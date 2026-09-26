@@ -1,0 +1,26 @@
+NGX gateway versions (recorded 2026-09-16)
+==========================================
+
+NVIDIA DLSS SDK
+  third_party/NVIDIA-DLSS  git tag v310.9.1
+  NVSDK_NGX_Version_API    0x15
+  lib  nvsdk_ngx_s.lib     Windows_x86_64/x64   /MT   3782558 bytes
+  runtime nvngx_dlss.dll   Windows_x86_64/rel           58956912 bytes
+  driver nvngx.dll         NVIDIA 591.86 (not copied)
+
+MSVC portable (third_party/msvc, not a system VS install)
+  fetch: third_party/fetch-msvc.ps1  (portable-msvc.py, VS 2022 channel)
+  MSVC 14.44.17.14  Hostx64/x64  cl/link  dumpbin 14.44.35229.0
+  Windows SDK 10.0.26100
+  DLL flags: /LD /O2 /MT /EHsc /std:c++17 /D_CRT_SECURE_NO_WARNINGS
+
+MinGW (engine + ngx-probe)
+  w64devkit g++ 16.2.0
+  sauerbraten-ngx.exe  -DHWRT_NGX_GATEWAY
+  ngx-probe.exe        gcc -std=c11  LoadLibrary of sauer_ngx C ABI
+
+ABI
+  SAUER_NGX_ABI_VERSION 4  (bin64/ngx-sr/sauer_ngx.dll — DLSS SR experimental: DLAA/Quality/Balanced/Performance, BiasCurrentColorMask, MVLowRes)
+  SAUER_NGX_ABI_VERSION 3  (kept as bin64/ngx-sr/sauer_ngx-abi3-*.dll and bin64/ref-quality-abi3 — Quality pair with MVLowRes)
+  SAUER_NGX_ABI_VERSION 2  (kept as bin64/ngx-sr/sauer_ngx-abi2-*.dll — previous Quality pair)
+  SAUER_NGX_ABI_VERSION 1  (bin64/ngx/sauer_ngx.dll — frozen DLAA play client, do not overwrite)

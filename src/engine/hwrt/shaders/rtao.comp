@@ -1,0 +1,144 @@
+#version 460
+#extension GL_EXT_ray_query : require
+
+// Phase 3 RTAO probe (rtaodebug 1 / hwrtdebug 5).
+//
+// World position is reconstructed from the GL depth buffer (copied into a
+// shared R32F image) with the same invcamprojmatrix as the phase 2 silhouette
+// view. One cosine-weighted hemisphere ray per pixel against the world TLAS.
+// Closest-hit is occluded, miss is unoccluded. Hideous 1-spp noise is success.
+//
+// Row 0 of every shared image is the BOTTOM of the screen. Depth uses the same
+// convention, so uv.y = 0 is NDC y = -1.
+
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(binding = 0, rgba8) uniform writeonly image2D result;
+layout(binding = 1) uniform accelerationStructureEXT tlas;
+layout(binding = 2, r32f) uniform readonly image2D gdepth;
+
+layout(push_constant) uniform Params
+{
+    ivec2 size;
+    int mode;
+    int frame;
+    mat4 invcamproj;
+    vec4 origin; // xyz = camera1->o, w = origin bias along the normal
+    vec4 range;  // x = rtaoradius, y = rtaoscale, z = farplane
+} pc;
+
+uint pcg(uint v)
+{
+    uint state = v * 747796405u + 2891336453u;
+    uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    return (word >> 22u) ^ word;
+}
+
+float rand01(uint s)
+{
+    return float(pcg(s)) * (1.0 / 4294967296.0);
+}
+
+float fetchdepth(ivec2 p)
+{
+    p = clamp(p, ivec2(0), pc.size - 1);
+    return imageLoad(gdepth, p).r;
+}
+
+vec3 worldfromdepth(ivec2 p, float zwin)
+{
+    vec2 uv = (vec2(p) + 0.5) / vec2(pc.size);
+    vec2 ndcxy = uv * 2.0 - 1.0;
+    float ndcz = zwin * 2.0 - 1.0;
+    vec4 h = pc.invcamproj * vec4(ndcxy, ndcz, 1.0);
+    return h.xyz / max(h.w, 1e-8);
+}
+
+void storeao(ivec2 p, float ao, bool sky)
+{
+    float scale = pc.range.y;
+    if(sky)
+    {
+        // Overlay: transparent so vanilla GL shows. Multiply: white so the
+        // blend is a no-op.
+        imageStore(result, p, scale > 0.0 ? vec4(1.0) : vec4(0.0));
+        return;
+    }
+    vec3 col = scale > 0.0 ? vec3(mix(1.0, ao, clamp(scale, 0.0, 1.0))) : vec3(ao);
+    imageStore(result, p, vec4(col, 1.0));
+}
+
+void main()
+{
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    if(p.x >= pc.size.x || p.y >= pc.size.y) return;
+
+    float z = fetchdepth(p);
+    // Cleared / sky pixels sit at window depth 1. Sky and alpha are not in the
+    // BLAS on purpose: a miss is unoccluded, not a reason to add clip.
+    if(z >= 0.995 || z <= 0.0)
+    {
+        storeao(p, 1.0, true);
+        return;
+    }
+
+    vec3 pos = worldfromdepth(p, z);
+
+    float zx1 = fetchdepth(p + ivec2(1, 0));
+    float zx0 = fetchdepth(p - ivec2(1, 0));
+    float zy1 = fetchdepth(p + ivec2(0, 1));
+    float zy0 = fetchdepth(p - ivec2(0, 1));
+
+    // Keep the derivative pointing toward +X / +Y (up, because row 0 is the
+    // bottom) so the cross product does not flip when we pick the closer side.
+    bool usexp = abs(zx1 - z) < abs(zx0 - z);
+    bool useyp = abs(zy1 - z) < abs(zy0 - z);
+    vec3 posx = worldfromdepth(usexp ? p + ivec2(1, 0) : p - ivec2(1, 0), usexp ? zx1 : zx0);
+    vec3 posy = worldfromdepth(useyp ? p + ivec2(0, 1) : p - ivec2(0, 1), useyp ? zy1 : zy0);
+    vec3 dpdx = usexp ? (posx - pos) : (pos - posx);
+    vec3 dpdy = useyp ? (posy - pos) : (pos - posy);
+
+    vec3 n = cross(dpdx, dpdy);
+    float nlen = length(n);
+    vec3 tocam = pc.origin.xyz - pos;
+    if(nlen < 1e-8) n = tocam;
+    else n /= nlen;
+    // GL front faces are clockwise, but the visible surface still faces the
+    // camera. If this dot is negative the hemisphere sits inside the wall.
+    if(dot(n, tocam) < 0.0) n = -n;
+    n = normalize(n);
+
+    vec3 up = abs(n.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+    vec3 t = normalize(cross(up, n));
+    vec3 b = cross(n, t);
+
+    uint seed = uint(p.x) + pcg(uint(p.y) + pcg(uint(pc.frame)));
+    float u1 = rand01(seed);
+    float u2 = rand01(seed ^ 0x9e3779b9u);
+    float r = sqrt(u1);
+    float phi = 6.28318530718 * u2;
+    vec3 hemi = vec3(r * cos(phi), r * sin(phi), sqrt(max(1.0 - u1, 0.0)));
+    vec3 dir = normalize(t * hemi.x + b * hemi.y + n * hemi.z);
+
+    float bias = max(pc.origin.w, 0.01);
+    vec3 origin = pos + n * bias;
+    float tmin = 0.01;
+    float tmax = max(pc.range.x, tmin + 1.0);
+
+    rayQueryEXT q;
+    // WORLD|MODEL|SELF: skip CASTER (smoke puffs). 0xFF made the rifle
+    // smoke volume show up as a dark tube in the air.
+    rayQueryInitializeEXT(q, tlas, gl_RayFlagsOpaqueEXT, 0x07, origin, tmin, dir, tmax);
+    while(rayQueryProceedEXT(q))
+    {
+        if(rayQueryGetIntersectionTypeEXT(q, false) == gl_RayQueryCandidateIntersectionTriangleEXT)
+            rayQueryConfirmIntersectionEXT(q);
+    }
+
+    float ao = 1.0;
+    if(rayQueryGetIntersectionTypeEXT(q, true) == gl_RayQueryCommittedIntersectionTriangleEXT)
+    {
+        float hit = rayQueryGetIntersectionTEXT(q, true);
+        ao = clamp(hit / tmax, 0.0, 1.0);
+    }
+    storeao(p, ao, false);
+}

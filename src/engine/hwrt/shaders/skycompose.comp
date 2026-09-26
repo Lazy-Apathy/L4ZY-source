@@ -1,0 +1,205 @@
+#version 460
+
+// Combine denoised skyvis with the lighting payload hitlight stored.
+// World combine only. Models / FULLBRIGHT keep hitlight's original lighting
+// (studio key with the real normal, mdlenvmap). Does not re-trace.
+
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(binding = 0, rgba16f) uniform writeonly image2D result;
+layout(binding = 1, rgba16f) uniform readonly image2D nrddiff;
+layout(binding = 2, rgba16f) uniform readonly image2D nrdp0;
+layout(binding = 3, rgba16f) uniform readonly image2D nrdp1;
+layout(binding = 4, rgba16f) uniform readonly image2D nrdp2;
+layout(binding = 5, rgba16f) uniform readonly image2D nrdp3;
+layout(binding = 7, rgba16f) uniform readonly image2D nrdmv;
+struct LightEnv {
+    vec3 sunDir;
+    float sunOn;
+    vec3 sunColor;
+    float skyRays;
+    vec3 skyColor;
+    float skyOn;
+    float modelMin;
+    float worldGain;
+    float shadowSelf;
+    float glowLayers;
+    mat4 prevViewProj;
+    vec3 prevCam;
+    float skyAlpha;
+    float diffFilter;
+    float diffVis;
+    float skyStable;
+    float diffPad1;
+    mat4 nrdWorldToView;
+    mat4 nrdWorldToViewPrev;
+    mat4 nrdViewToClip;
+    mat4 nrdViewToClipPrev;
+    vec4 nrdHit;
+};
+struct Light { vec3 pos; float radius; vec3 color; float flags; };
+layout(std430, binding = 6) readonly buffer Lights {
+    LightEnv env;
+    Light l[];
+} lights;
+
+layout(push_constant) uniform Params
+{
+    ivec2 size;
+    int mode;
+    int dbg; // 0 play, 1 skip denoise, 2 magenta, 3 in/out/valid, 4 histlen, 5 MV,
+             // 6 full-compose identity, 7 geometry UV, 8 reject map,
+             // 9 histlen+NoV+|viewZ|, 10 histlen+projErr+|N.z|
+    vec4 lighting;
+} pc;
+
+// REBLUR_BackEnd_UnpackRadianceAndNormHitDist / _NRD_YCoCgToLinear.
+vec3 nrdYCoCgToLinear(vec3 c)
+{
+    float t = c.x - c.z;
+    return vec3(t + c.y, c.x + c.z, t - c.y);
+}
+
+vec3 composeWorld(float skyvis, vec3 albedo, vec3 direct, float gain, vec3 specAcc, vec3 emit)
+{
+    vec3 base = pc.lighting.xyz;
+    vec3 skycol = lights.env.skyColor;
+    vec3 sunlamps = max(direct, base);
+    if((pc.mode & 0x800) == 0) sunlamps = min(sunlamps, vec3(1.0));
+    vec3 sky = base + max(skycol - base, vec3(0.0)) * skyvis;
+    vec3 lit = base + (max(sunlamps, sky) - base) * gain;
+    vec3 shaded = albedo * lit + specAcc;
+    float vis = lights.env.diffVis;
+    if(vis > 1.5) shaded = lit;
+    else if(vis > 0.5) shaded = albedo;
+    int skydbg = (int(lights.env.diffPad1 + 0.5) >> 2) & 3;
+    if(skydbg > 1) shaded = vec3(skyvis);
+    if(vis < 0.5) shaded += emit;
+    return shaded;
+}
+
+void storeHdrProbe(ivec2 p)
+{
+    if((pc.mode & 0x1000) == 0) return;
+    if(p.x < 0 || p.y < 0 || p.x >= pc.size.x || p.y >= pc.size.y) return;
+    int x0 = pc.size.x - 240;
+    int y0 = pc.size.y - 70;
+    if(x0 < 0 || y0 < 0) return;
+    if(p.x < x0 || p.y < y0 || p.y >= y0 + 48) return;
+    int lx = p.x - x0;
+    float v = -1.0;
+    if(lx >= 8 && lx < 56) v = 0.18;
+    else if(lx >= 64 && lx < 112) v = 1.0;
+    else if(lx >= 120 && lx < 168) v = 4.0;
+    else if(lx >= 176 && lx < 224) v = 16.0;
+    if(v < 0.0) return;
+    imageStore(result, p, vec4(v, v, v, 1.0));
+}
+
+void shadeCompose()
+{
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    if(p.x >= pc.size.x || p.y >= pc.size.y) return;
+
+    vec4 p0 = imageLoad(nrdp0, p);
+    // Numeric float, not a bitcast. Integers 0..31 are exact in float16.
+    // uintBitsToFloat(flags) wrote denormals (~1e-45) that rgba16f stored as 0,
+    // so valid never fired and this pass wrote alpha 0 (GL left on screen).
+    uint flags = uint(p0.a + 0.5);
+    bool valid = (flags & 1u) != 0u;
+    bool ismodel = (flags & 2u) != 0u;
+    bool fullbright = (flags & 4u) != 0u;
+    if(!valid || ismodel || fullbright)
+        return;
+
+    vec3 albedo = p0.rgb;
+    vec4 p1 = imageLoad(nrdp1, p);
+    vec3 direct = p1.rgb;
+    float gain = p1.a;
+    vec4 p2 = imageLoad(nrdp2, p);
+    vec3 specAcc = p2.rgb;
+    vec4 p3 = imageLoad(nrdp3, p);
+    vec3 emit = p3.rgb;
+    float skyIn = clamp(p3.a, 0.0, 1.0);
+
+    vec4 packed = imageLoad(nrddiff, p);
+    vec3 lin = nrdYCoCgToLinear(packed.xyz);
+    float skyvis = clamp(dot(lin, vec3(0.2126, 0.7152, 0.0722)), 0.0, 1.0);
+
+    vec3 shaded = composeWorld(skyvis, albedo, direct, gain, specAcc, emit);
+
+    if(pc.dbg == 2)
+        shaded = vec3(clamp(skyvis, 0.0, 1.0), 0.0, clamp(skyvis, 0.0, 1.0));
+    else if(pc.dbg == 3)
+        shaded = vec3(skyIn, clamp(skyvis, 0.0, 1.0), 1.0);
+    else if(pc.dbg == 4)
+    {
+        // .w is history length in frames when the gateway returns it.
+        float hlen = clamp(packed.w / 30.0, 0.0, 1.0);
+        shaded = vec3(hlen, clamp(skyvis, 0.0, 1.0), 1.0);
+    }
+    else if(pc.dbg == 5)
+    {
+        vec4 m = imageLoad(nrdmv, p);
+        float px = abs(m.x) * float(pc.size.x);
+        float py = abs(m.y) * float(pc.size.y);
+        // 1 pixel of UV motion = full R/G. |dZ|=0.1 Sauer unit = full B
+        // (a still camera must stay black; a 0.04 u/frame slide is visible).
+        shaded = vec3(clamp(px, 0.0, 1.0), clamp(py, 0.0, 1.0), clamp(abs(m.z) * 10.0, 0.0, 1.0));
+    }
+    else if(pc.dbg == 6)
+    {
+        // Full lighting combine at identical signal (denoise skipped).
+        // R = luma(compose(payload skyvis)), G = luma(compose(unpacked pack)).
+        // B = 10*|R-G|. Yellow + B=0 is the same composition, not two scalars.
+        vec3 a = composeWorld(skyIn, albedo, direct, gain, specAcc, emit);
+        vec3 b = composeWorld(skyvis, albedo, direct, gain, specAcc, emit);
+        float la = dot(a, vec3(0.2126, 0.7152, 0.0722));
+        float lb = dot(b, vec3(0.2126, 0.7152, 0.0722));
+        shaded = vec3(clamp(la, 0.0, 1.0), clamp(lb, 0.0, 1.0), clamp(abs(la - lb) * 10.0, 0.0, 1.0));
+    }
+    else if(pc.dbg == 7)
+    {
+        // Real-hit UV round-trip. p2.a = GetScreenUv D3D of the unflipped
+        // engine projection of this pixel's hit. Pixel v is GL (row 0 = bottom).
+        // R ~0: the D3D mapping is a pure Y flip of the pixel. G = mismatch
+        // without the clip-Y flip. B = residual in pixels after applying it.
+        float vPix = (float(p.y) + 0.5) / float(pc.size.y);
+        float vD3d = p2.a;
+        float vFlip = 1.0 - vD3d;
+        shaded = vec3(
+            clamp(abs(vD3d + vPix - 1.0) * 8.0, 0.0, 1.0),
+            clamp(abs(vD3d - vPix) * 2.0, 0.0, 1.0),
+            clamp(abs(vFlip - vPix) * float(pc.size.y), 0.0, 1.0));
+    }
+    else if(pc.dbg == 8)
+    {
+        // R = history length / 30. G = unflipped D3D vs pixel v (Y mismatch).
+        // B = |v-0.5|*2 (screen height). After clip-Y flip G must drop;
+        // remaining R~0 with G~0 is not the vertical convention.
+        float vPix = (float(p.y) + 0.5) / float(pc.size.y);
+        float hlen = clamp(packed.w / 30.0, 0.0, 1.0);
+        shaded = vec3(hlen, clamp(abs(p2.a - vPix) * 2.0, 0.0, 1.0), clamp(abs(vPix - 0.5) * 2.0, 0.0, 1.0));
+    }
+    else if(pc.dbg == 9)
+    {
+        // hitlight overwrote p2.rgb: NoV, abs(viewZ)/64, |uvCurr-uvPix| in 8 px.
+        // R stays histlen/30 from REBLUR out.w (denoise runs).
+        float hlen = clamp(packed.w / 30.0, 0.0, 1.0);
+        shaded = vec3(hlen, clamp(p2.r, 0.0, 1.0), clamp(p2.g, 0.0, 1.0));
+    }
+    else if(pc.dbg >= 10)
+    {
+        float hlen = clamp(packed.w / 30.0, 0.0, 1.0);
+        shaded = vec3(hlen, clamp(p2.b, 0.0, 1.0), clamp(p2.a, 0.0, 1.0));
+    }
+
+    imageStore(result, p, vec4(shaded, 1.0));
+}
+
+void main()
+{
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    if(p.x < pc.size.x && p.y < pc.size.y)
+        shadeCompose();
+    storeHdrProbe(p);
+}

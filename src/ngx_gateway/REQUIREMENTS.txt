@@ -1,0 +1,45 @@
+NGX gateway compile chain (x64)
+================================
+
+Selected library (this SDK, NVIDIA DLSS 310.9.1, API 0x15):
+  third_party/NVIDIA-DLSS/lib/Windows_x86_64/x64/nvsdk_ngx_s.lib
+  Size ~3.78 MiB. Static CRT. Link the DLL with MSVC /MT.
+
+Not selected, and why:
+  nvsdk_ngx_d.lib          /MD + VC++ redistributable. Unused for an isolated DLL.
+  nvsdk_ngx_*_dbg*.lib     debug CRT. Unused for this probe.
+  nvsdk_ngx_*iterator*.lib iterator-debug CRT variants. Unused.
+  vs2010 / vs2012 / vs2013 older toolsets. Unused.
+  nvsdk_ngx_khr_*.lib      Khronos/OpenCL-oriented wrapper. Unused (we use Vulkan).
+  nvsdk_ngx_uwp_*.lib      UWP. Unused.
+
+Runtime:
+  lib/Windows_x86_64/rel/nvngx_dlss.dll  (snippet, copied to bin64/ngx)
+  nvngx.dll from the NVIDIA driver (DriverStore / System32). Not copied.
+
+Headers used by the DLL:
+  third_party/NVIDIA-DLSS/include/nvsdk_ngx_vk.h
+  nvsdk_ngx_helpers.h, nvsdk_ngx_helpers_vk.h
+  src/include/vulkan/vulkan.h (existing engine headers)
+
+MSVC (portable tree in third_party\msvc as of 2026-09-16):
+  cl.exe / link.exe from MSVC 14.44.17.14 (Hostx64/x64)
+  Windows SDK 10.0.26100 via portable-msvc.py
+  Not a system Visual Studio install. System Kits still only have NETFXSDK 4.7.2.
+
+MinGW (present):
+  w64devkit g++ 16.2.0 — engine + ngx-probe.exe only.
+  Do not link nvsdk_ngx_s.lib from MinGW. Do not call guessed nvngx.dll CORE exports.
+
+Portable MSVC (no system Visual Studio; preferred on this machine):
+  powershell -File third_party\fetch-msvc.ps1
+  Writes third_party\msvc\setup_x64.bat (MSVC 14.44 + Windows SDK 26100).
+  Then src\ngx_gateway\build-dll.bat finds it automatically.
+
+System-wide alternative (needs your approval):
+  winget install Microsoft.VisualStudio.2022.BuildTools --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+
+Then:
+  src\ngx_gateway\build-dll.bat
+  src\ngx_gateway\build-probe.bat
+  src\build-ngx.bat

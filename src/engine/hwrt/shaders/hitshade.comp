@@ -1,0 +1,142 @@
+#version 460
+#extension GL_EXT_ray_query : require
+
+// Phase 4 hybrid hit shading (hwrtdebug 6 / hwrtshade 1).
+//
+// Same camera primary ray as silhouette.comp. Closest-hit interpolates
+// diffuse UV + lightmap UV, samples the copies of the existing bake and
+// the existing slot diffuse, writes diffuse * lightmap * GL's colorparams
+// (2 * vslot.colorscale, the world overbright). Miss is
+// transparent so vanilla GL shows (HUD, sky). A hit whose instance
+// customIndex is not 0 is a dynent / mapmodel: store vec4(0) so the
+// GL raster of that model shows through. Do not feed a dynent primitive
+// index into the world shade SSBOs. Row 0 is the BOTTOM of the screen.
+
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(binding = 0, rgba8) uniform writeonly image2D result;
+layout(binding = 1) uniform accelerationStructureEXT tlas;
+struct ShadeVert { vec2 tc; vec2 lm; vec3 n; float pad; vec3 pos; float pad2; };
+layout(std430, binding = 2) readonly buffer ShadeVerts { ShadeVert v[]; } verts;
+layout(std430, binding = 3) readonly buffer ShadeIdx { uint i[]; } idx;
+layout(std430, binding = 4) readonly buffer ShadeTri { uvec4 t[]; } tri;
+layout(binding = 5) uniform sampler2DArray lightmaps;
+layout(binding = 6) uniform sampler2DArray diffuses;
+
+layout(push_constant) uniform Params
+{
+    ivec2 size;
+    int mode;
+    int frame;
+    mat4 invcamproj;
+    vec4 origin; // xyz = camera1->o, w = tmin
+    vec4 range;  // x = tmax, y = lightmap layers, z = diffuse layers, w = triangle count
+} pc;
+
+void main()
+{
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    if(p.x >= pc.size.x || p.y >= pc.size.y) return;
+
+    vec2 uv = (vec2(p) + 0.5) / vec2(pc.size);
+    vec2 ndc = uv * 2.0 - 1.0;
+
+    vec4 farh = pc.invcamproj * vec4(ndc, 1.0, 1.0);
+    vec3 farw = farh.xyz / farh.w;
+    vec3 origin = pc.origin.xyz;
+    vec3 dir = farw - origin;
+    float len = length(dir);
+    if(len < 1e-8)
+    {
+        imageStore(result, p, vec4(0.0));
+        return;
+    }
+    dir /= len;
+
+    float tmin = max(pc.origin.w, 0.01);
+    float tmax = max(pc.range.x, tmin + 1.0);
+
+    rayQueryEXT q;
+    // WORLD|MODEL: skip the first-person body (SELF = 0x04). Hitting it would
+    // write transparent and punch a head-shaped hole in the bake view.
+    rayQueryInitializeEXT(q, tlas, gl_RayFlagsOpaqueEXT, 0x03, origin, tmin, dir, tmax);
+    while(rayQueryProceedEXT(q))
+    {
+        if(rayQueryGetIntersectionTypeEXT(q, false) == gl_RayQueryCandidateIntersectionTriangleEXT)
+            rayQueryConfirmIntersectionEXT(q);
+    }
+
+    if(rayQueryGetIntersectionTypeEXT(q, true) != gl_RayQueryCommittedIntersectionTriangleEXT)
+    {
+        imageStore(result, p, vec4(0.0));
+        return;
+    }
+
+    // customIndex 0 is the world BLAS. Anything else is a dynent / mapmodel:
+    // the world lightmap SSBOs do not apply, so leave the pixel transparent.
+    if(rayQueryGetIntersectionInstanceCustomIndexEXT(q, true) != 0)
+    {
+        imageStore(result, p, vec4(0.0));
+        return;
+    }
+
+    uint prim = rayQueryGetIntersectionPrimitiveIndexEXT(q, true);
+    uint ntris = uint(max(pc.range.w, 0.0));
+    if(prim >= ntris)
+    {
+        imageStore(result, p, vec4(1.0, 0.0, 1.0, 1.0));
+        return;
+    }
+
+    uvec4 t = tri.t[prim];
+    if(t.x == 0xFFFFFFFFu)
+    {
+        imageStore(result, p, vec4(1.0, 0.0, 1.0, 1.0));
+        return;
+    }
+
+    uint i0 = idx.i[prim * 3u + 0u];
+    uint i1 = idx.i[prim * 3u + 1u];
+    uint i2 = idx.i[prim * 3u + 2u];
+    vec2 bary = rayQueryGetIntersectionBarycentricsEXT(q, true);
+    float a = 1.0 - bary.x - bary.y;
+    float b = bary.x;
+    float c = bary.y;
+    vec2 tc = verts.v[i0].tc * a + verts.v[i1].tc * b + verts.v[i2].tc * c;
+    vec2 lm = verts.v[i0].lm * a + verts.v[i1].lm * b + verts.v[i2].lm * c;
+
+    int ndiff = int(pc.range.z);
+    int nlm = int(pc.range.y);
+    vec3 albedo = vec3(1.0, 0.0, 1.0);
+    if(ndiff > 0 && int(t.x) >= 0 && int(t.x) < ndiff)
+        albedo = texture(diffuses, vec3(tc, float(t.x))).rgb;
+    vec2 btc = vec2(verts.v[i0].pad, verts.v[i0].pad2) * a
+             + vec2(verts.v[i1].pad, verts.v[i1].pad2) * b
+             + vec2(verts.v[i2].pad, verts.v[i2].pad2) * c;
+    uint lmid = t.y & 0xFFFFu;
+    uint bot = t.y >> 16u;
+    if(bot != 0xFFFFu && ndiff > 0 && int(bot) < ndiff)
+    {
+        vec3 botc = texture(diffuses, vec3(btc, float(bot))).rgb;
+        float ba = 1.0;
+        if(lmid >= 6u && nlm > 0 && int(lmid) < nlm)
+            ba = texture(lightmaps, vec3(lm, float(lmid))).a;
+        albedo = mix(botc, albedo, ba);
+    }
+
+    vec3 bake = vec3(0.098); // reserved ambient 0x19/255, used when lmid < 6
+    if(lmid == 2u || lmid == 3u) bake = vec3(0.502); // LMID_BRIGHT, fullbrightlevel 128
+    else if(lmid == 4u || lmid == 5u) bake = vec3(0.0);
+    else if(lmid >= 6u && nlm > 0)
+    {
+        int layer = int(lmid);
+        if(layer < 0 || layer >= nlm) layer = 0;
+        bake = texture(lightmaps, vec3(lm, float(layer))).rgb;
+    }
+
+    // GL's world shader is `diffuse * lm * colorparams`, and renderva.cpp
+    // builds colorparams as 2 * vslot.colorscale: the bake is stored at half
+    // scale. Without that 2 this view is half of the rasteriser it is meant
+    // to reproduce.
+    vec3 scale = vec3(float(t.z & 255u), float((t.z >> 8u) & 255u), float((t.z >> 16u) & 255u)) * (2.0 / 255.0);
+    imageStore(result, p, vec4(albedo * bake * scale, 1.0));
+}

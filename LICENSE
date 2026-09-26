@@ -1,0 +1,45 @@
+L4ZY — modified Cube 2: Sauerbraten client
+
+Copyright (C) 2026 Lazy-Apathy and L4ZY contributors
+(L4ZY changes and additions)
+
+Copyright (C) 2001-2020 Wouter van Oortmerssen, Lee Salzman, Mike Dysart,
+Robert Pointon, and Quinton Reeves
+(original Sauerbraten engine source code)
+
+This software is provided 'as-is', without any express or implied
+warranty.  In no event will the authors be held liable for any damages
+arising from the use of this software.
+
+Permission is granted to anyone to use this software for any purpose,
+including commercial applications, and to alter it and redistribute it
+freely, subject to the following restrictions:
+
+1. The origin of this software must not be misrepresented; you must not
+   claim that you wrote the original software. If you use this software
+   in a product, an acknowledgment in the product documentation would be
+   appreciated but is not required.
+2. Altered source versions must be plainly marked as such, and must not be
+   misrepresented as being the original software.
+3. This notice may not be removed or altered from any source distribution.
+
+-------------------------------------------------------------------------
+
+Scope
+
+This licence covers the source code in this repository (src/, data/*.cfg,
+third_party/*.ps1) EXCEPT the third-party
+files listed in THIRD-PARTY-NOTICES.md, which keep their own licences
+(ENet: MIT-style; Vulkan headers: Apache-2.0 / MIT; SDL2 and zlib headers:
+zlib licence).
+
+This is an altered version of the Sauerbraten source code; it is not the
+original software. The original Sauerbraten licence and notes are kept in
+src/readme_source.txt.
+
+Sauerbraten game media (maps, textures, models, sounds, and the images in
+data/) are NOT covered by this licence; they keep their authors' licences
+(see the Sauerbraten distribution and data/license.txt).
+
+NVIDIA DLSS/NGX and NRD are not part of this repository. They are fetched
+separately and remain under the NVIDIA RTX SDKs licence.

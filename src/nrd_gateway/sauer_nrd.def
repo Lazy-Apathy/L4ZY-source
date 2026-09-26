@@ -1,0 +1,10 @@
+LIBRARY sauer_nrd
+EXPORTS
+    sauer_nrd_abi_version
+    sauer_nrd_create
+    sauer_nrd_set_images
+    sauer_nrd_denoise
+    sauer_nrd_destroy
+    sauer_nrd_stats
+    sauer_nrd_probe_arm
+    sauer_nrd_probe_read

@@ -1,0 +1,1608 @@
+#version 460
+#extension GL_EXT_ray_query : require
+#extension GL_EXT_buffer_reference2 : require
+#extension GL_EXT_buffer_reference_uvec2 : require
+#extension GL_EXT_nonuniform_qualifier : require
+
+// Point lights + sun + skylight (hwrtdebug 7 / hwrtlight 1).
+//
+// Same camera primary ray as hitshade.comp. Closest-hit interpolates diffuse
+// UV + vertex normal, samples the existing diffuse copy, evaluates every
+// uploaded radius-0 ET_LIGHT (baker unlimited omni, packed first; cap 16)
+// plus the N nearest finite-radius lights with Lambert * linear attenuation,
+// traces one shadow ray toward each chosen light, then:
+//   sunlight: Lambert * (sunlightcolor/255 * sunlightscale), one shadow ray
+//             along sunlightdir (toward the sun, same as the baker). Miss is
+//             lit; hit is not. Skipped entirely when sunlight is 0.
+//             World hits include SELF when hwrtshadowself >= 1, so the
+//             player stains the floor along the sun direction.
+//   skylight: hwrtskyrays cosine-weighted hemisphere rays around the world
+//             normal. Misses count toward a visibility fraction (the cosine
+//             pdf already matches a Lambertian sky, so there is no extra
+//             weight). Hit adds nothing. Skipped when skylight is 0.
+//             On the world that fraction lerps from ambient up to
+//             skylightcolor, like calcskylight, and the result is max()ed
+//             against sun + lamps rather than added: an open sky replaces the
+//             ambient floor, it does not stack on the sun. Models keep the
+//             plain sum, since nothing bakes them.
+//             Before that combine, hwrtskyfilter (default on) averages skyvis
+//             across the 16x16 workgroup: one 5x5 on the same plane, world vs
+//             model kept apart. Two 7x7 passes (and a flat 16x16) smeared
+//             mid/far lighting once four rays already carried the grain.
+//             Neighbours must share the same plane (so a wall/floor crease
+//             holds). Hit-distance along the ray is not the gate: a floor
+//             seen at a graze changes T across a kernel and left leftover
+//             dots in every shadow. A 2-pixel skyvis apron was measured
+//             slower than four unfiltered rays, so the filter stays inside
+//             the tile. The output alpha (model mask) is not filtered.
+//             hwrtskytemporal then keeps that fraction across frames. A new
+//             pixel (surface just back in view) starts at age 1 and mixes
+//             1/age until it reaches N; only then may hold freeze. skyvis
+//             is geometry, not shading, so a hit that reprojects onto its own
+//             stored world position inherits the whole running average, with
+//             a pixel-stable hemisphere seed (hwrtskystable) as the still-
+//             camera alternative to pixel+frame RNG.
+//             no colour clamp to cap the convergence. Four rays are 4 coin
+//             flips and the 5x5 about 12 usable taps; only the frame axis has
+//             the headroom left to put the residual under one 8-bit level
+//             after hwrtworldgain has doubled it.
+//             World hits skip SELF unless hwrtshadowself is 2: a body that
+//             close otherwise eats the whole hemisphere and looks like a 3D
+//             pit. Other players (MODEL) still occlude sky. Lamps still see
+//             SELF at the default, so the shadow follows the lights.
+// Ambient is the existing constant. It is not counted again as sky.
+// On the world, everything above that constant is scaled by hwrtworldgain
+// (GL's colorparams overbright, default 2). Ambient itself is not, so a pixel
+// no light reaches keeps the brightness it had before the gain existed.
+// The world also clips sun + lamps to 1 before that scale, because the lumel
+// GL samples is 8 bit and cannot hold more.
+// Miss is transparent so vanilla GL shows. With SHADE_MODELS, a model hit
+// uses the same lights as the world (skin albedo × 2 like Sauer's model
+// shader, instance-transformed normal, one shadow ray each). Models use
+// the same hwrtshadowself policy as the walls (foliage included). A player
+// shadow ray skips its own TLAS instance so arms and legs do not eat every
+// sample; the visibility floor and studio fill keep the look bright.
+// Shadow rays on a model start from the triangle geometric normal with a
+// larger bias so they do not begin inside the mesh. A
+// GEOM_FULLBRIGHT instance (ENT_PLAYER, including bots in that armour) is
+// shaded like the menu preview, not like GL's in-game fullbright plate:
+// Lambert wrap + Blinn-Phong spec (masks.r, maskscale.x) + mdlenvmap
+// cubemap (masks.b, the preview's metal) + a camera+up studio fill that
+// only fills where world lights are weak + a modest visibility floor.
+// Matching GL's fullbrightmodels/100 (1.5 at Overbright) is the plastic
+// look; we do not. Crates / monsters are not marked and stay Lambert.
+// customIndex 0 is still the world SSBOs; anything else indexes the geometry
+// table, never the world buffers. Without SHADE_MODELS a model hit stores
+// vec4(0) (MASK_MODELS then hides those pixels so GL's raster survives).
+// MESH_ALPHA (leaves, CTF flags) is a second non-opaque BLAS geometry: without
+// gl_RayFlagsOpaqueEXT those triangles arrive as candidates, skins.a is
+// tested against mdlalphatest (pad1, default 0.9), and a hole lets the ray
+// continue. Opaque geometry still commits in hardware. Shadow / sun / sky
+// use the same test so a canopy casts a foliage shadow, not a solid disc.
+// Does not sample the bake for lighting. Lightmap alpha is still read for
+// texlayer floors (grass/dirt mix). Row 0 of the image is the BOTTOM of the
+// screen.
+//
+// TEST_GLDEPTH compares every world hit against the window depth GL has just
+// finished rasterising, so a hit the ray only reached by passing through
+// something still absent from the TLAS (grass, water, world alpha cubes)
+// is handed back to GL. Foliage and flags are in the TLAS now.
+//
+// Glow (Sauer's self-lit textures) is not an ET_LIGHT. World faces with a
+// glowmap add texture*glowcolor on top of the lit albedo, the way
+// glowshader does (`diffuse*lm + vec4(glow, 0)`). Model skins mix toward
+// albedo * curglow on masks.g, the way modelshader does. Playermodels also
+// add Blinn-Phong spec from masks.r. Jumppads and screens are packed as
+// always-evaluated finite omnis (flags 2, no shadow ray) so they colour
+// anyone who walks up. The default teleporter ring is flags 3: same
+// always-eval slot, but a lamp in the hole with shadow rays.
+
+layout(local_size_x = 16, local_size_y = 16) in;
+layout(binding = 0, rgba16f) uniform writeonly image2D result;
+layout(binding = 1) uniform accelerationStructureEXT tlas;
+struct ShadeVert { vec2 tc; vec2 lm; vec3 n; float pad; vec3 pos; float pad2; };
+layout(std430, binding = 2) readonly buffer ShadeVerts { ShadeVert v[]; } verts;
+layout(std430, binding = 3) readonly buffer ShadeIdx { uint i[]; } idx;
+layout(std430, binding = 4) readonly buffer ShadeTri { uvec4 t[]; } tri;
+layout(binding = 5) uniform sampler2DArray diffuses;
+struct LightEnv {
+    vec3 sunDir;
+    float sunOn;
+    vec3 sunColor;
+    float skyRays;    // 1..4, +0.25 when hwrtskyfilter
+    vec3 skyColor;
+    float skyOn;
+    float modelMin;   // visibility floor for GEOM_FULLBRIGHT, not GL's 1.5 plate
+    float worldGain;  // GL's world overbright (colorparams), hwrtworldgain
+    float shadowSelf; // 0 none, 1 sun, 2 +always-eval omni, 3 +finite, 4 +sky
+    float glowLayers; // world glow array layers; 0 = no glow
+    mat4 prevViewProj; // last dispatch's world -> clip, for the skyvis history
+    vec3 prevCam;      // and where the camera stood when it wrote that history
+    float skyAlpha;    // 0 off, 1 seed (write only), else the new estimate's weight
+    float diffFilter;  // 0 textureLod 0 (old), 1 textureGrad from pixel UV footprint
+    float diffVis;     // 0 play, 1 albedo, 2 lighting, 3 lod heatmap
+    float skyStable;   // 0 pixel+frame RNG, 1 pixel only (no frame)
+    // Packed: bit0 hold, bit1 bilinear history, bits2-3 visdbg, bit4 per-pixel age,
+    // bit5 NRD (skip skyage spatial/temporal; write raw skyvis + guides).
+    // bits6-9 hwrtnrddbg, bit12 hidden-retry (default on).
+    float diffPad1;
+    mat4 nrdWorldToView;
+    mat4 nrdWorldToViewPrev;
+    mat4 nrdViewToClip;
+    mat4 nrdViewToClipPrev;
+    vec4 nrdHit; // A, B, C, denoisingRange
+};
+struct Light { vec3 pos; float radius; vec3 color; float flags; };
+layout(std430, binding = 6) readonly buffer Lights {
+    LightEnv env;
+    Light l[];
+} lights;
+
+// Per-BLAS attributes, reached by device address so each rest-pose / animated
+// slot keeps its own buffers. customIndex indexes this table; slot 0 is unused
+// (the world) and holds the uploaded skin-layer count in ntris.
+struct ModelVert { vec2 tc; vec2 pad0; vec3 n; float pad1; vec3 pos; float pad2; };
+layout(buffer_reference, std430, buffer_reference_align = 16) readonly buffer ModelVertRef { ModelVert v[]; };
+layout(buffer_reference, std430, buffer_reference_align = 4) readonly buffer ModelIdxRef { uint i[]; };
+layout(buffer_reference, std430, buffer_reference_align = 4) readonly buffer ModelTriRef { uint t[]; };
+// Addresses as uvec2 so the shader does not need shaderInt64. Same 8-byte
+// little-endian layout as the CPU's uint64_t device addresses.
+struct ModelGeom {
+    uvec2 verts;
+    uvec2 indices;
+    uvec2 tris;
+    uint ntris;
+    uint flags;
+};
+layout(std430, binding = 7) readonly buffer ModelGeoms { ModelGeom g[]; } geoms;
+layout(binding = 8) uniform sampler2DArray skins;
+// GL's window depth after the world and both model passes, copied into the
+// shared R32F. Only read when TEST_GLDEPTH is set, which the CPU only sets
+// once the copy for this frame has succeeded.
+layout(binding = 9, r32f) uniform readonly image2D gdepth;
+// World glowmaps (TEX_GLOW). Layer index + RGB scale live in ShadeTri.w.
+// Missing glow binds the diffuse array as a dummy; the shader never samples
+// it when the layer byte is 0xFF.
+layout(binding = 10) uniform sampler2DArray glows;
+layout(binding = 11) uniform samplerCube mdlenv;
+// Lightmaps for texlayer blend alpha only. Lighting itself does not use the bake.
+layout(binding = 12) uniform sampler2DArray lightmaps;
+// The skyvis history, alternating: 13 is what the previous dispatch wrote, 14 is
+// what this one writes. rgb is the hit position relative to the camera of the
+// frame that wrote it, a is the running visibility (negative = no entry).
+layout(binding = 13, rgba16f) uniform readonly image2D skyhistin;
+layout(binding = 14, rgba16f) uniform writeonly image2D skyhistout;
+// Matching ping-pong for the per-pixel sample count. 0 = no entry. Integers
+// 1..N are exact in r16f. Same lifetime as the vis pair: seed, bilinear of
+// geom-valid taps (min age), miss/reset back to 1, destroy on resize.
+layout(binding = 15, r16f) uniform readonly image2D skyagein;
+layout(binding = 16, r16f) uniform writeonly image2D skyageout;
+// NRD inputs + composition payloads. 1x1 dummies when NRD is off.
+layout(binding = 17, rgba16f) uniform writeonly image2D nrddiff;
+layout(binding = 18, r32f) uniform writeonly image2D nrdviewz;
+layout(binding = 19, rgba16) uniform writeonly image2D nrdnormal;
+layout(binding = 20, rgba16f) uniform writeonly image2D nrdmv;
+layout(binding = 21, rgba16f) uniform writeonly image2D nrdp0;
+layout(binding = 22, rgba16f) uniform writeonly image2D nrdp1;
+layout(binding = 23, rgba16f) uniform writeonly image2D nrdp2;
+layout(binding = 24, rgba16f) uniform writeonly image2D nrdp3;
+
+layout(push_constant) uniform Params
+{
+    ivec2 size;
+    int mode;
+    int frame;
+    mat4 invcamproj;
+    vec4 origin;   // xyz = camera1->o, w = tmin
+    vec4 range;    // x = tmax, y = diffuse layers, z = hwrtdlights, w = triangle count
+    vec4 lighting; // xyz = ambient/255, w = uploaded light count
+} pc;
+
+const float SHADOW_BIAS = 0.25;
+// Models are a closed mesh with two-sided instances. A 0.25 push along a
+// smoothed vertex normal often starts the shadow ray *inside* the body, so
+// every light (and the sky) self-hits and the player is ambient-only.
+const float MODEL_SHADOW_BIAS = 0.75;
+// Sauer's model shader samples diffuse then does `light.rgb *= 2.0`, and
+// keeps an unlit floor of about 0.29 (lightscale.z). Without both, a player
+// is a near-black blob next to a wall that used the same lights.
+const float MODEL_MINSHADE = 0.29;
+// Sauer's model wrap (glsl.cfg + setshaderparams unlit defaults):
+// lightscale = (0.21, 0.30, 0.29). Replaces the old half-Lambert that
+// fed half the sun to grazing faces and blew rgba8.
+const vec3 MODEL_LIGHTSCALE = vec3(0.21, 0.30, 0.29);
+// modelshader Blinn-Phong exponent (the non-glare path).
+const float MODEL_SPEC_POW = 128.0;
+// The same wrap, for the two light terms that have no direction to feed it:
+// the ambient constant and the sky. glsl.cfg multiplies the WHOLE of
+// lightreaching()'s colour by the wrap, and that colour is ambient plus the
+// bake, so those terms cannot arrive unattenuated. The value is the wrap
+// evaluated at the mean cosine of a cosine-weighted hemisphere, E[n.l] = 2/3:
+// (2/3)*((2/3)*0.21 + 0.30) + 0.29. Derived, not dialled in, so it stays
+// right if MODEL_LIGHTSCALE is ever corrected.
+const float MODEL_AMBWRAP = 0.583;
+// Preview studio key (3dgui: light.dir = (0,-1,2)). In a camera looking
+// along +Y that is -forward + 2*up. Intensity sits under the 1.5 cap so
+// a sunlit player does not clip to white.
+const float MODEL_STUDIO = 1.00;
+// Set in pc.mode above the trace mode number. Push constants are 128 bytes.
+const int MASK_MODELS = 0x100;
+const int SHADE_MODELS = 0x200;
+const int TEST_GLDEPTH = 0x400;
+// Lot 1 HDR. HDR keeps scene radiance in this rgba16f image. HDRPROBE
+// overwrites a fixed rectangle after shading so the values travel through
+// the same image the lighting pass writes.
+const int HDR = 0x800;
+const int HDRPROBE = 0x1000;
+// How far in front of the hit GL has to be before the pixel is handed back.
+// The BLAS is the same geometry the rasteriser draws, so a hit that really is
+// the nearest surface matches to within depth-buffer precision and whatever
+// the CPU-skinned pose drifts from GL's; only a clearly nearer surface is an
+// occluder the TLAS never had. World units, relative to the hit distance.
+const float GLDEPTH_SLACK_REL = 0.015;
+const float GLDEPTH_SLACK_ABS = 0.75;
+const uint GEOM_SHADE = 1u;
+const uint GEOM_FULLBRIGHT = 2u;
+// Instance ray masks, mirroring HWRT_RAYMASK_ in hwrt.h.
+const uint RAYMASK_WORLD = 0x01u;
+const uint RAYMASK_MODEL = 0x02u;
+const uint RAYMASK_SELF  = 0x04u;
+const uint RAYMASK_CASTER = 0x08u;
+const uint RAYMASK_PORTAL = 0x10u;
+const uint RAYMASK_ALL = 0xFFu;
+
+// 16x16 so a 5x5 bilateral has interior pixels with a full neighbourhood.
+// 8x8 would average only inside an 8-pixel tile and show as a faint grid.
+shared float sh_sky[16][16];
+shared vec3 sh_n[16][16];
+shared vec3 sh_p[16][16];
+shared float sh_mdl[16][16];
+shared float sh_hit[16][16];
+
+uint pcg(uint v)
+{
+    uint state = v * 747796405u + 2891336453u;
+    uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    return (word >> 22u) ^ word;
+}
+
+float rand01(uint s)
+{
+    return float(pcg(s)) * (1.0 / 4294967296.0);
+}
+
+float modelWrap(float ndotl)
+{
+    return clamp(ndotl * (ndotl * MODEL_LIGHTSCALE.x + MODEL_LIGHTSCALE.y) + MODEL_LIGHTSCALE.z, 0.0, 1.0);
+}
+
+vec3 cosineHemi(vec3 n, inout uint seed)
+{
+    vec3 up = abs(n.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+    vec3 t = normalize(cross(up, n));
+    vec3 b = cross(n, t);
+    float u1 = rand01(seed);
+    seed = pcg(seed);
+    float u2 = rand01(seed);
+    seed = pcg(seed);
+    float r = sqrt(u1);
+    float phi = 6.28318530718 * u2;
+    vec3 hemi = vec3(r * cos(phi), r * sin(phi), sqrt(max(1.0 - u1, 0.0)));
+    return normalize(t * hemi.x + b * hemi.y + n * hemi.z);
+}
+
+// Alpha, water, sky and clip surfaces of the WORLD stay out of the BLAS, so
+// a primary ray still goes through grass / water. Tree foliage and CTF flags
+// are in the TLAS as non-opaque geometry: the candidate loop tests skins.a.
+// GL's depth buffer still catches whatever is not traced (grass, world alpha).
+bool glWorldPos(ivec2 p, out vec3 glpos, out float gldist)
+{
+    float z = imageLoad(gdepth, p).r;
+    glpos = vec3(0.0);
+    gldist = -1.0;
+    // 1 is the cleared value: sky, or a pixel GL rasterised nothing into.
+    if(z <= 0.0 || z >= 1.0) return false;
+    vec2 ndcxy = ((vec2(p) + 0.5) / vec2(pc.size)) * 2.0 - 1.0;
+    vec4 h = pc.invcamproj * vec4(ndcxy, z * 2.0 - 1.0, 1.0);
+    glpos = h.xyz / max(h.w, 1e-8);
+    // dir is normalised, so hitT is already a distance from the eye and the
+    // two measures are in the same units.
+    gldist = distance(glpos, pc.origin.xyz);
+    return true;
+}
+
+bool hiddenbygl(ivec2 p, float hitT)
+{
+    vec3 glpos;
+    float gldist;
+    if(!glWorldPos(p, glpos, gldist)) return false;
+    return gldist < hitT - max(GLDEPTH_SLACK_ABS, hitT * GLDEPTH_SLACK_REL);
+}
+
+// Recovered hit must sit on this pixel's GL surface. Same slack as the far
+// reject, measured from gldist (the visible face), not a looser window.
+bool glSurfaceMatch(float hitT, float gldist)
+{
+    if(gldist <= 0.0) return false;
+    return abs(hitT - gldist) <= max(GLDEPTH_SLACK_ABS, gldist * GLDEPTH_SLACK_REL);
+}
+
+// Pixel-centre primary, same convention as main (row 0 = bottom of the GL
+// window). Used only to recover UV derivatives: compute has no implicit dFdx.
+vec3 worldRayDir(ivec2 pix)
+{
+    vec2 uv = (vec2(pix) + 0.5) / vec2(pc.size);
+    vec2 ndc = uv * 2.0 - 1.0;
+    vec4 farh = pc.invcamproj * vec4(ndc, 1.0, 1.0);
+    vec3 farw = farh.xyz / max(farh.w, 1e-8);
+    return normalize(farw - pc.origin.xyz);
+}
+
+vec3 triBarycentric(vec3 p, vec3 a, vec3 b, vec3 c)
+{
+    vec3 v0 = b - a, v1 = c - a, v2 = p - a;
+    float d00 = dot(v0, v0);
+    float d01 = dot(v0, v1);
+    float d11 = dot(v1, v1);
+    float d20 = dot(v2, v0);
+    float d21 = dot(v2, v1);
+    float det = d00 * d11 - d01 * d01;
+    if(abs(det) < 1e-12) return vec3(1.0, 0.0, 0.0);
+    float inv = 1.0 / det;
+    float v = (d11 * d20 - d01 * d21) * inv;
+    float w = (d00 * d21 - d01 * d20) * inv;
+    return vec3(1.0 - v - w, v, w);
+}
+
+vec2 wrapDelta(vec2 d)
+{
+    return d - round(d);
+}
+
+vec2 uvOnPlane(ivec2 pix, vec3 p0, vec3 p1, vec3 p2, vec3 n, vec2 uv0, vec2 uv1, vec2 uv2, vec2 fallback)
+{
+    vec3 rdir = worldRayDir(pix);
+    float denom = dot(n, rdir);
+    if(abs(denom) < 1e-8) return fallback;
+    float t = dot(p0 - pc.origin.xyz, n) / denom;
+    if(t < 1e-4) return fallback;
+    vec3 hit = pc.origin.xyz + rdir * t;
+    vec3 bary = triBarycentric(hit, p0, p1, p2);
+    return uv0 * bary.x + uv1 * bary.y + uv2 * bary.z;
+}
+
+vec3 lodHeat(float lod)
+{
+    float l = clamp(lod, 0.0, 3.0);
+    return vec3(clamp(l - 1.0, 0.0, 1.0), clamp(1.0 - abs(l - 1.0), 0.0, 1.0), clamp(1.0 - l, 0.0, 1.0));
+}
+
+// World diffuse only. Model skins stay on their own sampler/upload path.
+vec3 sampleWorldDiff(int layer, vec2 uv, ivec2 pix, vec3 p0, vec3 p1, vec3 p2, vec3 n, vec2 uv0, vec2 uv1, vec2 uv2, inout float lod)
+{
+    int ndiff = int(pc.range.y);
+    if(ndiff <= 0 || layer < 0 || layer >= ndiff) return vec3(1.0, 0.0, 1.0);
+    vec3 coord = vec3(uv, float(layer));
+    bool wantgrad = lights.env.diffFilter > 0.5 || lights.env.diffVis > 2.5;
+    if(!wantgrad)
+    {
+        lod = 0.0;
+        return textureLod(diffuses, coord, 0.0).rgb;
+    }
+    vec2 uvx = uvOnPlane(pix + ivec2(1, 0), p0, p1, p2, n, uv0, uv1, uv2, uv);
+    vec2 uvy = uvOnPlane(pix + ivec2(0, 1), p0, p1, p2, n, uv0, uv1, uv2, uv);
+    vec2 ddx = wrapDelta(uvx - uv);
+    vec2 ddy = wrapDelta(uvy - uv);
+    ivec3 tsz = textureSize(diffuses, 0);
+    vec2 rho = vec2(length(ddx * vec2(tsz.xy)), length(ddy * vec2(tsz.xy)));
+    lod = log2(max(max(rho.x, rho.y), 1e-6));
+    if(lights.env.diffFilter > 0.5)
+        return textureGrad(diffuses, coord, ddx, ddy).rgb;
+    return textureLod(diffuses, coord, 0.0).rgb;
+}
+
+// Non-opaque BLAS triangles (MESH_ALPHA) arrive as candidates. Sample the
+// skin alpha and keep the texel if it is at least mdlalphatest. Opaque
+// geometry never calls this: it commits in hardware. Missing skin (overflow)
+// refuses the candidate so we do not paint a solid panel.
+bool alphaTexel(uint custom, uint prim, uint geomid, vec2 bary)
+{
+    uint geom = custom & 0xFFu;
+    uint opac = (custom >> 8) & 0xFFu;
+    if(geom == 0u) return true;
+    if(geom >= 97u) return false;
+    // Smoke puffs pack 1-255 here. A grey sprite is not a solid wall: keep
+    // this ray with probability opac/255 so the shadow thins as the trail
+    // fades. 0 means a normal model (no extra channel).
+    if(opac != 0u)
+    {
+        uint seed = pcg(prim * 747796405u + custom + uint(bary.x * 4096.0) + uint(bary.y * 7919.0));
+        return rand01(seed) * 255.0 < float(opac);
+    }
+    ModelGeom g = geoms.g[nonuniformEXT(geom)];
+    uint nopaque = g.flags >> 2u;
+    uint trii = prim + (geomid != 0u ? nopaque : 0u);
+    if((g.flags & GEOM_SHADE) == 0u || (g.verts.x == 0u && g.verts.y == 0u) ||
+       (g.indices.x == 0u && g.indices.y == 0u) || (g.tris.x == 0u && g.tris.y == 0u) ||
+       trii >= g.ntris)
+        return false;
+    ModelVertRef mv = ModelVertRef(g.verts);
+    ModelIdxRef mi = ModelIdxRef(g.indices);
+    ModelTriRef mt = ModelTriRef(g.tris);
+    uint i0 = mi.i[trii * 3u + 0u];
+    uint i1 = mi.i[trii * 3u + 1u];
+    uint i2 = mi.i[trii * 3u + 2u];
+    ModelVert v0 = mv.v[i0];
+    ModelVert v1 = mv.v[i1];
+    ModelVert v2 = mv.v[i2];
+    float w = 1.0 - bary.x - bary.y;
+    vec2 tc = v0.tc * w + v1.tc * bary.x + v2.tc * bary.y;
+    float cutoff = v0.pad1;
+    if(cutoff <= 0.0) return true;
+    uint packed = mt.t[trii];
+    uint layer = packed & 255u;
+    uint nskin = geoms.g[0].ntris;
+    if(layer == 255u || nskin == 0u || layer >= nskin) return false;
+    return texture(skins, vec3(tc, float(layer))).a >= cutoff;
+}
+
+bool occluded(vec3 origin, vec3 dir, float tmax, uint mask, uint skipInst)
+{
+    rayQueryEXT sq;
+    float tmin = 0.01;
+    float tfar = max(tmax, tmin + 0.001);
+    if(mask == 0u) mask = RAYMASK_ALL;
+    // World-only and world+portal rays skip foliage any-hit: walls (and the
+    // punched teleporter rim) still block, the alpha canopy does not.
+    // OpaqueEXT lets hardware terminate. Sun / ordinary lamps keep CASTER
+    // in the mask so they still take the any-hit path.
+    bool skipalpha = (mask & ~(RAYMASK_WORLD | RAYMASK_MODEL | RAYMASK_PORTAL)) == 0u;
+    uint rflags = gl_RayFlagsTerminateOnFirstHitEXT;
+    if(skipalpha) rflags |= gl_RayFlagsOpaqueEXT;
+    rayQueryInitializeEXT(sq, tlas, rflags, mask, origin, tmin, dir, tfar);
+    if(skipalpha)
+    {
+        rayQueryProceedEXT(sq);
+        return rayQueryGetIntersectionTypeEXT(sq, true) == gl_RayQueryCommittedIntersectionTriangleEXT;
+    }
+    while(rayQueryProceedEXT(sq))
+    {
+        if(rayQueryGetIntersectionTypeEXT(sq, false) == gl_RayQueryCandidateIntersectionTriangleEXT)
+        {
+            uint iid = uint(rayQueryGetIntersectionInstanceIdEXT(sq, false));
+            if(iid == skipInst) continue;
+            uint custom = uint(rayQueryGetIntersectionInstanceCustomIndexEXT(sq, false));
+            uint prim = uint(rayQueryGetIntersectionPrimitiveIndexEXT(sq, false));
+            uint geomid = uint(rayQueryGetIntersectionGeometryIndexEXT(sq, false));
+            vec2 bary = rayQueryGetIntersectionBarycentricsEXT(sq, false);
+            if(alphaTexel(custom, prim, geomid, bary))
+                rayQueryConfirmIntersectionEXT(sq);
+        }
+    }
+    return rayQueryGetIntersectionTypeEXT(sq, true) == gl_RayQueryCommittedIntersectionTriangleEXT;
+}
+
+// Same as occluded, but returns committed T or a negative miss. Used as the
+// NRD hit-distance guide, not as a substitute for skyvis.
+// TerminateOnFirstHit: this is the first committed intersection, not a
+// certified closest-surface distance once any-hit/alpha candidates are in
+// play. Opaque-only traces (OpaqueEXT) commit the closest opaque hit.
+float occludedT(vec3 origin, vec3 dir, float tmax, uint mask, uint skipInst)
+{
+    rayQueryEXT sq;
+    float tmin = 0.01;
+    float tfar = max(tmax, tmin + 0.001);
+    if(mask == 0u) mask = RAYMASK_ALL;
+    bool skipalpha = (mask & ~(RAYMASK_WORLD | RAYMASK_MODEL | RAYMASK_PORTAL)) == 0u;
+    uint rflags = gl_RayFlagsTerminateOnFirstHitEXT;
+    if(skipalpha) rflags |= gl_RayFlagsOpaqueEXT;
+    rayQueryInitializeEXT(sq, tlas, rflags, mask, origin, tmin, dir, tfar);
+    if(skipalpha)
+    {
+        rayQueryProceedEXT(sq);
+        if(rayQueryGetIntersectionTypeEXT(sq, true) == gl_RayQueryCommittedIntersectionTriangleEXT)
+            return rayQueryGetIntersectionTEXT(sq, true);
+        return -1.0;
+    }
+    while(rayQueryProceedEXT(sq))
+    {
+        if(rayQueryGetIntersectionTypeEXT(sq, false) == gl_RayQueryCandidateIntersectionTriangleEXT)
+        {
+            uint iid = uint(rayQueryGetIntersectionInstanceIdEXT(sq, false));
+            if(iid == skipInst) continue;
+            uint custom = uint(rayQueryGetIntersectionInstanceCustomIndexEXT(sq, false));
+            uint prim = uint(rayQueryGetIntersectionPrimitiveIndexEXT(sq, false));
+            uint geomid = uint(rayQueryGetIntersectionGeometryIndexEXT(sq, false));
+            vec2 bary = rayQueryGetIntersectionBarycentricsEXT(sq, false);
+            if(alphaTexel(custom, prim, geomid, bary))
+                rayQueryConfirmIntersectionEXT(sq);
+        }
+    }
+    if(rayQueryGetIntersectionTypeEXT(sq, true) == gl_RayQueryCommittedIntersectionTriangleEXT)
+        return rayQueryGetIntersectionTEXT(sq, true);
+    return -1.0;
+}
+
+int skyPackFlags()
+{
+    return int(lights.env.diffPad1 + 0.5);
+}
+
+bool skyHistGeomOk(vec4 h, vec3 hp, vec3 n, float hitdist)
+{
+    if(h.w < 0.0) return false;
+    vec3 delta = h.xyz + lights.env.prevCam - hp;
+    float off = abs(dot(delta, n));
+    float along = length(delta - n * dot(delta, n));
+    return off < max(0.5, hitdist * 0.01) && along < max(4.0, hitdist * 0.05);
+}
+
+void addSpec(vec3 ldir, vec3 n, vec3 viewDir, vec3 color, float specMul, inout vec3 specAcc)
+{
+    if(specMul <= 0.0) return;
+    vec3 H = ldir - viewDir;
+    float hlen = length(H);
+    if(hlen < 1e-6) return;
+    H /= hlen;
+    float sp = pow(clamp(dot(n, H), 0.0, 1.0), MODEL_SPEC_POW);
+    specAcc += color * sp * specMul;
+}
+
+void addOmni(int i, vec3 hit, vec3 n, vec3 sorigin, uint shmask, uint skipInst, bool wrap, inout vec3 acc, vec3 viewDir, float specMul, inout vec3 specAcc)
+{
+    vec3 toL = lights.l[i].pos - sorigin;
+    float mag = length(toL);
+    float radius = lights.l[i].radius;
+    float flags = lights.l[i].flags;
+    float intensity = 1.0;
+    if(radius > 0.0)
+    {
+        float magh = length(lights.l[i].pos - hit);
+        float x = magh / radius;
+        if(x >= 1.0) return;
+        // Glow / teleport: 1-x^2 keeps mid-range light without raising the
+        // peak. Linear (ordinary lamps) matches the baker.
+        intensity = flags >= 1.5 ? (1.0 - x*x) : (1.0 - x);
+    }
+    vec3 ldir = mag > 1e-4 ? (toL / mag) : n;
+    // flags 2: aura (screens). Sit on a pad that is often buried
+    // in a wall cube, so Lambert would light nothing. Distance only, no
+    // shadow ray. flags 3: always-eval lamp with Lambert and shadow rays
+    // (teleporter, lava). flags 0/1: ordinary lamps.
+    bool aura = flags >= 1.5 && flags < 2.5;
+    float ndotl = 1.0;
+    if(!aura)
+    {
+        ndotl = dot(n, ldir);
+        if(wrap) ndotl = modelWrap(ndotl);
+        else ndotl = max(ndotl, 0.0);
+        // Teleport / lava sit low over a pad: hard Lambert leaves the floor
+        // black a few metres out. A bit of wrap fills the room; walls still
+        // block because the shadow ray runs after this.
+        if(flags >= 2.5) ndotl = ndotl * 0.65 + 0.35;
+        if(ndotl <= 0.0) return;
+    }
+    if(intensity * ndotl < 0.02) return;
+
+    bool shadowed = false;
+    bool wantshadow = flags < 0.5 || flags >= 2.5;
+    float slack = flags >= 2.5 ? 0.35 : 0.01;
+    if(wantshadow && mag > slack + 0.02)
+        shadowed = occluded(sorigin, ldir, mag - slack, shmask, skipInst);
+    if(shadowed) return;
+    acc += lights.l[i].color * intensity * ndotl;
+    if(!aura) addSpec(ldir, n, viewDir, lights.l[i].color * intensity, specMul, specAcc);
+}
+
+// Integration HDR lot 1. Players (fullbright models) in HDR are shaded exactly
+// as on an SDR screen (display-encoded colours, SDR caps), clipped at white,
+// then decoded once at the end: their overbright plate and studio fill must
+// not become HDR highlights. The world and the other models keep the HDR path.
+bool gSdrModel = false;
+
+vec3 colorTex(vec3 c)
+{
+    if((pc.mode & HDR) == 0 || gSdrModel) return c;
+    c = max(c, vec3(0.0));
+    return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));
+}
+
+void storeHdrProbe(ivec2 p)
+{
+    if((pc.mode & HDRPROBE) == 0) return;
+    if(p.x < 0 || p.y < 0 || p.x >= pc.size.x || p.y >= pc.size.y) return;
+    int x0 = pc.size.x - 240;
+    int y0 = pc.size.y - 70;
+    if(x0 < 0 || y0 < 0) return;
+    if(p.x < x0 || p.y < y0 || p.y >= y0 + 48) return;
+    int lx = p.x - x0;
+    float v = -1.0;
+    if(lx >= 8 && lx < 56) v = 0.18;
+    else if(lx >= 64 && lx < 112) v = 1.0;
+    else if(lx >= 120 && lx < 168) v = 4.0;
+    else if(lx >= 176 && lx < 224) v = 16.0;
+    if(v < 0.0) return;
+    imageStore(result, p, vec4(v, v, v, 1.0));
+}
+
+void shadePixel()
+{
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    bool live = p.x < pc.size.x && p.y < pc.size.y;
+    bool filtered = (lights.env.skyRays - floor(lights.env.skyRays)) > 0.1;
+
+    // Hoisted so every invocation reaches the workgroup barrier, including
+    // misses and the extra threads on a 16x16 tile that hang off the image.
+    vec3 n = vec3(0.0, 0.0, 1.0);
+    vec3 albedo = vec3(0.0);
+    float difflod = 0.0;
+    vec3 emit = vec3(0.0);
+    float modelglow = 3.0;
+    bool ismodel = false;
+    bool fullbright = false;
+    vec2 modelenv = vec2(0.0);
+    vec3 base = vec3(0.0);
+    float gain = 1.0;
+    vec3 direct = vec3(0.0);
+    vec3 specAcc = vec3(0.0);
+    vec3 maskrgb = vec3(0.0);
+    bool hasmask = false;
+    float specMul = 0.0;
+    vec3 dir = vec3(0.0, 1.0, 0.0);
+    float skyvis = 0.0;
+    // 0 miss, 1 geom reject, 2 noise/occluder reset, 3 mix, 4 hold.
+    int skyReuse = 0;
+    float skyAgeShown = 0.0;
+    // Effective taps the 5x5 actually gave this pixel, (sum w)^2 / sum w^2.
+    // The kernel is narrow, so an interior pixel on open ground gets about 12
+    // of its 25 neighbours and one at a crease gets far fewer. The temporal
+    // pass needs the real count to know how noisy its own input is.
+    float skytaps = 1.0;
+    float hitdist = 0.0;
+    float skyHitDist = 0.0;
+    vec3 hitp = vec3(0.0);
+    bool valid = false;
+    vec4 outc = vec4(0.0);
+    bool nrdOn = (int(lights.env.diffPad1 + 0.5) & 32) != 0;
+
+    if(live) do
+    {
+    vec2 uv = (vec2(p) + 0.5) / vec2(pc.size);
+    vec2 ndc = uv * 2.0 - 1.0;
+
+    vec4 farh = pc.invcamproj * vec4(ndc, 1.0, 1.0);
+    vec3 farw = farh.xyz / farh.w;
+    vec3 origin = pc.origin.xyz;
+    dir = farw - origin;
+    float len = length(dir);
+    if(len < 1e-8) break;
+    dir /= len;
+
+    float tmin = max(pc.origin.w, 0.01);
+    float tmax = max(pc.range.x, tmin + 1.0);
+
+    // SHADE_MODELS: primary rays hit world + other models, never SELF (the
+    // first-person body). SELF stays in the TLAS so shadow / sun / sky rays
+    // from the world still see it. MASK_MODELS without shading: world only.
+    // Both bits: shade models, and tag those hits at alpha 0.5 so the
+    // composite can keep them while still dropping world hits behind an
+    // untraced GL model (grass). No OpaqueEXT: MESH_ALPHA is a candidate,
+    // skins.a decides. Opaque BLAS triangles still commit in hardware.
+    uint primarymask = RAYMASK_ALL;
+    if((pc.mode & SHADE_MODELS) != 0)
+        primarymask = RAYMASK_WORLD | RAYMASK_MODEL;
+    else if((pc.mode & MASK_MODELS) != 0)
+        primarymask = RAYMASK_WORLD;
+
+    rayQueryEXT q;
+    rayQueryInitializeEXT(q, tlas, 0, primarymask, origin, tmin, dir, tmax);
+    while(rayQueryProceedEXT(q))
+    {
+        if(rayQueryGetIntersectionTypeEXT(q, false) == gl_RayQueryCandidateIntersectionTriangleEXT)
+        {
+            uint ccustom = uint(rayQueryGetIntersectionInstanceCustomIndexEXT(q, false));
+            uint cprim = uint(rayQueryGetIntersectionPrimitiveIndexEXT(q, false));
+            uint cgeom = uint(rayQueryGetIntersectionGeometryIndexEXT(q, false));
+            vec2 cbary = rayQueryGetIntersectionBarycentricsEXT(q, false);
+            if(alphaTexel(ccustom, cprim, cgeom, cbary))
+                rayQueryConfirmIntersectionEXT(q);
+        }
+    }
+
+    if(rayQueryGetIntersectionTypeEXT(q, true) != gl_RayQueryCommittedIntersectionTriangleEXT)
+        break;
+
+    uint custom = uint(rayQueryGetIntersectionInstanceCustomIndexEXT(q, true));
+    uint prim = rayQueryGetIntersectionPrimitiveIndexEXT(q, true);
+    uint hitInst = uint(rayQueryGetIntersectionInstanceIdEXT(q, true));
+    vec2 bary = rayQueryGetIntersectionBarycentricsEXT(q, true);
+    float a = 1.0 - bary.x - bary.y;
+    float b = bary.x;
+    float c = bary.y;
+    float hitT = rayQueryGetIntersectionTEXT(q, true);
+    vec3 hit = origin + dir * hitT;
+    hitp = hit;
+    hitdist = hitT;
+    // Window depth is the edge-stop the brief asked for: a player standing
+    // on the floor is nearer in gdepth than the ground around his feet.
+    vec3 glposP = vec3(0.0);
+    float gldistP = -1.0;
+    bool haveGlP = false;
+    if((pc.mode & TEST_GLDEPTH) != 0)
+    {
+        haveGlP = glWorldPos(p, glposP, gldistP);
+        if(haveGlP)
+        {
+            hitp = glposP;
+            hitdist = gldistP;
+        }
+    }
+
+    // Before any attribute or lighting work: if GL rasterised something in
+    // front of this hit, the hit is not what the player is looking at.
+    // Model hits skip this: the skinned BLAS sits a hair behind GL's raster
+    // (CPU skin vs GPU pose), so the test was handing every player pixel back
+    // to GL's MDL_FULLBRIGHT plate and the menu's spec never showed.
+    if((pc.mode & TEST_GLDEPTH) != 0 && custom == 0u && hiddenbygl(p, hitT))
+    {
+        // Pixel-centre direction punched through the GL-visible face at a
+        // silhouette. Camera origin is unchanged. Alpha 0 then lets the
+        // composite keep GL lighting, a bright crack against RT neighbours.
+        // Retry four subpixel directions; keep the world hit closest to this
+        // pixel's GL depth, inside the existing slack. A nearer neighbour is
+        // not accepted. Bit 12 (hwrthiddenretry) actually disables this.
+        bool recovered = false;
+        if((skyPackFlags() & 4096) != 0 && haveGlP)
+        {
+            const vec2 offs[4] = vec2[](vec2(0.4, 0.0), vec2(-0.4, 0.0), vec2(0.0, 0.4), vec2(0.0, -0.4));
+            float bestErr = 1e30;
+            uint bestCustom = 0u;
+            uint bestPrim = 0u;
+            uint bestInst = 0u;
+            vec2 bestBary = vec2(0.0);
+            float bestT = 0.0;
+            vec3 bestDir = dir;
+            for(int oi = 0; oi < 4; oi++)
+            {
+                vec2 uv2 = (vec2(p) + 0.5 + offs[oi]) / vec2(pc.size);
+                vec2 ndc2 = uv2 * 2.0 - 1.0;
+                vec4 farh2 = pc.invcamproj * vec4(ndc2, 1.0, 1.0);
+                vec3 farw2 = farh2.xyz / max(farh2.w, 1e-8);
+                vec3 dir2 = farw2 - origin;
+                float len2 = length(dir2);
+                if(len2 < 1e-8) continue;
+                dir2 /= len2;
+                rayQueryEXT q2;
+                rayQueryInitializeEXT(q2, tlas, 0, primarymask, origin, tmin, dir2, tmax);
+                while(rayQueryProceedEXT(q2))
+                {
+                    if(rayQueryGetIntersectionTypeEXT(q2, false) == gl_RayQueryCandidateIntersectionTriangleEXT)
+                    {
+                        uint ccustom = uint(rayQueryGetIntersectionInstanceCustomIndexEXT(q2, false));
+                        uint cprim = uint(rayQueryGetIntersectionPrimitiveIndexEXT(q2, false));
+                        uint cgeom = uint(rayQueryGetIntersectionGeometryIndexEXT(q2, false));
+                        vec2 cbary = rayQueryGetIntersectionBarycentricsEXT(q2, false);
+                        if(alphaTexel(ccustom, cprim, cgeom, cbary))
+                            rayQueryConfirmIntersectionEXT(q2);
+                    }
+                }
+                if(rayQueryGetIntersectionTypeEXT(q2, true) != gl_RayQueryCommittedIntersectionTriangleEXT)
+                    continue;
+                uint custom2 = uint(rayQueryGetIntersectionInstanceCustomIndexEXT(q2, true));
+                float hitT2 = rayQueryGetIntersectionTEXT(q2, true);
+                if(custom2 != 0u || !glSurfaceMatch(hitT2, gldistP)) continue;
+                float err = abs(hitT2 - gldistP);
+                if(err >= bestErr) continue;
+                bestErr = err;
+                bestCustom = custom2;
+                bestPrim = rayQueryGetIntersectionPrimitiveIndexEXT(q2, true);
+                bestInst = uint(rayQueryGetIntersectionInstanceIdEXT(q2, true));
+                bestBary = rayQueryGetIntersectionBarycentricsEXT(q2, true);
+                bestT = hitT2;
+                bestDir = dir2;
+                recovered = true;
+            }
+            if(recovered)
+            {
+                custom = bestCustom;
+                prim = bestPrim;
+                hitInst = bestInst;
+                bary = bestBary;
+                a = 1.0 - bary.x - bary.y;
+                b = bary.x;
+                c = bary.y;
+                hitT = bestT;
+                dir = bestDir;
+                hit = origin + dir * hitT;
+                // Shading uses the recovered subpixel hit. hitp/hitdist feed
+                // skyage and NRD guides/MV for this pixel: keep the GL snap.
+                hitp = glposP;
+                hitdist = gldistP;
+            }
+        }
+        if(!recovered)
+            break;
+    }
+
+    vec3 noffset = n;
+    vec2 tc = vec2(0.0);
+    uint modelmask = 0xFFu;
+    float modelspec = 0.5;
+
+    if(custom == 0u)
+    {
+        uint ntris = uint(max(pc.range.w, 0.0));
+        if(prim >= ntris)
+        {
+            outc = vec4(1.0, 0.0, 1.0, 1.0);
+            break;
+        }
+
+        uvec4 t = tri.t[prim];
+        if(t.x == 0xFFFFFFFFu)
+        {
+            outc = vec4(1.0, 0.0, 1.0, 1.0);
+            break;
+        }
+
+        uint i0 = idx.i[prim * 3u + 0u];
+        uint i1 = idx.i[prim * 3u + 1u];
+        uint i2 = idx.i[prim * 3u + 2u];
+        vec3 p0 = verts.v[i0].pos;
+        vec3 p1 = verts.v[i1].pos;
+        vec3 p2 = verts.v[i2].pos;
+        vec2 tc0 = verts.v[i0].tc;
+        vec2 tc1 = verts.v[i1].tc;
+        vec2 tc2 = verts.v[i2].tc;
+        tc = tc0 * a + tc1 * b + tc2 * c;
+        vec2 lm = verts.v[i0].lm * a + verts.v[i1].lm * b + verts.v[i2].lm * c;
+        vec2 btc0 = vec2(verts.v[i0].pad, verts.v[i0].pad2);
+        vec2 btc1 = vec2(verts.v[i1].pad, verts.v[i1].pad2);
+        vec2 btc2 = vec2(verts.v[i2].pad, verts.v[i2].pad2);
+        vec2 btc = btc0 * a + btc1 * b + btc2 * c;
+        n = verts.v[i0].n * a + verts.v[i1].n * b + verts.v[i2].n * c;
+        vec3 gn = cross(p1 - p0, p2 - p0);
+        float glen = length(gn);
+        if(glen > 1e-8) n = gn / glen;
+        else
+        {
+            float nlen = length(n);
+            if(nlen < 1e-6) n = -dir;
+            else n /= nlen;
+        }
+        if(dot(n, -dir) < 0.0) n = -n;
+        noffset = n;
+
+        int ndiff = int(pc.range.y);
+        albedo = vec3(1.0, 0.0, 1.0);
+        if(ndiff > 0 && int(t.x) >= 0 && int(t.x) < ndiff)
+            albedo = colorTex(sampleWorldDiff(int(t.x), tc, p, p0, p1, p2, n, tc0, tc1, tc2, difflod));
+        // t.y: low 16 = lightmap index, high 16 = bottom (dirt) diffuse layer.
+        // GL draws the dirt opaque then blends grass with lightmap.a.
+        uint lmid = t.y & 0xFFFFu;
+        uint bot = t.y >> 16u;
+        if(bot != 0xFFFFu && ndiff > 0 && int(bot) < ndiff)
+        {
+            float botlod = 0.0;
+            vec3 botc = colorTex(sampleWorldDiff(int(bot), btc, p, p0, p1, p2, n, btc0, btc1, btc2, botlod));
+            float ba = 1.0;
+            int nlm = textureSize(lightmaps, 0).z;
+            if(lmid >= 6u && nlm > 0 && int(lmid) < nlm)
+                ba = texture(lightmaps, vec3(lm, float(lmid))).a;
+            albedo = mix(botc, albedo, ba);
+            difflod = max(difflod, botlod);
+        }
+        vec3 scale = vec3(float(t.z & 255u), float((t.z >> 8u) & 255u), float((t.z >> 16u) & 255u)) * (1.0 / 255.0);
+        albedo *= scale;
+        // t.w: low 8 = glow layer (0xFF = none), high 24 = glowcolor rgb.
+        uint glayer = t.w & 255u;
+        int nglow = int(lights.env.glowLayers + 0.5);
+        if(glayer != 255u && nglow > 0 && int(glayer) < nglow)
+        {
+            vec3 gcol = vec3(float((t.w >> 8u) & 255u), float((t.w >> 16u) & 255u), float((t.w >> 24u) & 255u)) * (1.0 / 255.0);
+            emit = colorTex(texture(glows, vec3(tc, float(glayer))).rgb) * colorTex(gcol);
+        }
+    }
+    else
+    {
+        // A model hit. Do not feed prim into the world SSBOs. No shade flag
+        // (overflow, static OBJ, pose not yet known) stores transparent so
+        // GL's raster shows through.
+        if((pc.mode & SHADE_MODELS) == 0 || (custom & 0xFFu) >= 97u)
+            break;
+        // customIndex is per-instance, so neighbouring pixels in a subgroup
+        // hit different BLASes. Without nonuniformEXT the whole subgroup can
+        // load one slot and then fail prim>=ntris / flags on the others.
+        ModelGeom g = geoms.g[nonuniformEXT(custom & 0xFFu)];
+        uint geomid = uint(rayQueryGetIntersectionGeometryIndexEXT(q, true));
+        uint nopaque = g.flags >> 2u;
+        uint trii = prim + (geomid != 0u ? nopaque : 0u);
+        if((g.flags & GEOM_SHADE) == 0u || (g.verts.x == 0u && g.verts.y == 0u) || (g.indices.x == 0u && g.indices.y == 0u) || trii >= g.ntris)
+            break;
+        ModelVertRef mv = ModelVertRef(g.verts);
+        ModelIdxRef mi = ModelIdxRef(g.indices);
+        uint i0 = mi.i[trii * 3u + 0u];
+        uint i1 = mi.i[trii * 3u + 1u];
+        uint i2 = mi.i[trii * 3u + 2u];
+        ModelVert v0 = mv.v[i0];
+        ModelVert v1 = mv.v[i1];
+        ModelVert v2 = mv.v[i2];
+        tc = v0.tc * a + v1.tc * b + v2.tc * c;
+        vec3 gn = cross(v1.pos - v0.pos, v2.pos - v0.pos);
+        float glen = length(gn);
+        vec3 gnn = glen > 1e-8 ? gn / glen : vec3(0.0, 0.0, 1.0);
+        vec3 ln = v0.n * a + v1.n * b + v2.n * c;
+        float nlen = length(ln);
+        if(nlen > 1e-6) ln /= nlen;
+        else ln = gnn;
+        // Object-space normals. The TLAS instance is feetpos+yaw+pitch
+        // (identity for ragdolls already in world space). Lighting can use
+        // the skinned vertex normal; the shadow origin must use the triangle
+        // geometric normal or the bias walks inside the mesh.
+        mat4x3 o2w = rayQueryGetIntersectionObjectToWorldEXT(q, true);
+        mat3 o2wn = mat3(o2w);
+        n = normalize(o2wn * ln);
+        vec3 ng = normalize(o2wn * gnn);
+        if(dot(n, -dir) < 0.0) n = -n;
+        if(dot(ng, -dir) < 0.0) ng = -ng;
+        noffset = ng;
+        ismodel = true;
+        fullbright = (g.flags & GEOM_FULLBRIGHT) != 0u;
+        gSdrModel = fullbright && (pc.mode & HDR) != 0;
+        modelenv = v0.pad0 * a + v1.pad0 * b + v2.pad0 * c;
+
+        albedo = vec3(0.0);
+        uint nskin = geoms.g[0].ntris;
+        bool haveskin = false;
+        if((g.tris.x != 0u || g.tris.y != 0u) && nskin > 0u)
+        {
+            ModelTriRef mt = ModelTriRef(g.tris);
+            uint packed = mt.t[trii];
+            uint layer = packed & 255u;
+            if(layer != 255u && layer < nskin)
+            {
+                albedo = colorTex(texture(skins, vec3(tc, float(layer))).rgb);
+                haveskin = true;
+            }
+            modelmask = (packed >> 8u) & 255u;
+            modelglow = float((packed >> 16u) & 255u) * (1.0 / 32.0);
+            modelspec = float((packed >> 24u) & 255u) * (1.0 / 255.0);
+        }
+        // No atlas layer (overflow): GL already drew the coloured mesh.
+        // A 0.75 placeholder * 2 * lights reads as a white sheet.
+        if(!haveskin)
+            break;
+        // Same 2× as data/glsl.cfg modelshader (`light.rgb *= 2.0`).
+        albedo *= 2.0;
+    }
+
+    // GL's world pass hands the lightmap shader colorparams = 2 *
+    // vslot.colorscale (renderva.cpp): Sauer bakes at half scale and the world
+    // shader doubles it. Traced light is in the same units as the bake, so it
+    // needs the same factor. The model path already carries its own 2 (the
+    // `light.rgb *= 2.0` in glsl.cfg's modelshader), which is why models match
+    // GL and walls did not. Apply it to the light the RT actually traces and
+    // leave the constant ambient floor at its current value, so a pixel no
+    // light reaches keeps exactly the brightness it has today.
+    base = pc.lighting.xyz;
+    // MODEL_MINSHADE is a FRACTION of the light that reaches the model, not a
+    // level. glsl.cfg's modelshader multiplies the whole of lightreaching()'s
+    // colour by the wrap, whose value at a face turned away from the light is
+    // lightscale.z, so a tree in a dark corner is dark in vanilla. Flooring
+    // the ambient AT MODEL_MINSHADE instead made every mapmodel 1/ambient too
+    // bright wherever the map is darker than 0.29 -- ten times on a night map,
+    // which is how a tester spotted it: trees, plants and rocks glowed out
+    // of walls that had gone darker. The player plate keeps the absolute floor
+    // it was tuned with.
+    if(fullbright) base = max(base, vec3(MODEL_MINSHADE));
+    else if(ismodel) base *= MODEL_AMBWRAP;
+    gain = ismodel ? 1.0 : max(lights.env.worldGain, 0.0);
+    if(ismodel)
+    {
+        uint nskin = geoms.g[0].ntris;
+        if(modelmask != 255u && modelmask < nskin)
+        {
+            maskrgb = texture(skins, vec3(tc, float(modelmask))).rgb;
+            hasmask = true;
+        }
+        // Spec is the menu's metal: only ENT_PLAYER (FULLBRIGHT). Crates keep
+        // Lambert. Without a specmap, maskscale.x still applies.
+        if(fullbright && modelspec > 0.0)
+            specMul = hasmask ? modelspec * maskrgb.r : modelspec;
+    }
+    int nlights = int(pc.lighting.w);
+    nlights = clamp(nlights, 0, 256);
+    int nuse = int(pc.range.z + 0.5);
+    nuse = clamp(nuse, 1, 4);
+
+    vec3 sorigin = hit + noffset * (ismodel ? MODEL_SHADOW_BIAS : SHADOW_BIAS);
+    // hwrtshadowself: what the first-person body occludes. The levels are
+    // ordered by how badly the light type distorts the body's own shadow.
+    // The sun is directional, so its rays are parallel and the silhouette is
+    // exactly the body's cross-section however close the body is: it always
+    // reads as a shadow lying on the floor. A point lamp magnifies by
+    // (lamp -> lit surface) / (lamp -> body), which a body standing next to
+    // the lamp sends towards infinity: the umbra stops being a silhouette and
+    // becomes a fast-opening cone that darkens several surfaces at different
+    // depths and different scales at once. That composite is what a tester
+    // reported as a 3D shape floating in front of them rather than a shadow on
+    // a surface, and it is why it behaves the same next to any lamp. A finite
+    // lamp adds a second defect on top: it is elected per pixel out of the
+    // nearest hwrtdlights, so the body throws one silhouette per lamp, and
+    // the shadow is cut wherever the winning lamp changes between two
+    // neighbouring pixels. Hence 1 (default) is the sun alone, 2 adds the
+    // always-evaluated omnis, 3 the nearest-N finite lamps, 4 the sky -- a
+    // body that close eats every sample of the hemisphere (the 3D pit).
+    // 0 is off.
+    // Models keep walls + foliage + smoke, and skip their own instance so a
+    // closed mesh does not go black. They still see SELF so a crate next
+    // to you takes your shadow.
+    uint noself = RAYMASK_WORLD | RAYMASK_MODEL | RAYMASK_CASTER;
+    uint withself = noself | RAYMASK_SELF;
+    // omnimask is the always-evaluated omnis, nearmask the nearest-N finite
+    // lamps. Gating cannot depend on the hit: a per-pixel decision would cut
+    // the shadow along its own threshold, which is the defect level 3 has.
+    uint omnimask = noself, nearmask = noself, sunmask = noself, skymask = noself;
+    {
+        float ss = lights.env.shadowSelf;
+        if(ss >= 0.5) sunmask = withself;
+        if(ss >= 1.5) omnimask = withself;
+        if(ss >= 2.5) nearmask = withself;
+        if(ss >= 3.5) omnimask = nearmask = sunmask = skymask = RAYMASK_ALL;
+    }
+    uint skipInst = ismodel ? hitInst : 0xFFFFFFFFu;
+
+    // Radius 0: baker unlimited omni. Always contribute (they lose nearest-N
+    // when they sit high / far). Packed first; 16 is a safety cap.
+    // flags >= 1.5: glow omnis (teleport / jumppad / screens / lava).
+    // Finite radius but always evaluated, or a nearby lamp would steal
+    // hwrtdlights. CPU already merged stacked pad ents and kept the nearest
+    // few. Teleport / lava shadow rays are world-only: walls block, the
+    // foliage any-hit path (the triforts 30 fps) does not run. WORLD|PORTAL
+    // lets the punched teleporter rim block without player / leaf silhouettes
+    // from the pad, so the lamp stays in the hole instead of flooding the
+    // floor in front of the ring.
+    int nunlim = 0, nglights = 0;
+    for(int i = 0; i < nlights; i++)
+    {
+        bool unlim = lights.l[i].radius <= 0.0;
+        bool glowL = lights.l[i].flags >= 1.5 && !unlim;
+        if(!unlim && !glowL) continue;
+        if(unlim && nunlim >= 16) continue;
+        if(glowL && nglights >= 96) continue;
+        uint gmask = omnimask;
+        if(glowL && lights.l[i].flags >= 2.5) gmask = RAYMASK_WORLD | RAYMASK_PORTAL;
+        addOmni(i, hit, n, sorigin, gmask, skipInst, ismodel, direct, dir, specMul, specAcc);
+        if(unlim) nunlim++;
+        else nglights++;
+    }
+
+    int besti[4] = int[](-1, -1, -1, -1);
+    float bestd[4] = float[](1e30, 1e30, 1e30, 1e30);
+    for(int i = 0; i < nlights; i++)
+    {
+        float radius = lights.l[i].radius;
+        if(radius <= 0.0 || lights.l[i].flags >= 1.5) continue;
+        vec3 L = lights.l[i].pos - hit;
+        float mag = length(L);
+        if(mag >= radius) continue;
+        vec3 ldir = mag > 1e-4 ? (L / mag) : n;
+        if(dot(n, ldir) <= 0.0) continue;
+        for(int k = 0; k < nuse; k++)
+        {
+            if(mag < bestd[k])
+            {
+                for(int j = nuse - 1; j > k; j--)
+                {
+                    bestd[j] = bestd[j - 1];
+                    besti[j] = besti[j - 1];
+                }
+                bestd[k] = mag;
+                besti[k] = i;
+                break;
+            }
+        }
+    }
+
+    for(int k = 0; k < nuse; k++)
+    {
+        int i = besti[k];
+        if(i < 0) continue;
+        addOmni(i, hit, n, sorigin, nearmask, skipInst, ismodel, direct, dir, specMul, specAcc);
+    }
+
+    if(lights.env.sunOn > 0.5)
+    {
+        vec3 sdir = lights.env.sunDir;
+        float slen = length(sdir);
+        if(slen > 1e-6)
+        {
+            sdir /= slen;
+            float ndotl = dot(n, sdir);
+            if(ismodel) ndotl = modelWrap(ndotl);
+            else ndotl = max(ndotl, 0.0);
+            if(ndotl > 0.0)
+            {
+                if(!occluded(sorigin, sdir, tmax, sunmask, skipInst))
+                {
+                    direct += lights.env.sunColor * ndotl;
+                    addSpec(sdir, n, dir, lights.env.sunColor, specMul, specAcc);
+                }
+            }
+        }
+    }
+
+    // Sky visibility stays out of `direct` until after the workgroup filter:
+    // the bake takes max(sky, sun + lamps), so the world path needs the
+    // hemisphere fraction on its own, and models fold it in after the filter
+    // so the studio fill sees the denoised term.
+    skyvis = 0.0;
+    if(lights.env.skyOn > 0.5)
+    {
+        int nsky = int(lights.env.skyRays);
+        nsky = clamp(nsky, 1, 4);
+        uint seed;
+        if(lights.env.skyStable > 0.5)
+            // Same pixel every frame. World-cell hashing painted a 4px mosaic
+            // on the close floor and made snow crawl worse under jitter.
+            seed = uint(p.x) + pcg(uint(p.y));
+        else seed = uint(p.x) + pcg(uint(p.y) + pcg(uint(pc.frame)));
+        float wsky = 1.0 / float(nsky);
+        float hitAcc = 0.0;
+        int hitN = 0;
+        for(int s = 0; s < 4; s++)
+        {
+            if(s >= nsky) break;
+            vec3 sdir = cosineHemi(n, seed);
+            if(nrdOn)
+            {
+                float t = occludedT(sorigin, sdir, tmax, skymask, skipInst);
+                if(t < 0.0)
+                    skyvis += wsky;
+                else
+                {
+                    hitAcc += t;
+                    hitN++;
+                }
+            }
+            else if(!occluded(sorigin, sdir, tmax, skymask, skipInst))
+                skyvis += wsky;
+        }
+        // Misses are open sky, not a 65504 hit. Averaging FP16_MAX with
+        // occluder T made every partially open pixel look infinitely far,
+        // so REBLUR used its full blur radius and snow bled into gravel.
+        if(nrdOn) skyHitDist = (hitN > 0) ? (hitAcc / float(hitN)) : 65504.0;
+    }
+
+    valid = true;
+    } while(false);
+
+    // Every invocation hits these barriers. The filter flag is uniform
+    // (packed in skyRays); off still participates so the tile stays in lockstep.
+    {
+        uint lx = gl_LocalInvocationID.x;
+        uint ly = gl_LocalInvocationID.y;
+        sh_sky[ly][lx] = valid ? skyvis : -1.0;
+        sh_n[ly][lx] = n;
+        sh_p[ly][lx] = hitp;
+        sh_mdl[ly][lx] = ismodel ? 1.0 : 0.0;
+        sh_hit[ly][lx] = (valid && nrdOn) ? skyHitDist : -1.0;
+        barrier();
+        // One 5x5. Every invocation hits every barrier. Four rays already
+        // carry the grain; a second 7x7 pass smeared mid/far lighting.
+        // Experimental spatial prefilter for NRD too (plane-tested). Not a
+        // REBLUR requirement: the pinned README targets 1 path/pixel. NRD's
+        // own 30px prepass has no plane test, so it stays off. Temporal
+        // hold/age stay off for world pixels that NRD will denoise.
+        if(filtered && valid)
+        {
+            float acc = 0.0;
+            float wsum = 0.0;
+            float w2sum = 0.0;
+            float hitAcc = 0.0;
+            float hitW = 0.0;
+            float selfm = ismodel ? 1.0 : 0.0;
+            for(int dy = -2; dy <= 2; dy++)
+            for(int dx = -2; dx <= 2; dx++)
+            {
+                int nx = int(lx) + dx;
+                int ny = int(ly) + dy;
+                if(nx < 0 || ny < 0 || nx >= 16 || ny >= 16) continue;
+                float sv = sh_sky[ny][nx];
+                if(sv < 0.0) continue;
+                if(abs(sh_mdl[ny][nx] - selfm) > 0.5) continue;
+                float nd = max(dot(sh_n[ny][nx], n), 0.0);
+                if(nd < 0.3) continue;
+                float plane = abs(dot(sh_p[ny][nx] - hitp, n));
+                if(plane > 16.0) continue;
+                float spat = exp(-0.5 * float(dx * dx + dy * dy) / 2.0);
+                float w = spat * nd * nd;
+                acc += sv * w;
+                wsum += w;
+                w2sum += w * w;
+                // HitT is a noisy guide if it stays the raw 4-ray mean while
+                // skyvis is the 5x5. Do not mix 65504 (open sky) into occluder T.
+                float ht = sh_hit[ny][nx];
+                if(ht > 0.0 && ht < 65000.0)
+                {
+                    hitAcc += ht * w;
+                    hitW += w;
+                }
+            }
+            if(wsum > 1e-5)
+            {
+                skyvis = acc / wsum;
+                skytaps = (wsum * wsum) / max(w2sum, 1e-8);
+            }
+            if(nrdOn && skyHitDist < 65000.0 && hitW > 1e-5)
+                skyHitDist = hitAcc / hitW;
+        }
+        barrier();
+    }
+
+    // Temporal reuse of skyvis, and the reason four rays are enough. The rays
+    // are only one of three multipliers on the effective sample count: four of
+    // them through the 5x5 is about 48 samples and leaves 0.036 on a fraction
+    // that hwrtworldgain then doubles, which is several 8-bit levels in shade
+    // and is redrawn every frame. N frames of history divide that by sqrt(N)
+    // and, just as important, hold the residual still instead of letting it
+    // crawl.
+    //
+    // This works where the composited-frame TAA does not because skyvis is
+    // geometry rather than shading: it does not depend on where the camera is,
+    // so a hit only has to be recognised as the same surface point to inherit
+    // its own average. No colour neighbourhood clamp is needed -- and a clamp
+    // is what stops looktaa converging, since it pins the result to the
+    // variance of the very neighbourhood that is noisy.
+    // World pixels that NRD denoises skip hold/age so REBLUR does not inherit
+    // a frozen skyage mean. Models keep the original temporal path.
+    if(lights.env.skyAlpha > 0.0 && (!nrdOn || ismodel))
+    {
+        // A miss, a magenta overflow or a pixel handed back to GL keeps no
+        // entry: -1 can never be mistaken for a visibility later.
+        vec4 store = vec4(0.0, 0.0, 0.0, -1.0);
+        float ageOut = 0.0;
+        if(valid)
+        {
+            float histv = -1.0;
+            float histAge = 0.0;
+            bool geomfail = false;
+            int flags = skyPackFlags();
+            bool skyhold = (flags & 1) != 0;
+            bool skybilin = (flags & 2) != 0;
+            bool skyage = (flags & 16) != 0;
+            if(lights.env.skyAlpha < 1.0 && lights.env.skyOn > 0.5)
+            {
+                vec4 clip = lights.env.prevViewProj * vec4(hitp, 1.0);
+                if(clip.w > 1e-6)
+                {
+                    vec2 puv = (clip.xy / clip.w) * 0.5 + 0.5;
+                    if(skybilin)
+                    {
+                        vec2 spos = puv * vec2(pc.size) - vec2(0.5);
+                        ivec2 p0 = ivec2(floor(spos));
+                        vec2 f = fract(spos);
+                        float accv = 0.0;
+                        float accAge = 0.0;
+                        float wsum = 0.0;
+                        for(int oy = 0; oy < 2; oy++)
+                        for(int ox = 0; ox < 2; ox++)
+                        {
+                            ivec2 tp = p0 + ivec2(ox, oy);
+                            if(any(lessThan(tp, ivec2(0))) || any(greaterThanEqual(tp, pc.size))) continue;
+                            vec4 h = imageLoad(skyhistin, tp);
+                            if(h.w < 0.0) continue;
+                            if(!skyHistGeomOk(h, hitp, n, hitdist)) { geomfail = true; continue; }
+                            float w = ((ox == 0) ? (1.0 - f.x) : f.x) * ((oy == 0) ? (1.0 - f.y) : f.y);
+                            accv += h.w * w;
+                            accAge += max(imageLoad(skyagein, tp).r, 0.0) * w;
+                            wsum += w;
+                        }
+                        if(wsum > 1e-5)
+                        {
+                            histv = accv / wsum;
+                            histAge = accAge / wsum;
+                        }
+                    }
+                    else
+                    {
+                        ivec2 pp = ivec2(floor(puv * vec2(pc.size)));
+                        if(all(greaterThanEqual(pp, ivec2(0))) && all(lessThan(pp, pc.size)))
+                        {
+                            vec4 h = imageLoad(skyhistin, pp);
+                            if(h.w < 0.0) {}
+                            else if(skyHistGeomOk(h, hitp, n, hitdist))
+                            {
+                                histv = h.w;
+                                histAge = max(imageLoad(skyagein, pp).r, 0.0);
+                            }
+                            else geomfail = true;
+                        }
+                    }
+                    if(histv >= 0.0)
+                    {
+                        float nmax = max(1.0 / max(lights.env.skyAlpha, 1.0 / 128.0), 1.0);
+                        float age = clamp(histAge, 1.0, nmax);
+                        float sigma = 0.5 * inversesqrt(max(skytaps * float(clamp(int(lights.env.skyRays), 1, 4)), 1.0));
+                        float d = abs(skyvis - histv);
+                        // Default mix 1/N never holds still: each frame injects
+                        // a fresh 4-ray sample. When the gap is just noise,
+                        // keep the running average. A moving occluder jumps
+                        // farther than 3.5 sigma and still resets. Age makes
+                        // a newly visible pixel mix 1/1, 1/2, ... instead of
+                        // 1/N from the first accepted tap, and hold waits
+                        // until that running mean is old enough to freeze.
+                        // Do not shrink age on the 1.5 sigma mix band: snow's
+                        // 4-ray noise sits there often enough that a *0.5 cut
+                        // keeps age around 3, hold never arms, and 1/age mix
+                        // crawls forever. The 1.0 sigma hold leak has the same
+                        // effect. Mix already tracks 1.5-3.5; 3.5 still resets.
+                        if(d >= 3.5 * sigma)
+                        {
+                            skyReuse = 2;
+                            age = 1.0;
+                        }
+                        else
+                        {
+                            age = min(age + 1.0, nmax);
+                            float alpha = skyage ? (1.0 / age) : lights.env.skyAlpha;
+                            bool holdready = !skyage || age >= min(8.0, nmax);
+                            if(skyhold && holdready && d < 1.5 * sigma)
+                            {
+                                skyvis = histv;
+                                skyReuse = 4;
+                            }
+                            else
+                            {
+                                skyvis = mix(histv, skyvis, alpha);
+                                skyReuse = 3;
+                            }
+                        }
+                        ageOut = age;
+                    }
+                    else if(geomfail) skyReuse = 1;
+                }
+            }
+            if(ageOut < 0.5) ageOut = 1.0;
+            skyAgeShown = ageOut;
+            store = vec4(hitp - pc.origin.xyz, skyvis);
+        }
+        if(live)
+        {
+            imageStore(skyhistout, p, store);
+            imageStore(skyageout, p, vec4(ageOut));
+        }
+    }
+
+    if(nrdOn)
+    {
+        if(live)
+        {
+            // Static world only. Models (and FULLBRIGHT studio/envmap) keep
+            // hitlight's original lighting: NRD MVs have camera motion, not
+            // skinned/object motion, and compose cannot reconstruct mdlenv.
+            bool nrdSurface = valid && !ismodel && !fullbright;
+            float range = max(lights.env.nrdHit.w, 1.0);
+            float viewZ = range * 2.0;
+            vec3 Npack = vec3(0.5, 0.5, 1.0);
+            vec4 mv = vec4(0.0);
+            vec4 packed = vec4(0.0);
+            float uvD3dY = (float(p.y) + 0.5) / float(pc.size.y);
+            float nrdNoV = 0.0;
+            float nrdAbsZ = 0.0;
+            float nrdProjErr = 0.0;
+            float nrdNz = 0.0;
+            if(nrdSurface)
+            {
+                vec4 hv = lights.env.nrdWorldToView * vec4(hitp, 1.0);
+                viewZ = hv.z;
+                // Roughness 1: spec magic curve ~1, so f = A + |viewZ|*B.
+                // skyHitDist is the mean of occluded hemisphere rays only
+                // (TerminateOnFirstHit), or 65504 on a total miss.
+                float f = max(lights.env.nrdHit.x + abs(viewZ) * lights.env.nrdHit.y, 1e-6);
+                float normH = clamp(skyHitDist / f, 1e-6, 1.0);
+                // REBLUR_FrontEnd_PackRadianceAndNormHitDist of grayscale:
+                // Y = skyvis, Co = Cg = 0. Integers 0..31 used to be stuffed
+                // into alpha via uintBitsToFloat; those denormals vanish in
+                // rgba16f. Flags go out as a numeric float instead.
+                packed = vec4(skyvis, 0.0, 0.0, normH);
+                float ax = max(abs(n.x), max(abs(n.y), abs(n.z)));
+                vec3 Np = n / max(ax, 1e-6);
+                Npack = Np * 0.5 + 0.5;
+                // Official 2.5D screen-space MV (NRDDescs / README):
+                // non-jittered, MV = previous - current, pixelUv in (0;1).
+                // Project the hit through BOTH unjittered view-to-clip
+                // matrices. Pixel-centre UV minus unjittered-prev(hitp) mixed
+                // jittered primaries (hwrtdlaajitterrt) into a still camera.
+                vec4 hvp = lights.env.nrdWorldToViewPrev * vec4(hitp, 1.0);
+                vec4 clipc = lights.env.nrdViewToClip * hv;
+                vec4 clipp = lights.env.nrdViewToClipPrev * hvp;
+                vec2 uvPix = (vec2(p) + 0.5) / vec2(pc.size);
+                vec2 uvCurr = uvPix;
+                vec2 uvPrev = uvPix;
+                if(abs(clipc.w) > 1e-6)
+                {
+                    vec2 ndc = clipc.xy / clipc.w;
+                    // Engine / MV: OpenGL window, v=0 at the bottom of the image.
+                    uvCurr = ndc * 0.5 + 0.5;
+                    // NRD GetScreenUv with STYLE_D3D / ML_WINDOW_ORIGIN_OGL=0
+                    // on the unflipped engine projection. nrd.cpp flips clip Y
+                    // so NRD's UV matches uvCurr. p2.a keeps the unflipped D3D
+                    // v for dbg7/8 (NRD does not read the lighting payloads).
+                    uvD3dY = ndc.y * -0.5 + 0.5;
+                }
+                if(abs(clipp.w) > 1e-6)
+                    uvPrev = clipp.xy / clipp.w * 0.5 + 0.5;
+                // IN_VIEWZ is signed OpenGL (negative in front). NRD does
+                // viewZ = abs(IN_VIEWZ) then viewZprev = viewZ + mv.z.
+                // mv.z must be abs(prev) - abs(curr), not signed prev - curr.
+                mv = vec4(uvPrev - uvCurr, abs(hvp.z) - abs(viewZ), 0.0);
+                vec3 toCam = pc.origin.xyz - hitp;
+                float toCamLen = length(toCam);
+                vec3 Vhit = toCamLen > 1e-6 ? (toCam / toCamLen) : vec3(0.0, 0.0, 1.0);
+                nrdNoV = abs(dot(n, Vhit));
+                nrdAbsZ = abs(viewZ);
+                nrdProjErr = length(uvCurr - uvPix) * float(pc.size.y);
+                nrdNz = abs(n.z);
+            }
+            imageStore(nrddiff, p, packed);
+            imageStore(nrdviewz, p, vec4(viewZ));
+            imageStore(nrdnormal, p, vec4(Npack, 1.0));
+            imageStore(nrdmv, p, mv);
+            uint flags = 0u;
+            if(nrdSurface) flags |= 1u;
+            if(ismodel) flags |= 2u;
+            if(fullbright) flags |= 4u;
+            if(hasmask) flags |= 8u;
+            if((pc.mode & MASK_MODELS) != 0) flags |= 16u;
+            imageStore(nrdp0, p, vec4(albedo, float(flags)));
+            imageStore(nrdp1, p, vec4(direct, gain));
+            int nrdDbg = (skyPackFlags() >> 6) & 15;
+            if(nrdDbg >= 9 && nrdSurface)
+                imageStore(nrdp2, p, vec4(nrdNoV, clamp(nrdAbsZ / 64.0, 0.0, 1.0), clamp(nrdProjErr / 8.0, 0.0, 1.0), nrdNz));
+            else
+                imageStore(nrdp2, p, vec4(specAcc, nrdSurface ? uvD3dY : maskrgb.g));
+            // p3.a is the noisy skyvis for diagnostics / compose-match.
+            // packHalf2x16(modelenv) into a float then rgba16f dropped 16 bits;
+            // models never read this payload (original lighting below).
+            imageStore(nrdp3, p, vec4(emit, nrdSurface ? skyvis : 0.0));
+            if(nrdSurface) return;
+        }
+        else return;
+    }
+
+    if(!valid)
+    {
+        if(live) imageStore(result, p, outc);
+        return;
+    }
+
+    // The player plate adds the sky on top of the lamps, which is what it was
+    // tuned with. Ordinary mapmodels must not: lightreaching() samples the
+    // same bake the world does, and finishlightmap writes max(skylight, sun +
+    // lamps), so on open ground the sky COMPETES with the lamps instead of
+    // stacking on them. Adding it there put a tree under a night sky above
+    // everything around it. Handled with the world's own combine below.
+    if(fullbright && lights.env.skyOn > 0.5) direct += lights.env.skyColor * skyvis;
+
+    // Menu studio key: same (0,-1,2) as 3dgui's preview lamp, expressed as
+    // -view + 2*up so a camera looking along +Y matches. No shadow ray — the
+    // preview has none. FULLBRIGHT only, so a crate in a dark box is unchanged.
+    // Fill only: in a lit courtyard the world lights already make volumes, and
+    // adding a full studio key flattened every plate to the old cap.
+    if(fullbright)
+    {
+        vec3 studiodir = normalize(-dir + vec3(0.0, 0.0, 2.0));
+        float ndotl = modelWrap(dot(n, studiodir));
+        if(ndotl > 0.0)
+        {
+            float fill = clamp(1.0 - dot(direct, vec3(1.0/3.0)), 0.0, 1.0);
+            direct += vec3(MODEL_STUDIO) * ndotl * fill;
+            addSpec(studiodir, n, dir, vec3(MODEL_STUDIO) * fill, specMul, specAcc);
+        }
+    }
+
+    // Ambient is the floor, everything above it is traced light: only the
+    // traced part takes GL's overbright, so shadows stay where they are and
+    // the lit-to-shadow ratio goes up rather than down.
+    //
+    // The world combines that light the way the bake next door does, or it
+    // drifts from GL exactly where both are brightest. finishlightmap
+    // (lightmap.cpp:891) writes max(skylight, sun + lamps), so an open sky
+    // competes with the sun instead of stacking on it, and the lumel is 8 bit
+    // so neither term passes 1 before colorparams doubles it. On authentic
+    // (sunlightscale 2) the sun alone is 1.32 and GL clips it to 1; summing
+    // both terms and skipping the clip made open ground twice the rasteriser.
+    vec3 lit;
+    if(fullbright) lit = base + direct * gain;
+    else
+    {
+        // Ordinary mapmodels take the same combine as the world, because they
+        // read the same bake in vanilla. Only the overbright differs: the
+        // world doubles its light here, the model path already carries its 2
+        // in the albedo, which is why gain is 1 for models. The sky is the one
+        // term that needs the model wrap applied by hand -- the lamps and the
+        // sun already got it from modelWrap when they were traced.
+        vec3 skycol = ismodel ? lights.env.skyColor * MODEL_AMBWRAP : lights.env.skyColor;
+        vec3 sunlamps = max(direct, base);
+        if((pc.mode & HDR) == 0) sunlamps = min(sunlamps, vec3(1.0));
+        vec3 sky = base + max(skycol - base, vec3(0.0)) * skyvis;
+        lit = base + (max(sunlamps, sky) - base) * gain;
+    }
+
+    // Visibility floor, not GL's 1.5 plate. Spec and envmap are added after
+    // so the floor cannot kill the metal. Same 1.5 cap as other models —
+    // a 0.85 cap turned a lit player into a saturated plate.
+    if(fullbright) lit = max(lit, vec3(lights.env.modelMin));
+    if(ismodel && ((pc.mode & HDR) == 0 || gSdrModel)) lit = min(lit, vec3(1.5));
+
+    vec3 shaded = albedo * lit + specAcc;
+    float vis = lights.env.diffVis;
+    if(!ismodel)
+    {
+        if(vis > 2.5) shaded = lodHeat(difflod);
+        else if(vis > 1.5) shaded = lit;
+        else if(vis > 0.5) shaded = albedo;
+        int skydbg = (skyPackFlags() >> 2) & 3;
+        if(skydbg > 2) shaded = vec3(clamp(skyAgeShown / 32.0, 0.0, 1.0));
+        else if(skydbg > 1) shaded = vec3(skyvis);
+        else if(skydbg > 0)
+        {
+            if(skyReuse == 4) shaded = vec3(0.05, 0.95, 0.10);
+            else if(skyReuse == 3) shaded = vec3(0.15, 0.45, 0.15);
+            else if(skyReuse == 2) shaded = vec3(0.95, 0.80, 0.05);
+            else if(skyReuse == 1) shaded = vec3(0.95, 0.12, 0.08);
+            else shaded = vec3(0.10, 0.25, 0.95);
+        }
+    }
+    if(ismodel)
+    {
+        // modelshader: `light` is the doubled diffuse, `glow = light * 0.5 *
+        // curglow`, then mix on masks.g. Glowing texels ignore the room light
+        // and show albedo * curglow (default 3), which is how a teleporter
+        // ring stays bright in a dark hall — and how a player's costume
+        // lights pop once the fullbright plate is gone.
+        if(hasmask)
+        {
+            vec3 glow = albedo * (0.5 * modelglow);
+            shaded = mix(shaded, glow, maskrgb.g);
+        }
+        // mdlenvmap after glow, same order as glsl.cfg modelshader.
+        if(fullbright)
+        {
+            float envmapmin = modelenv.x;
+            float envmapmax = modelenv.y;
+            if(envmapmax > 0.0)
+            {
+                vec3 camn = -dir;
+                float invfresnel = dot(camn, n);
+                vec3 rvec = 2.0 * invfresnel * n - camn;
+                vec3 reflectc = colorTex(texture(mdlenv, rvec).rgb);
+                float rmod = (envmapmin - envmapmax) * max(invfresnel, 0.0) + envmapmax;
+                float emask = hasmask ? maskrgb.b : 1.0;
+                shaded = mix(shaded, reflectc, clamp(rmod * emask, 0.0, 1.0));
+            }
+        }
+    }
+    else if(vis < 0.5) shaded += emit;
+
+    // Alpha 1 = world, 0.5 = shaded model, 0 = miss / unshaded. The composite
+    // mask keeps 0.5 even where GL also rasterised a model, and drops 1.0
+    // where GL drew something the TLAS never saw (CTF flags, alpha cloth).
+    // Only written when MASK_MODELS is on: without the mask shader a 0.5
+    // would blend the player at 50%.
+    float alpha = 1.0;
+    if(ismodel && (pc.mode & MASK_MODELS) != 0) alpha = 0.5;
+    if(gSdrModel)
+    {
+        vec3 e = clamp(shaded, 0.0, 1.0);
+        shaded = mix(e / 12.92, pow((e + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), e));
+    }
+    imageStore(result, p, vec4(shaded, alpha));
+}
+
+void main()
+{
+    shadePixel();
+    storeHdrProbe(ivec2(gl_GlobalInvocationID.xy));
+}

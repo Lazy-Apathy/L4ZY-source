@@ -1,0 +1,18 @@
+LIBRARY sauer_ngx
+EXPORTS
+    sauer_ngx_abi_version
+    sauer_ngx_probe_link
+    sauer_ngx_set_paths
+    sauer_ngx_set_log
+    sauer_ngx_query_instance_exts
+    sauer_ngx_query_device_exts
+    sauer_ngx_query_caps
+    sauer_ngx_init
+    sauer_ngx_create_dlaa
+    sauer_ngx_query_optimal
+    sauer_ngx_create_feature
+    sauer_ngx_evaluate
+    sauer_ngx_get_stats
+    sauer_ngx_release
+    sauer_ngx_shutdown
+    sauer_ngx_last_error

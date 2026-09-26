@@ -1,0 +1,36 @@
+# Build outputs
+bin/
+bin64/
+bin_unix/
+*.exe
+*.dll
+*.o
+*.a
+*.gch
+*.res
+*.obj
+*.lib
+*.pdb
+src/sauer_client
+src/sauer_server
+src/sauer_master
+
+# Third-party SDKs and toolchains (fetched by third_party/fetch-*.ps1)
+/third_party/*
+!/third_party/fetch-*.ps1
+
+# Release tool caches and output
+/distrib/.cache/
+/distrib/out/
+__pycache__/
+
+# Game data, profiles and logs (never committed)
+/packages/
+config.cfg
+saved.cfg
+restore.cfg
+servers.cfg
+*.log
+*.secrets
+*.secret
+.env
