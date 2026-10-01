@@ -2,6 +2,7 @@
 
 #include "engine.h"
 #include "SDL_mixer.h"
+#include "son3d.h"
 
 bool nosound = true;
 
@@ -51,6 +52,7 @@ struct soundchannel
     int radius, volume, pan, flags;
     bool dirty;
     int soundid;
+    son3dchan s3; // 3D sound (son3d.cpp), unused while son3d is off
 
     soundchannel(int id) : id(id) { reset(); }
 
@@ -69,6 +71,7 @@ struct soundchannel
         flags = 0;
         dirty = false;
         soundid = -1;
+        s3.reset();
     }
 };
 vector<soundchannel> channels;
@@ -106,7 +109,8 @@ void syncchannel(soundchannel &chan)
 {
     if(!chan.dirty) return;
     if(!Mix_FadingChannel(chan.id)) Mix_Volume(chan.id, chan.volume);
-    Mix_SetPanning(chan.id, 255-chan.pan, chan.pan);
+    if(chan.s3.mode || son3d_dsp_attached(chan.id)) son3dsync(chan.id, chan.s3, chan.pan);
+    else Mix_SetPanning(chan.id, 255-chan.pan, chan.pan);
     chan.dirty = false;
 }
 
@@ -232,6 +236,7 @@ void initsound()
 	Mix_AllocateChannels(soundchans);	
     maxchannels = soundchans;
     nosound = false;
+    son3daudioopen();
 }
 
 void musicdone()
@@ -584,6 +589,7 @@ void clear_sound()
     mapsounds.clear();
     samples.clear();
     Mix_CloseAudio();
+    son3daudioclose();
     resetchannels();
 }
 
@@ -663,9 +669,11 @@ bool updatechannel(soundchannel &chan)
     vol = (vol*clamp(mix, 0, 200))/100;
     vol = (vol*MIX_MAX_VOLUME*chan.slot->volume)/255/255;
     vol = min(vol, MIX_MAX_VOLUME);
-    if(vol == chan.volume && pan == chan.pan) return false;
+    int s3 = son3dupdate(chan.id, chan.s3, chan.hasloc() ? &chan.loc : NULL);
+    if(vol == chan.volume && pan == chan.pan && s3 == chan.s3.mode) return false;
     chan.volume = vol;
     chan.pan = pan;
+    chan.s3.mode = s3;
     chan.dirty = true;
     return true;
 }  
@@ -797,7 +805,9 @@ int playsound(int n, const vec *loc, extentity *ent, int flags, int loops, int f
     if(chanid < 0) return -1;
 
     soundchannel &chan = newchannel(chanid, &slot, loc, ent, flags, radius, n);
+    chan.s3.looping = loops != 0;
     updatechannel(chan);
+    if(chan.s3.mode) son3dstart(chanid, chan.s3);
     int playing = -1;
     if(fade) 
     {
@@ -854,6 +864,7 @@ void resetsound()
         }
         if(musicstream) musicstream->seek(0, SEEK_SET);
         Mix_CloseAudio();
+        son3daudioclose();
     }
     initsound();
     resetchannels();

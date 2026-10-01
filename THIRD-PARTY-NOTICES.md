@@ -6,7 +6,8 @@
 | ENet | `src/enet/` | MIT-style | (c) 2002-2020 Lee Salzman. See `src/enet/LICENSE`. |
 | SDL 2.0.12, SDL_image, SDL_mixer headers | `src/include/SDL*.h`, `begin_code.h`, `close_code.h` | zlib | As shipped in the Sauerbraten 2020 source. |
 | zlib 1.2.5 headers | `src/include/zlib.h`, `zconf.h` | zlib | (c) Jean-loup Gailly and Mark Adler. |
-| Vulkan headers (VK_HEADER_VERSION 313) | `src/include/vulkan/`, `src/include/vk_video/` | Apache-2.0 (C headers); Apache-2.0 OR MIT (`*.hpp`, `vulkan.cppm`) | (c) 2015-2025 The Khronos Group Inc. Unmodified. Apache-2.0 text: <https://www.apache.org/licenses/LICENSE-2.0>. |
+| Vulkan headers (VK_HEADER_VERSION 313) | `src/include/vulkan/`, `src/include/vk_video/` | Apache-2.0 (C headers); Apache-2.0 OR MIT (`*.hpp`, `vulkan.cppm`) | (c) 2015-2025 The Khronos Group Inc. Unmodified. Apache-2.0 text: `distrib/docs/licenses/steam-audio/LICENSE.txt` (same text). |
+| Steam Audio 4.8.1 headers | `src/include/phonon/` | Apache-2.0 | (c) 2017-2023 Valve Corporation. Unmodified. `phonon.dll` itself is downloaded by `third_party/fetch-steam-audio.ps1`. |
 
 Not included, fetched by scripts in `third_party/`:
 
@@ -16,3 +17,4 @@ Not included, fetched by scripts in `third_party/`:
 | NVIDIA NRD 4.17.3 | NVIDIA RTX SDKs licence | Same. |
 | Portable MSVC + Windows SDK, CMake | Microsoft / BSD-3-Clause | Toolchains, downloaded on demand. |
 
+The binaries an L4ZY installation ships (SDL DLLs and codecs, NVIDIA DLLs, Steam Audio, Python, llama.cpp, Visual C++ runtime) are listed with their licences in `distrib/docs/licenses/THIRD-PARTY-NOTICES.txt`.

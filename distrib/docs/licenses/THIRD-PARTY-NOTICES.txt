@@ -1,0 +1,68 @@
+L4ZY - third-party components and licences
+==============================================
+
+L4ZY is a modified client of Cube 2: Sauerbraten (2020 edition), with
+ray-traced lighting, NVIDIA DLSS/DLAA, NVIDIA NRD denoising, HDR output,
+optional 3D sound (Steam Audio) and a local chat translation service. This
+is not an official Sauerbraten release.
+
+Engine source code (modified)
+  Cube 2: Sauerbraten engine, zlib licence (c) 2001-2020 Wouter van
+  Oortmerssen, Lee Salzman, Mike Dysart, Robert Pointon, Quinton Reeves.
+  Altered version: see sauerbraten-source-license.txt. ENet: MIT-style licence.
+
+Game media (maps, textures, models, sounds in packages/)
+  Unmodified Sauerbraten media, each under its author's licence; see
+  packages/readme.txt, the readme files inside each package folder, and
+  sauerbraten-README.html (section "License"). Some media are licensed for
+  non-commercial use only (for example data/license.txt, CC BY-NC-SA).
+  L4ZY is distributed free of charge.
+
+Libraries next to the game (bin64/)
+  SDL2, SDL2_image, SDL2_mixer and their codecs: see bin64/LICENSE.*.txt and
+  bin64/README-SDL.txt.
+
+NVIDIA DLSS / NGX (bin64/ngx-*/nvngx_dlss.dll, gateway sauer_ngx.dll)
+NVIDIA NRD (bin64/nrd/sauer_nrd.dll)
+  Provided under the NVIDIA RTX SDKs licence (NVIDIA-RTX-SDKs-LICENSE.txt and
+  bin64/nrd/LICENSE-NRD.txt). As an end user you may not reverse engineer,
+  decompile or disassemble these NVIDIA components, remove their notices, or
+  redistribute them separately from L4ZY. NVIDIA does not sponsor or
+  endorse L4ZY.
+
+Steam Audio 4.8.1 (bin64/phonon.dll), used for the optional 3D sound
+  Copyright (c) Valve Corporation. Apache License 2.0, see
+  licenses/steam-audio/LICENSE.txt. Unmodified binary from the official
+  release https://github.com/ValveSoftware/steam-audio/releases/tag/v4.8.1
+  (steamaudio_4.8.1.zip, SHA-256 4a0aa5ec1176f38f0b0993a37c2259d9e86f27e2
+  2d5e24f83ec4c3cb9a1d5449). It is loaded only when 3D sound is switched on.
+  Valve does not sponsor or endorse L4ZY.
+  phonon.dll contains third-party components under their own licences,
+  reproduced in licenses/steam-audio/THIRDPARTY.md: Intel Integrated
+  Performance Primitives (Intel Simplified Software License: binary
+  redistribution without modification; no reverse engineering, decompilation
+  or disassembly), FFTS (BSD 3-clause), PFFFT (BSD-style), MySOFA
+  (BSD 3-clause), Intel Embree (Apache 2.0), AMD RadeonRays (MIT),
+  AMD TrueAudio Next (MIT), CIPIC HRTF Database (Copyright (c) 2001 The
+  Regents of the University of California, All Rights Reserved) and Google
+  Spherical Harmonics Library (Apache 2.0).
+
+Python 3.14.7 embeddable package (runtime/python)
+  Python Software Foundation licence, see runtime/python/LICENSE.txt
+  (includes OpenSSL, libffi, SQLite, expat, zlib notices).
+
+llama.cpp b10621, Vulkan build (runtime/llama)
+  MIT licence, see runtime/llama/LICENSE-llama.cpp.txt.
+  LLVM OpenMP runtime (libomp.dll): see runtime/llama/LICENSE-LLVM-OpenMP.
+
+Microsoft Visual C++ runtime 14.52 (runtime/llama/msvcp140.dll,
+vcruntime140.dll, vcruntime140_1.dll)
+  Redistributable files from the Microsoft Visual Studio "CRT.Redist" package,
+  distributed under the Visual Studio licence terms for Distributable Code.
+
+Translation models (not included in the installer)
+  Downloaded on request from the official Qwen repositories on Hugging Face
+  (Qwen3-4B / 8B / 14B GGUF), Apache License 2.0, (c) Alibaba Cloud / Qwen team.
+
+Installer
+  Built with NSIS (zlib licence).

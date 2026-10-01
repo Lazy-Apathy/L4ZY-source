@@ -1,0 +1,5 @@
+{
+ "_comment": "Adresse publique des canaux L4ZY (depot GitHub public Lazy-Apathy/L4ZY). Le pointeur latest.json est un fichier du depot ; manifestes, composants et installateurs sont des fichiers de 'releases'.",
+ "stable": "https://raw.githubusercontent.com/Lazy-Apathy/L4ZY/main/channels/stable/latest.json",
+ "test": "https://raw.githubusercontent.com/Lazy-Apathy/L4ZY/main/channels/test/latest.json"
+}

@@ -46,6 +46,15 @@
 //             flips and the 5x5 about 12 usable taps; only the frame axis has
 //             the headroom left to put the residual under one 8-bit level
 //             after hwrtworldgain has doubled it.
+//             hwrtskybluenoise (default on) draws those rays from a 128x128
+//             blue-noise tile instead of the pcg hash for the world pixels NRD
+//             denoises: neighbours then fall on both sides of an occluder's edge
+//             in the right proportion, so the 5x5 hands REBLUR less grain. Same
+//             ray count, same estimator, same converged picture. The skyage path
+//             (Sauer filter, and models) keeps the hash: its hold re-reads a
+//             frozen history that drifts, the tile borders of the 5x5 stood out
+//             more against a cleaner interior, and a frozen residual repeated
+//             with the 128-pixel tile.
 //             World hits skip SELF unless hwrtshadowself is 2: a body that
 //             close otherwise eats the whole hemisphere and looks like a 3D
 //             pit. Other players (MODEL) still occlude sky. Lamps still see
@@ -186,6 +195,12 @@ layout(binding = 21, rgba16f) uniform writeonly image2D nrdp0;
 layout(binding = 22, rgba16f) uniform writeonly image2D nrdp1;
 layout(binding = 23, rgba16f) uniform writeonly image2D nrdp2;
 layout(binding = 24, rgba16f) uniform writeonly image2D nrdp3;
+// Sky-ray blue noise (hwrtskybluenoise): 128x128 words from
+// tools/generate-hwrt-bluenoise.py, two independent void-and-cluster masks,
+// u1 in the low 16 bits and u2 in the high 16. Uploaded once; only read when
+// bit 13 of the sky flags says the tile is live.
+layout(std430, binding = 25) readonly buffer SkyBlueNoise { uint v[]; } skybn;
+const uint SKYBN_SIZE = 128u;
 
 layout(push_constant) uniform Params
 {
@@ -289,6 +304,40 @@ vec3 cosineHemi(vec3 n, inout uint seed)
     float phi = 6.28318530718 * u2;
     vec3 hemi = vec3(r * cos(phi), r * sin(phi), sqrt(max(1.0 - u1, 0.0)));
     return normalize(t * hemi.x + b * hemi.y + n * hemi.z);
+}
+
+// cosineHemi's mapping for a sample that did not come from the pcg chain.
+vec3 cosineHemiU(vec3 n, float u1, float u2)
+{
+    vec3 up = abs(n.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+    vec3 t = normalize(cross(up, n));
+    vec3 b = cross(n, t);
+    float r = sqrt(u1);
+    float phi = 6.28318530718 * u2;
+    vec3 hemi = vec3(r * cos(phi), r * sin(phi), sqrt(max(1.0 - u1, 0.0)));
+    return normalize(t * hemi.x + b * hemi.y + n * hemi.z);
+}
+
+// The pixel's blue-noise sample as 0.32 fixed point, (value + 0.5) / 65536.
+// Each frame adds the same R2 step (Roberts' plastic-number sequence) to every
+// pixel: a shift mod 1 keeps the tile's spatial layout, while each pixel walks
+// a low-discrepancy sequence over time, so its running mean converges to the
+// same value the pcg rays do. The stable mode keeps frame 0.
+uvec2 skyBlueNoiseBase(ivec2 p, bool stable)
+{
+    uint w = skybn.v[(uint(p.y) % SKYBN_SIZE) * SKYBN_SIZE + (uint(p.x) % SKYBN_SIZE)];
+    uvec2 q = uvec2((w & 0xFFFFu) << 16, w & 0xFFFF0000u) + uvec2(0x8000u);
+    if(!stable) q += uint(pc.frame) * uvec2(3242174889u, 2447445414u);
+    return q;
+}
+
+// Ray s of a pixel: the base shifted by s * (1/2, 1/4), a 4-point lattice, so
+// the pixel's own rays already cover four azimuths and both halves of the
+// radius instead of four independent draws.
+vec3 skyBlueNoiseDir(vec3 n, uvec2 base, int s)
+{
+    uvec2 q = base + uint(s) * uvec2(0x80000000u, 0x40000000u);
+    return cosineHemiU(n, float(q.x) * (1.0 / 4294967296.0), float(q.y) * (1.0 / 4294967296.0));
 }
 
 // Alpha, water, sky and clip surfaces of the WORLD stay out of the BLAS, so
@@ -1147,13 +1196,16 @@ void shadePixel()
             // on the close floor and made snow crawl worse under jitter.
             seed = uint(p.x) + pcg(uint(p.y));
         else seed = uint(p.x) + pcg(uint(p.y) + pcg(uint(pc.frame)));
+        bool bluenoise = (skyPackFlags() & 8192) != 0 && nrdOn && !ismodel;
+        uvec2 bnbase = uvec2(0u);
+        if(bluenoise) bnbase = skyBlueNoiseBase(p, lights.env.skyStable > 0.5);
         float wsky = 1.0 / float(nsky);
         float hitAcc = 0.0;
         int hitN = 0;
         for(int s = 0; s < 4; s++)
         {
             if(s >= nsky) break;
-            vec3 sdir = cosineHemi(n, seed);
+            vec3 sdir = bluenoise ? skyBlueNoiseDir(n, bnbase, s) : cosineHemi(n, seed);
             if(nrdOn)
             {
                 float t = occludedT(sorigin, sdir, tmax, skymask, skipInst);

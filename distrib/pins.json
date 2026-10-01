@@ -1,0 +1,45 @@
+{
+ "_comment": "Composants tiers epingles. Changer une version = nouvelle URL + nouvelle empreinte, puis nouvelle version L4ZY.",
+ "python": {
+  "about": "Python 3.14.7 embeddable package, Windows x64, python.org (licence PSF dans l'archive)",
+  "url": "https://www.python.org/ftp/python/3.14.7/python-3.14.7-embed-amd64.zip",
+  "file": "python-3.14.7-embed-amd64.zip",
+  "sha256": "d297e5ff019966817ad8502465176139f2d3d840fa4ed84b13bed399a6ab1f15"
+ },
+ "llama": {
+  "about": "llama.cpp b10621, build officielle Windows Vulkan x64 (licence MIT). Seuls les fichiers charges par llama-server sont gardes.",
+  "url": "https://github.com/ggml-org/llama.cpp/releases/download/b10621/llama-b10621-bin-win-vulkan-x64.zip",
+  "file": "llama-b10621-bin-win-vulkan-x64.zip",
+  "sha256": "2672d85bf87c8280d94dee01eb6a86280046878f70a07d786a93637fa9081163",
+  "keep": [
+   "llama-server.exe", "llama-server-impl.dll", "llama-common.dll", "llama.dll", "mtmd.dll",
+   "ggml.dll", "ggml-base.dll", "ggml-vulkan.dll", "libomp.dll", "LICENSE-LLVM-OpenMP",
+   "ggml-cpu-x64.dll", "ggml-cpu-sse42.dll", "ggml-cpu-sandybridge.dll", "ggml-cpu-ivybridge.dll",
+   "ggml-cpu-piledriver.dll", "ggml-cpu-haswell.dll", "ggml-cpu-skylakex.dll", "ggml-cpu-cannonlake.dll",
+   "ggml-cpu-cascadelake.dll", "ggml-cpu-cooperlake.dll", "ggml-cpu-icelake.dll", "ggml-cpu-alderlake.dll",
+   "ggml-cpu-sapphirerapids.dll", "ggml-cpu-zen4.dll"
+  ]
+ },
+ "llama_license": {
+  "about": "Licence MIT de llama.cpp au meme tag",
+  "url": "https://raw.githubusercontent.com/ggml-org/llama.cpp/b10621/LICENSE",
+  "file": "llama.cpp-LICENSE-b10621.txt",
+  "sha256": "94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d"
+ },
+ "vcredist": {
+  "about": "Runtime Visual C++ 14.52 (MSVCP140...), paquet officiel Microsoft CRT.Redist du canal Visual Studio 2026. Fichiers redistribuables app-local, requis par llama.cpp sur un Windows sans le Redistributable.",
+  "channel": "https://aka.ms/vs/18/stable/channel",
+  "package": "Microsoft.VC.14.52.CRT.Redist.X64.base",
+  "files": {
+   "msvcp140.dll": "4a25710800a9e86464369d52e6e0e044533fc0dd12e3e1c35283f095cf9a65b1",
+   "vcruntime140.dll": "aabdd441c96b7928184ab5623245624be576abce1a2c35a7d96dcedbcffd33f3",
+   "vcruntime140_1.dll": "f8b039fdb1a0249a9db7f399d1730bf94a97836e37035d615070c91c6f9e4577"
+  }
+ },
+ "nsis": {
+  "about": "NSIS 3.11 (zip portable, outil de construction de l'installateur ; licence zlib)",
+  "url": "https://downloads.sourceforge.net/project/nsis/NSIS%203/3.11/nsis-3.11.zip",
+  "file": "nsis-3.11.zip",
+  "sha256": "c7d27f780ddb6cffb4730138cd1591e841f4b7edb155856901cdf5f214394fa1"
+ }
+}

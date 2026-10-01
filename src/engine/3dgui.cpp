@@ -17,6 +17,8 @@ enum {FIELDCOMMIT, FIELDABORT, FIELDEDIT, FIELDSHOW, FIELDKEY};
 
 static int fieldmode = FIELDSHOW; 
 static bool fieldsactive = false;
+bool guifieldboxed = false; // set by guiinputfield around its field
+int guipanelspare = 0; // free height left in the last laid out menu panel (negative = it scrolls)
 
 static bool hascursor;
 static float cursorx = 0.5f, cursory = 0.5f;
@@ -144,8 +146,11 @@ struct gui : g3d_gui
         hoverfill_(textx - INSERT, cury, max(textw, 8) + INSERT*2, pressed);
     }
 
-    int button_(const char *text, int color, const char *icon, bool clickable, bool center, bool underline = false)
+    // disabled: takes a clickable button's room (rows do not jump when an option
+    // becomes available) but draws grey, no hover, and never reports a click
+    int button_(const char *text, int color, const char *icon, bool clickable, bool center, bool underline = false, bool disabled = false)
     {
+        if(disabled) color = 0x707070;
         const int padding = 18;
         int w = 0;
         if(icon) w += ICON_SIZE;
@@ -155,7 +160,7 @@ struct gui : g3d_gui
         if(visible())
         {
             int hitw = (clickable && isvertical()) ? max(w, xsize) : w;
-            bool hit = ishit(hitw, FONTH);
+            bool hit = !disabled && ishit(hitw, FONTH);
             if(hit && clickable) color = 0xFF7A18;
             int x = curx;
             bool centertext = center || (bannercenter && isvertical() && !icon);
@@ -182,7 +187,7 @@ struct gui : g3d_gui
                 {
                     const char *ext = strrchr(icon, '.');
                     defformatstring(tname, "packages/icons/%s%s", icon, ext ? "" : ".jpg");
-                    icon_(textureload(tname, 3), false, x, cury, ICON_SIZE, clickable && hit);
+                    icon_(textureload(tname, 3), false, x, cury, ICON_SIZE, clickable && hit, NULL, disabled);
                 }
                 x += ICON_SIZE;
             }
@@ -195,7 +200,8 @@ struct gui : g3d_gui
             if(clickable) extra = (bannercenter || bannerlayout) ? FONTH/4 : FONTH/6;
             else if(underline) extra = FONTH/8;
         }
-        return layout(w, FONTH + extra);
+        int flags = layout(w, FONTH + extra);
+        return disabled ? flags&G3D_ROLLOVER : flags;
     }
 
     bool allowautotab(bool on)
@@ -388,6 +394,7 @@ struct gui : g3d_gui
     int text  (const char *text, int color, const char *icon) { autotab(); return button_(text, color, icon, false, false); }
     int button(const char *text, int color, const char *icon) { autotab(); return button_(text, color, icon, true, false); }
     int title (const char *text, int color, const char *icon) { autotab(); return button_(text, color, icon, false, false, true); }
+    int disabledbutton(const char *text, const char *icon) { autotab(); return button_(text, 0x707070, icon, true, false, false, true); }
 
     void separator() { autotab(); line_(FONTH/3); }
     void progress(float percent) { autotab(); line_((FONTH*4)/5, percent); }
@@ -918,6 +925,7 @@ struct gui : g3d_gui
             {
                 int temp;
                 text_bounds(e->lines[0].text, temp, e->pixelheight, e->pixelwidth); //only single line editors can have variable height
+                if(guifieldboxed) e->pixelheight = max(e->pixelheight, FONTH*2);
             }
             else 
                 e->pixelheight = FONTH*max(height, 1); 
@@ -928,6 +936,8 @@ struct gui : g3d_gui
         bool wasvertical = isvertical();
         if(wasvertical && e->maxy != 1) pushlist();
         
+        // 2D menus underline a one-line field; a boxed field (guiinputfield) keeps its frame
+        bool underline = gui2d && e->maxy==1 && !guifieldboxed;
         char *result = NULL;
         if(visible() && !layoutpass)
         {
@@ -947,7 +957,7 @@ struct gui : g3d_gui
                 } 
             }
             bool editing = (fieldmode != FIELDSHOW) && (e==currentfocus());
-            if(hit && editing && (mousebuttons&G3D_PRESSED)!=0 && fieldtype==FIELDEDIT) e->hit(int(floor(hx-((gui2d && e->maxy==1) ? curx : curx+FONTW/2))), int(floor(hy-cury)), (mousebuttons&G3D_DRAGGED)!=0); //mouse request position
+            if(hit && editing && (mousebuttons&G3D_PRESSED)!=0 && fieldtype==FIELDEDIT) e->hit(int(floor(hx-((underline) ? curx : curx+FONTW/2))), int(floor(hy-cury)), (mousebuttons&G3D_DRAGGED)!=0); //mouse request position
             if(editing && ((fieldmode==FIELDCOMMIT) || (fieldmode==FIELDABORT) || !hit)) // commit field if user pressed enter or wandered out of focus 
             {
                 if(fieldmode==FIELDCOMMIT || (fieldmode!=FIELDABORT && !hit)) result = e->currentline().text;
@@ -956,9 +966,9 @@ struct gui : g3d_gui
             } 
             else fieldsactive = true;
             
-            int drawx = (gui2d && e->maxy==1) ? curx : curx+FONTW/2;
+            int drawx = (underline) ? curx : curx+FONTW/2;
             int drawcolor = color;
-            if(gui2d && e->maxy==1 && hit)
+            if(underline && hit)
             {
                 int tw = text_width(e->currentline().text);
                 hoverfilltext_(drawx, tw, editing);
@@ -966,13 +976,13 @@ struct gui : g3d_gui
             }
             e->draw(drawx, cury, drawcolor, hit && editing);
             
-            if(!gui2d || e->maxy!=1 || editing)
+            if(!underline || editing)
             {
                 hudnotextureshader->set();
                 glDisable(GL_BLEND);
                 if(editing) gle::colorub(255, 122, 24, 220);
                 else gle::colorub(color>>16, (color>>8)&0xFF, color&0xFF);
-                if(gui2d && e->maxy==1)
+                if(underline)
                 {
                     int tw = text_width(e->currentline().text);
                     rect_(drawx - INSERT, cury+h-2, max(tw, 8) + INSERT*2, 2);
@@ -1056,13 +1066,14 @@ struct gui : g3d_gui
         hudshader->set();
     }
 
-    void icon_(Texture *t, bool overlaid, int x, int y, int size, bool hit, const char *title = NULL)
+    void icon_(Texture *t, bool overlaid, int x, int y, int size, bool hit, const char *title = NULL, bool dim = false)
     {
         float scale = float(size)/max(t->xs, t->ys); //scale and preserve aspect ratio
         float xs = t->xs*scale, ys = t->ys*scale;
         x += int((size-xs)/2);
         y += int((size-ys)/2);
-        const vec &color = hit ? vec(1, 0.55f, 0.18f) : (overlaid ? vec(1, 1, 1) : light);
+        vec color = hit ? vec(1, 0.55f, 0.18f) : (overlaid ? vec(1, 1, 1) : light);
+        if(dim) color.mul(0.4f);
         glBindTexture(GL_TEXTURE_2D, t->id);
         if(hit && actionon)
         {
@@ -1377,6 +1388,7 @@ struct gui : g3d_gui
         visih -= visih % FONTH;
         bodyh = ysize;
         fixedpanel = true;
+        guipanelspare = visih - ysize;
         int smax = max(0, ysize - visih);
         if(bindscrollmax) *bindscrollmax = smax;
         scrolloff = 0;
@@ -2033,3 +2045,10 @@ void consolebox(int x1, int y1, int x2, int y2)
     pophudmatrix();
 }
 
+
+// live text of a gui field (while typing, before Enter commits it)
+ICOMMAND(guifieldtext, "s", (char *name),
+{
+    loopv(editors) if(!strcmp(editors[i]->name, name)) { result(editors[i]->lines[0].text); return; }
+    result(getalias(name));
+});

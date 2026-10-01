@@ -98,11 +98,21 @@ bool chatlogfind(int num, int &uid, int &type)
     return true;
 }
 
+// RT/HDR/NGX diagnostics go to log.txt only; rtconsole 1 shows them again.
+VARP(rtconsole, 0, 0, 1);
+
+static bool rtdiagline(const char *s)
+{
+    static const char * const prefixes[] = { "hwrt", "hdr", "ngx", "NGX", "nrd", "NRD", "SDR - sortie HDR" };
+    loopi(sizeof(prefixes)/sizeof(prefixes[0])) if(!strncmp(s, prefixes[i], strlen(prefixes[i]))) return true;
+    return false;
+}
+
 void conoutfv(int type, const char *fmt, va_list args)
 {
     static char buf[CONSTRLEN];
     vformatstring(buf, fmt, args, sizeof(buf));
-    conline(type, buf);
+    if(rtconsole || (type&CON_ERROR) || !rtdiagline(buf)) conline(type, buf);
     logoutf("%s", buf);
 }
 
@@ -162,7 +172,7 @@ ICOMMAND(togglechat, "", (), { fullchat ^= 1; if(fullchat) { fullconsole = 0; ga
 
 bool overlaycursor()
 {
-    return ((fullchat || fullconsole) && commandmillis < 0) || game::demobarcursor();
+    return ((fullchat || fullconsole) && commandmillis < 0) || game::demobarcursor() || hudeditactive();
 }
 
 #ifdef __APPLE__
@@ -552,9 +562,24 @@ int renderconsole(int w, int h, int abovehud)                   // render buffer
     
     if(fullconsole) consolebox(conpad, conpad, conwidth+conpad+2*conoff, conheight+conpad+2*conoff);
     
+    // the normal console and the chat can be moved (HUD editor); the full
+    // overlays keep their place (they are selected with the mouse)
+    if(!fullconsole) hudbegin("console", "Console messages");
     int y = drawconlines(conskip, fullconsole ? 0 : confade, conwidth, conheight, conpad+conoff, fullconsole ? fullconfilter : confilter, 0, 1, fullconsole!=0);
+    if(!fullconsole)
+    {
+        hudrect(conpad+conoff, conpad+conoff, conwidth, hudeditactive() ? conheight : y - (conpad+conoff));
+        hudend();
+    }
     if(!fullconsole && (miniconsize && miniconwidth))
-        drawconlines(miniconskip, miniconfade, (miniconwidth*(w - 2*(conpad + conoff)))/100, min(FONTH*miniconsize, abovehud - y), conpad+conoff, miniconfilter, abovehud, -1);
+    {
+        int mw = (miniconwidth*(w - 2*(conpad + conoff)))/100, mh = min(FONTH*miniconsize, abovehud - y);
+        hudbegin("chat", "Chat");
+        int top = drawconlines(miniconskip, miniconfade, mw, mh, conpad+conoff, miniconfilter, abovehud, -1);
+        if(hudeditactive()) top = abovehud - mh;
+        hudrect(conpad+conoff, top, mw, abovehud - top);
+        hudend();
+    }
     return fullconsole ? conheight + 2*(conpad + conoff) : y;
 }
 
@@ -977,7 +1002,9 @@ void processkey(int code, bool isdown, int modstate)
     if(haskey && haskey->pressed) execbind(*haskey, isdown); // allow pressed keys to release
     else if(!g3d_key(code, isdown)) // 3D GUI mouse button intercept   
     {
-        if(overlaykey(code, isdown)) {}
+        extern bool hudeditkey(int code, bool isdown);
+        if(hudeditkey(code, isdown)) {}
+        else if(overlaykey(code, isdown)) {}
         else if(game::demobarkey(code, isdown)) {}
         else if(chatkey(code, isdown)) {}
         else if(game::killlogkey(code, isdown)) {}

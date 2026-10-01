@@ -356,6 +356,7 @@ namespace game
             extern int hitsound;
             if(hitsound && lasthit != lastmillis) playsound(S_HIT);
             lasthit = lastmillis;
+            lasthitcn = d->type==ENT_PLAYER ? ((fpsent *)d)->clientnum : -1;
         }
 
         if(d->type==ENT_INANIMATE)

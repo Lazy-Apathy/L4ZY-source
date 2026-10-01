@@ -60,6 +60,12 @@ VAR(hwrtskyage, 0, 1, 1);
 // 0 play. 1 reuse heatmap (hold green, mix dark-green, reset yellow, geom red,
 // miss blue). 2 skyvis grayscale. 3 age/32 grayscale. Lab vis only.
 VAR(hwrtskyvisdbg, 0, 0, 3);
+// Sky rays from the blue-noise tile (trace.cpp, binding 25) instead of the pcg
+// hash, for the world pixels NRD denoises. Same ray count and estimator; less
+// grain into REBLUR. The skyage path (Sauer filter, models) keeps the hash.
+// Default on. A change reseeds the history so neither mode inherits the
+// other's running average. 0 is the old hash everywhere, kept for A/B.
+VARF(hwrtskybluenoise, 0, 1, 1, hwrtinvalidateskyhistory());
 // Retry four subpixel directions when the pixel-centre world hit is hiddenbygl.
 // Default on. Console witness only; not persisted, no menu or key.
 VAR(hwrthiddenretry, 0, 1, 1);
@@ -253,9 +259,15 @@ void hwrtnotelightsrebuild()
     hwrtinvalidateskyhistory();
 }
 
-static bool hwrtnearvanillateleport(const vec &o, float dist)
+// Vanilla teleporter positions, gathered once per light upload. The finite-light
+// loop used to rescan every entity for each light (~8 ms a frame on triforts).
+// Same entities, same order, same float distance test; nothing kept across frames.
+static vector<vec> vanillateleports;
+
+static void gathervanillateleports()
 {
-    if(!hwrtteleportlight) return false;
+    vanillateleports.setsize(0);
+    if(!hwrtteleportlight) return;
     const vector<extentity *> &ents = entities::getents();
     loopv(ents)
     {
@@ -264,8 +276,13 @@ static bool hwrtnearvanillateleport(const vec &o, float dist)
         if(!nm || strcmp(nm, "teleport")) continue;
         const char *mdl = entities::entmodel(e);
         if(!mdl || strcmp(mdl, "teleporter")) continue;
-        if(e.o.dist(o) < dist) return true;
+        vanillateleports.add(e.o);
     }
+}
+
+static bool hwrtnearvanillateleport(const vec &o, float dist)
+{
+    loopv(vanillateleports) if(vanillateleports[i].dist(o) < dist) return true;
     return false;
 }
 
@@ -509,7 +526,7 @@ void hwrtupdatelights()
     packed.env.diffFilter = hwrtdiffmip ? 1.0f : 0.0f;
     packed.env.diffVis = float(hwrtdiffvis);
     packed.env.skyStable = hwrtskystable ? 1.0f : 0.0f;
-        packed.env.diffPad1 = float(hwrtskyhold + (hwrtskyhistfilter ? 2 : 0) + ((hwrtskyvisdbg & 3) << 2) + (hwrtskyage ? 16 : 0) + (hwrtnrdsession() ? 32 : 0) + ((hwrtnrddbg & 15) << 6) + (hwrthiddenretry ? 4096 : 0));
+        packed.env.diffPad1 = float(hwrtskyhold + (hwrtskyhistfilter ? 2 : 0) + ((hwrtskyvisdbg & 3) << 2) + (hwrtskyage ? 16 : 0) + (hwrtnrdsession() ? 32 : 0) + ((hwrtnrddbg & 15) << 6) + (hwrthiddenretry ? 4096 : 0) + (hwrtskybluenoise && hwrtskybluenoiseready() ? 8192 : 0));
     {
         matrix4 w2v, v2c;
         hwrtnrdcameramats(w2v, v2c);
@@ -676,6 +693,7 @@ void hwrtupdatelights()
         nglow++;
     }
 
+    gathervanillateleports();
     loopv(ents)
     {
         extentity &e = *ents[i];

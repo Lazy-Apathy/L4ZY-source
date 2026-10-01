@@ -60,6 +60,11 @@ namespace demohd
     static vector<hdsample> track, live, pending;
     static int play_cn = -1, play_idx = 0, live_idx = 0, nplaycns = 0;
     static uchar playhas[256];
+    // exact aim: samples the player sent himself (HD_OWN): the recorder's own
+    // track, or every modded client in a server demo. Other tracks of a local
+    // recording are only the network aim seen by the recorder.
+    static uchar playexact[256];
+    static int nexactcns = 0;
     static bool play_loaded = false, autofollowdone = false, hdzoomframe = false;
     static float hdzoomval = 0;
     static int scanmillis = 0, dmolenms = 0;
@@ -572,8 +577,9 @@ namespace demohd
         play_loaded = false;
         play_cn = -1;
         play_idx = 0;
-        nplaycns = 0;
+        nplaycns = nexactcns = 0;
         memset(playhas, 0, sizeof(playhas));
+        memset(playexact, 0, sizeof(playexact));
         autofollowdone = false;
         string hdpath;
         sidecarname(hdpath, dmopath, sizeof(hdpath));
@@ -618,13 +624,15 @@ namespace demohd
         delete f;
         play_loaded = track.length() > 0;
         play_idx = 0;
-        nplaycns = 0;
+        nplaycns = nexactcns = 0;
         memset(playhas, 0, sizeof(playhas));
+        memset(playexact, 0, sizeof(playexact));
         loopv(track)
         {
             int c = track[i].cn;
             if(c < 0 || c > 255) continue;
             if(!playhas[c]) { playhas[c] = 1; nplaycns++; }
+            if((track[i].flags & HD_OWN) && !playexact[c]) { playexact[c] = 1; nexactcns++; }
         }
         if(play_loaded) conoutf(nplaycns > 1 ? "HD aim tracks loaded (%d players)" : "HD aim track loaded", nplaycns);
         else conoutf(CON_WARN, "HD aim file is empty");
@@ -848,8 +856,9 @@ namespace demohd
         track.setsize(0);
         play_loaded = false;
         play_cn = -1;
-        nplaycns = 0;
+        nplaycns = nexactcns = 0;
         memset(playhas, 0, sizeof(playhas));
+        memset(playexact, 0, sizeof(playexact));
         play_idx = 0;
         dmolenms = 0;
         dbdrag = false;
@@ -909,6 +918,15 @@ namespace demohd
         if(cn < 0) return play_cn >= 0;
         if(cn > 255) return false;
         return playhas[cn] != 0;
+    }
+
+    // exact aim known for this player: HD track in the demo, or live HD
+    // stream from a custom server while spectating
+    bool hdaim(fpsent *d)
+    {
+        if(!d || d->clientnum < 0) return false;
+        if(game::demoplayback) return play_loaded && d->clientnum <= 255 && playexact[d->clientnum];
+        return game::clanmodactive() && game::player1 && game::player1->state==CS_SPECTATOR && haslive(d->clientnum);
     }
 
     bool applycamera(fpsent *target)
@@ -991,7 +1009,8 @@ namespace demohd
             }
             bool hdnow = demohdplay && f && hastrack(f->clientnum);
             if(!demohdplay) copystring(s, "Playback: vanilla  (HD aim is off)");
-            else if(hdnow) copystring(s, nplaycns > 1 ? "Playback: HD (aim from this server)" : "Playback: HD (aim recorded on this machine)");
+            else if(hdnow && playexact[f->clientnum]) copystring(s, nexactcns > 1 ? "Playback: HD (exact aim from this server)" : "Playback: HD (exact aim recorded on this machine)");
+            else if(hdnow) copystring(s, "Playback: smooth  (network aim, not exact)");
             else copystring(s, "Playback: vanilla  (no HD track for this player)");
             return s;
         }
@@ -1032,8 +1051,10 @@ namespace demohd
 
     static int dbhit(float px, float py)
     {
-        loopi(8)
+        // the buttons first, then the bar behind them (0)
+        for(int n = 1; n <= 8; n++)
         {
+            int i = n%8;
             if(dbbox[i][2] <= 0) continue;
             if(px >= dbbox[i][0] && py >= dbbox[i][1] && px < dbbox[i][0]+dbbox[i][2] && py < dbbox[i][1]+dbbox[i][3])
                 return i;
@@ -1085,6 +1106,7 @@ namespace demohd
         float btn = bh - 10;
         float by = y + 5;
 
+        dbset(0, margin, y, w - 2*margin, bh); // the bar itself: a click on it is not for the game
         dbset(1, x, by, btnw, btn);
         x += btnw + gap;
         dbset(2, x, by, btnw, btn);
@@ -1109,7 +1131,7 @@ namespace demohd
         dbset(4, sliderx, by + btn*0.28f, sliderw, btn*0.44f);
         float timex = sliderx + sliderw + 8;
 
-        for(int i = 1; i <= 6; i++) { dbbox[i][0] /= w; dbbox[i][1] /= h; dbbox[i][2] /= w; dbbox[i][3] /= h; }
+        for(int i = 0; i <= 6; i++) { dbbox[i][0] /= w; dbbox[i][1] /= h; dbbox[i][2] /= w; dbbox[i][3] /= h; }
 
         if(dbdrag && dbbox[4][2] > 0)
         {
@@ -1146,6 +1168,12 @@ namespace demohd
         float cx, cy;
         g3d_cursorpos(cx, cy);
         int hit = dbhit(cx, cy);
+        // a click away from the bar goes to the game (left click = next
+        // player to watch, like the right click); its release too
+        static bool barpressed = false;
+        if(isdown && (hit < 0 || (dbhidden && hit != 7))) { barpressed = false; return false; }
+        if(!isdown && !barpressed && !dbdrag) return false;
+        barpressed = isdown;
         if(isdown)
         {
             if(hit==7)

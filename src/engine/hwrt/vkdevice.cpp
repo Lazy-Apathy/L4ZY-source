@@ -82,10 +82,17 @@ static bool loadvulkanlibrary()
 #else
     const char *libname = "libvulkan.so.1";
 #endif
+    if(hwrtsimulating("novulkan"))
+    {
+        conoutf(CON_INIT, "hwrt: no Vulkan loader (%s, simulated), staying on OpenGL", libname);
+        hwrtunavailable(HWRT_WHY_NOVULKAN);
+        return false;
+    }
     vklib = SDL_LoadObject(libname);
     if(!vklib)
     {
         conoutf(CON_INIT, "hwrt: no Vulkan loader (%s), staying on OpenGL", libname);
+        hwrtunavailable(HWRT_WHY_NOVULKAN);
         return false;
     }
     vkGetInstanceProcAddr = (PFN_vkGetInstanceProcAddr)SDL_LoadFunction(vklib, "vkGetInstanceProcAddr");
@@ -107,6 +114,7 @@ static bool loadvulkanlibrary()
     {
         defformatstring(msg, "Vulkan loader is missing %s", missing);
         hwrtfail(msg);
+        hwrtunavailable(HWRT_WHY_DRIVER);
         return false;
     }
     return true;
@@ -155,6 +163,8 @@ static bool createinstance()
     if(r != VK_SUCCESS)
     {
         hwrtfail("vkCreateInstance", r);
+        // the loader is there but no installed driver answers for this machine
+        if(r == VK_ERROR_INCOMPATIBLE_DRIVER || r == VK_ERROR_INITIALIZATION_FAILED) hwrtunavailable(HWRT_WHY_NOVULKAN);
         return false;
     }
 
@@ -186,7 +196,7 @@ static bool pickphysicaldevice(const uint8_t *gluuid)
 {
     uint32_t numdevs = 0;
     HWRTCHECK(vkEnumeratePhysicalDevices(hwrtdev.instance, &numdevs, NULL), "vkEnumeratePhysicalDevices");
-    if(!numdevs) { hwrtfail("no Vulkan physical devices"); return false; }
+    if(!numdevs) { hwrtfail("no Vulkan physical devices"); hwrtunavailable(HWRT_WHY_NOVULKAN); return false; }
 
     VkPhysicalDevice *devs = new VkPhysicalDevice[numdevs];
     VkResult r = vkEnumeratePhysicalDevices(hwrtdev.instance, &numdevs, devs);
@@ -214,11 +224,13 @@ static bool pickphysicaldevice(const uint8_t *gluuid)
     if(!found)
     {
         hwrtfail("no Vulkan device matches the GPU OpenGL is running on");
+        hwrtunavailable(HWRT_WHY_NOMATCH);
         return false;
     }
     if(VK_API_VERSION_MAJOR(hwrtdev.apiversion) == 1 && VK_API_VERSION_MINOR(hwrtdev.apiversion) < 1)
     {
         hwrtfail("Vulkan 1.1 or greater is required for GL interop");
+        hwrtunavailable(HWRT_WHY_DRIVER);
         return false;
     }
     return true;
@@ -245,6 +257,7 @@ static bool createdevice()
     {
         delete[] exts;
         hwrtfail("driver has no external memory/semaphore support");
+        hwrtunavailable(HWRT_WHY_DRIVER);
         return false;
     }
     enabled[numenabled++] = memext;
@@ -253,10 +266,17 @@ static bool createdevice()
     // Ray tracing is optional at this stage: interop and the debug composite have
     // to work on hardware without RT cores so the layer can be developed and
     // profiled there.
-    bool wantrt = VK_API_VERSION_MINOR(hwrtdev.apiversion) >= 2 &&
-                  hasdeviceext(exts, numexts, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) &&
+    bool rtexts = hasdeviceext(exts, numexts, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) &&
                   hasdeviceext(exts, numexts, VK_KHR_RAY_QUERY_EXTENSION_NAME) &&
                   hasdeviceext(exts, numexts, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
+    bool wantrt = VK_API_VERSION_MINOR(hwrtdev.apiversion) >= 2 && rtexts;
+    if(hwrtsimulating("nort"))
+    {
+        conoutf(CON_INIT, "hwrt: ray query hidden (SAUER_HWRT_SIMULATE=nort)");
+        wantrt = rtexts = false;
+    }
+    // RT extensions on a Vulkan 1.1 driver: the card can, the driver is behind
+    if(!wantrt) hwrtunavailable(rtexts ? HWRT_WHY_DRIVER : HWRT_WHY_NORT);
 
     const char *slexts[24];
     int nslexts = hwrtdlaacollectdeviceexts(slexts, 24);
@@ -286,6 +306,7 @@ static bool createdevice()
         vkGetPhysicalDeviceFeatures2(hwrtdev.phys, &query);
         wantrt = rqfeat.rayQuery && asfeat.accelerationStructure && v12.bufferDeviceAddress;
         shaderint64 = query.features.shaderInt64 != VK_FALSE;
+        if(!wantrt) hwrtunavailable(HWRT_WHY_NORT);
     }
     if(wantrt)
     {

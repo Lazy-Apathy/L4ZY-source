@@ -111,9 +111,11 @@ CLIENT_OBJS= \
 	engine/lightmap.o \
 	engine/main.o \
 	engine/hdrout.o \
+	engine/latency.o \
 	engine/material.o \
 	engine/matchrec.o \
 	engine/menus.o \
+	engine/hudlayout.o \
 	engine/movie.o \
 	engine/normal.o	\
 	engine/octa.o \
@@ -132,6 +134,8 @@ CLIENT_OBJS= \
 	engine/shader.o \
 	engine/shadowmap.o \
 	engine/sound.o \
+	engine/son3d.o \
+	engine/son3d_dsp.o \
 	engine/texture.o \
 	engine/water.o \
 	engine/world.o \
@@ -504,7 +508,9 @@ engine/sound.o: engine/engine.h shared/cube.h shared/tools.h shared/geom.h
 engine/sound.o: shared/ents.h shared/command.h shared/glexts.h shared/glemu.h
 engine/sound.o: shared/iengine.h shared/igame.h engine/world.h engine/octa.h
 engine/sound.o: engine/lightmap.h engine/bih.h engine/texture.h
-engine/sound.o: engine/model.h
+engine/sound.o: engine/model.h engine/son3d.h engine/son3d_dsp.h
+engine/son3d.o: engine/engine.h engine/son3d.h engine/son3d_dsp.h
+engine/son3d_dsp.o: engine/son3d_dsp.h
 engine/texture.o: engine/engine.h shared/cube.h shared/tools.h shared/geom.h
 engine/texture.o: shared/ents.h shared/command.h shared/glexts.h
 engine/texture.o: shared/glemu.h shared/iengine.h shared/igame.h

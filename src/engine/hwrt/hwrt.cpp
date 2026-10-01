@@ -44,16 +44,57 @@ extern int hwrt;
 static int hwrtlitmillis = -100000;
 // 1 = the RT lighting pass was composed within the last second.
 ICOMMAND(hwrtlighteffective, "", (), intret(hwrt && hwrtavailable && !hwrtfailed && totalmillis - hwrtlitmillis < 1000 ? 1 : 0));
-ICOMMAND(hwrtisavailable, "", (), intret(hwrtavailable && hwrtrayquery && !hwrtfailed ? 1 : 0));
+static bool hwrtcanrun() { return hwrtavailable && hwrtrayquery && !hwrtfailed; }
+ICOMMAND(hwrtisavailable, "", (), intret(hwrtcanrun() ? 1 : 0));
+
+static int hwrtwhy = HWRT_WHY_NONE;
+static string hwrtsimulate = "";
+
+void hwrtunavailable(int why)
+{
+    if(hwrtwhy == HWRT_WHY_NONE) hwrtwhy = why;
+}
+
+bool hwrtsimulating(const char *mode)
+{
+    return hwrtsimulate[0] && !strcmp(hwrtsimulate, mode);
+}
+
+// Short English line for the menu and the assistant, "" when RT can run.
+static const char *hwrtreason()
+{
+    if(hwrtcanrun()) return "";
+    int why = hwrtwhy;
+    // interop without ray query is a device that came up fine but has no RT cores
+    if(why == HWRT_WHY_NONE && hwrtavailable && !hwrtrayquery && !hwrtfailed) why = HWRT_WHY_NORT;
+    switch(why)
+    {
+        case HWRT_WHY_NOVULKAN: return "Ray tracing is not available: no Vulkan driver was found for this graphics card.";
+        case HWRT_WHY_DRIVER: return "Ray tracing is not available: the graphics driver is too old for ray tracing.";
+        case HWRT_WHY_NOMATCH: return "Ray tracing is not available: Vulkan does not see the graphics card the game runs on.";
+        case HWRT_WHY_NORT:
+        {
+            static string msg;
+            if(hwrtdev.name[0]) formatstring(msg, "Ray tracing is not available: this graphics card (%s) has no hardware ray tracing.", hwrtdev.name);
+            else copystring(msg, "Ray tracing is not available: this graphics card has no hardware ray tracing.");
+            return msg;
+        }
+        default: return "Ray tracing is not available: it failed to start (see the console).";
+    }
+}
+ICOMMAND(hwrtraison, "", (), result(hwrtreason()));
+// read-only: the SAUER_HWRT_SIMULATE mode in force, "" in normal use
+ICOMMAND(hwrtsimulated, "", (), result(hwrtsimulate));
 
 VARFP(hwrt, 0, 0, 1,
 {
     // hwrtinit runs during gl_init, before any config is executed, so a saved
     // `hwrt 1` can be corrected here rather than left lying to menus and scripts.
     // The reason was already logged once at init, hence the silence while loading.
-    if(hwrt && !hwrtavailable)
+    // Interop alone (no ray query) is not enough: nothing would be traced.
+    if(hwrt && !hwrtcanrun())
     {
-        if(!initing) conoutf(CON_WARN, "hwrt: no hardware ray tracing path on this system, staying on OpenGL");
+        if(!initing) conoutf(CON_WARN, "hwrt: staying on OpenGL. %s", hwrtreason());
         hwrt = 0;
     }
     if(initing) return;
@@ -292,16 +333,48 @@ void hwrtinit()
     // ones that would be lost. The log is a few dozen lines a session.
     if(getlogfile()) setvbuf(getlogfile(), NULL, _IONBF, 0);
 
-    if(!hwrtloadglinterop()) return;
+    hwrtwhy = HWRT_WHY_NONE;
+    const char *sim = getenv("SAUER_HWRT_SIMULATE");
+    copystring(hwrtsimulate, sim ? sim : "");
+    if(hwrtsimulate[0])
+    {
+        static const char * const modes[] = { "novulkan", "driver", "nort", "failed" };
+        bool known = false;
+        loopi(int(sizeof(modes)/sizeof(modes[0]))) if(!strcmp(hwrtsimulate, modes[i])) known = true;
+        if(known) conoutf(CON_WARN, "hwrt: SAUER_HWRT_SIMULATE=%s, simulating an incompatible GPU (diagnostic)", hwrtsimulate);
+        else
+        {
+            conoutf(CON_WARN, "hwrt: SAUER_HWRT_SIMULATE=%s is not novulkan, driver, nort or failed; ignored", hwrtsimulate);
+            hwrtsimulate[0] = 0;
+        }
+    }
+
+    if(hwrtsimulating("driver"))
+    {
+        conoutf(CON_INIT, "hwrt: OpenGL driver has no GL_EXT_memory_object (simulated), staying on OpenGL");
+        hwrtunavailable(HWRT_WHY_DRIVER);
+        return;
+    }
+    if(!hwrtloadglinterop()) { hwrtunavailable(HWRT_WHY_DRIVER); return; }
 
     uint8_t gluuid[VK_UUID_SIZE];
     if(!hwrtglgetdeviceuuid(gluuid))
     {
         conoutf(CON_INIT, "hwrt: OpenGL will not report a device UUID, staying on OpenGL");
+        hwrtunavailable(HWRT_WHY_DRIVER);
         return;
     }
     if(!hwrtinitdevice(gluuid) || !hwrtinittrace())
     {
+        hwrtunavailable(HWRT_WHY_FAILED);
+        hwrtdestroytrace();
+        hwrtdestroydevice();
+        return;
+    }
+    if(hwrtsimulating("failed"))
+    {
+        hwrtfail("simulated start-up failure (SAUER_HWRT_SIMULATE=failed)");
+        hwrtunavailable(HWRT_WHY_FAILED);
         hwrtdestroytrace();
         hwrtdestroydevice();
         return;

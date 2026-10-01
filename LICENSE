@@ -28,10 +28,10 @@ freely, subject to the following restrictions:
 Scope
 
 This licence covers the source code in this repository (src/, data/*.cfg,
-third_party/*.ps1) EXCEPT the third-party
+traduction.cfg, distrib/, tools/, third_party/*.ps1) EXCEPT the third-party
 files listed in THIRD-PARTY-NOTICES.md, which keep their own licences
-(ENet: MIT-style; Vulkan headers: Apache-2.0 / MIT; SDL2 and zlib headers:
-zlib licence).
+(ENet: MIT-style; Vulkan headers: Apache-2.0 / MIT; Steam Audio headers:
+Apache-2.0; SDL2 and zlib headers: zlib licence).
 
 This is an altered version of the Sauerbraten source code; it is not the
 original software. The original Sauerbraten licence and notes are kept in

@@ -713,11 +713,15 @@ namespace game
 #endif
         const playermodelinfo &mdl = getplayermodelinfo(d);
         defformatstring(gunname, "%s/%s", hudgunsdir[0] ? hudgunsdir : mdl.hudguns, guns[d->gunselect].file);
-        if(d==player1 && selfhascolor())
+        // first-person arm follows the body tint: you, or the friend you spectate / watch in a demo
+        int hcidx = -1;
+        if(isselfplayer(d) && selfhascolor()) hcidx = selfcolorindex();
+        else if(isfriend(d) && friendhascolor(isfriendally(d))) hcidx = friendcolorindex(isfriendally(d));
+        if(hcidx >= 0)
         {
             string fallback;
             copystring(fallback, gunname);
-            defformatstring(suf, "/c%d", selfcolorindex());
+            defformatstring(suf, "/c%d", hcidx);
             concatstring(gunname, suf);
             if(!loadmodel(gunname, -1, false)) copystring(gunname, fallback);
         }

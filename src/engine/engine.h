@@ -226,6 +226,16 @@ extern bool hdrout_present();
 extern GLuint hdrout_drawfb();
 extern bool hdrout_fp16post();
 extern void hdrout_drawlabel();
+
+// latency
+extern void latency_wait();
+extern void latency_sample();
+extern void latency_swapstart();
+extern void latency_endframe();
+extern void latency_cleanup();
+extern double latency_now();
+extern bool latency_watchblocks();
+extern void latency_blocked(double start, double end);
 extern bool hdrout_preview_begin(int x, int y, int w, int h, bool background);
 extern void hdrout_preview_end();
 extern void hwrthdrsuspend();

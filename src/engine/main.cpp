@@ -505,6 +505,32 @@ VARNP(relativemouse, userelativemouse, 0, 1, 1);
 
 bool shouldgrab = false, grabinput = false, minimized = false, canrelativemouse = true, relativemouse = false;
 
+// Startup / display diagnostics in log.txt (black screen or frozen loading
+// screen reports): window events with time and flags, and long frame gaps.
+static void logwindowevent(int ev)
+{
+    static const char * const names[] = { "none", "shown", "hidden", "exposed", "moved", "resized", "size_changed",
+        "minimized", "maximized", "restored", "enter", "leave", "focus_gained", "focus_lost", "close", "take_focus", "hit_test" };
+    if(ev == SDL_WINDOWEVENT_MOVED || ev == SDL_WINDOWEVENT_ENTER || ev == SDL_WINDOWEVENT_LEAVE) return;
+    static int logged = 0;
+    if(++logged > 200) return;
+    logoutf("video: event %s t=%d ms flags=0x%x", ev >= 0 && ev < int(sizeof(names)/sizeof(names[0])) ? names[ev] : "?",
+            SDL_GetTicks(), screen ? SDL_GetWindowFlags(screen) : 0);
+}
+
+static void checkframegap()
+{
+    static Uint32 last = 0;
+    static int logged = 0;
+    Uint32 now = SDL_GetTicks();
+    if(last && now - last > 400 && logged < 50)
+    {
+        logged++;
+        logoutf("video: no frame for %u ms (t=%u ms) flags=0x%x", now - last, now, screen ? SDL_GetWindowFlags(screen) : 0);
+    }
+    last = now;
+}
+
 #ifdef SDL_VIDEO_DRIVER_X11
 VAR(sdl_xgrab_bug, 0, 0, 1);
 #endif
@@ -1178,6 +1204,7 @@ void checkinput()
                 break;
 
             case SDL_WINDOWEVENT:
+                logwindowevent(event.window.event);
                 switch(event.window.event)
                 {
                     case SDL_WINDOWEVENT_CLOSE:
@@ -1543,7 +1570,12 @@ int main(int argc, char **argv)
 
     logoutf("init: video");
     SDL_SetHint(SDL_HINT_GRAB_KEYBOARD, "0");
+    // Same guard as vanilla: on Windows, exclusive fullscreen must minimize on
+    // alt-tab so the desktop gets its native mode back (4:3 stretched players).
+    // Borderless/windowed are not SDL fullscreen, so the hint never applies there.
+    #if !defined(WIN32) && !defined(__APPLE__)
     SDL_SetHint(SDL_HINT_VIDEO_MINIMIZE_ON_FOCUS_LOSS, "0");
+    #endif
     setupscreen();
     SDL_ShowCursor(SDL_FALSE);
     SDL_StopTextInput(); // workaround for spurious text-input events getting sent on first text input toggle?
@@ -1634,6 +1666,8 @@ int main(int argc, char **argv)
     for(;;)
     {
         static int frames = 0;
+        // Low latency: any wait for the GPU happens here, before the input is read.
+        latency_wait();
         int millis = getclockmillis();
         limitfps(millis, totalmillis);
         elapsedtime = millis - totalmillis;
@@ -1651,6 +1685,7 @@ int main(int argc, char **argv)
         totalmillis = millis;
         updatetime();
  
+        latency_sample();
         checkinput();
         menuprocess();
         syncinputgrab();
@@ -1672,12 +1707,23 @@ int main(int argc, char **argv)
         updateparticles();
         updatesounds();
 
+        // Only trust "minimized" while SDL still reports the window iconic: a
+        // stray MINIMIZED at startup (focus / HDR swapchain) otherwise froze the
+        // last loading screen until the Windows key sent a new window event.
+        if(minimized && screen && !(SDL_GetWindowFlags(screen) & SDL_WINDOW_MINIMIZED))
+        {
+            logoutf("video: window reported minimized but is visible (t=%d ms): drawing resumed", SDL_GetTicks());
+            minimized = false;
+        }
         if(minimized && !hwrtvelneeddraw()) continue;
+        checkframegap();
 
         inbetweenframes = false;
         if(mainmenu) gl_drawmainmenu();
         else gl_drawframe();
+        latency_swapstart();
         swapbuffers();
+        latency_endframe();
         renderedframe = inbetweenframes = true;
     }
     

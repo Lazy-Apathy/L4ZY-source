@@ -457,6 +457,8 @@ struct captureclientmode : clientmode
     {
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         int s = 1800/4, x = 1800*w/h - s - s/10, y = s/10;
+        hudscope radarpart("radar", "Radar / minimap");
+        hudrect(x - 0.04f*s, y - 0.04f*s, 1.08f*s, 1.08f*s);
         gle::colorf(1, 1, 1, minimapalpha);
         if(minimapalpha >= 1) glDisable(GL_BLEND);
         bindminimap();

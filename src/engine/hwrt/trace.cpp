@@ -14,6 +14,7 @@
 #include "shaders/hitshade_comp.h"
 #include "shaders/hitlight_comp.h"
 #include "shaders/skycompose_comp.h"
+#include "shaders/bluenoise_tab.h"
 
 int hwrtfencestalls = 0;
 
@@ -38,6 +39,8 @@ struct hwrttracestate
     int slot;
     int frame;
     int skyflip;  // which of the two skyvis history images the next dispatch writes
+    VkBuffer skybnbuf;        // hitlight binding 25: the sky-ray blue-noise tile
+    VkDeviceMemory skybnmem;
 };
 
 static hwrttracestate tr;
@@ -473,6 +476,50 @@ static bool initshadepipeline()
     return true;
 }
 
+// The sky-ray blue-noise tile (hitlight binding 25). 64 KB, written once and
+// never touched again. The shader names the binding unconditionally, so the
+// light pipeline does not come up without it.
+static void destroyskybluenoise()
+{
+    if(tr.skybnbuf) vkDestroyBuffer(hwrtdev.device, tr.skybnbuf, NULL);
+    if(tr.skybnmem) vkFreeMemory(hwrtdev.device, tr.skybnmem, NULL);
+    tr.skybnbuf = VK_NULL_HANDLE;
+    tr.skybnmem = VK_NULL_HANDLE;
+}
+
+static bool initskybluenoise()
+{
+    VkBufferCreateInfo info = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+    info.size = sizeof(hwrtskybluenoisetab);
+    info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+    info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    VkResult r = vkCreateBuffer(hwrtdev.device, &info, NULL, &tr.skybnbuf);
+    if(r != VK_SUCCESS) { conoutf(CON_WARN, "hwrt: sky blue-noise buffer failed (%s)", hwrtresultstr(r)); tr.skybnbuf = VK_NULL_HANDLE; return false; }
+    VkMemoryRequirements req;
+    vkGetBufferMemoryRequirements(hwrtdev.device, tr.skybnbuf, &req);
+    // VRAM the CPU can write once if the device has it, host memory otherwise.
+    int memtype = hwrtfindmemtype(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT|VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    if(memtype < 0) memtype = hwrtfindmemtype(req.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    if(memtype < 0) { conoutf(CON_WARN, "hwrt: no host-visible memory for the sky blue-noise tile"); destroyskybluenoise(); return false; }
+    VkMemoryAllocateInfo alloc = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+    alloc.allocationSize = req.size;
+    alloc.memoryTypeIndex = uint32_t(memtype);
+    r = vkAllocateMemory(hwrtdev.device, &alloc, NULL, &tr.skybnmem);
+    if(r != VK_SUCCESS) { conoutf(CON_WARN, "hwrt: sky blue-noise memory failed (%s)", hwrtresultstr(r)); tr.skybnmem = VK_NULL_HANDLE; destroyskybluenoise(); return false; }
+    r = vkBindBufferMemory(hwrtdev.device, tr.skybnbuf, tr.skybnmem, 0);
+    void *mapped = NULL;
+    if(r == VK_SUCCESS) r = vkMapMemory(hwrtdev.device, tr.skybnmem, 0, sizeof(hwrtskybluenoisetab), 0, &mapped);
+    if(r != VK_SUCCESS || !mapped) { conoutf(CON_WARN, "hwrt: sky blue-noise upload failed (%s)", hwrtresultstr(r)); destroyskybluenoise(); return false; }
+    memcpy(mapped, hwrtskybluenoisetab, sizeof(hwrtskybluenoisetab));
+    vkUnmapMemory(hwrtdev.device, tr.skybnmem);
+    return true;
+}
+
+bool hwrtskybluenoiseready()
+{
+    return tr.skybnbuf != VK_NULL_HANDLE && tr.lightpipeline != VK_NULL_HANDLE;
+}
+
 static bool initlightpipeline()
 {
     if(!hwrtdev.rayquery) return true;
@@ -493,7 +540,9 @@ static bool initlightpipeline()
         conoutf(CON_INIT, "hwrt: hitlight SPIR-V %u words hash %08X", words, h);
     }
 
-    VkDescriptorSetLayoutBinding bindings[25];
+    if(!initskybluenoise()) return false;
+
+    VkDescriptorSetLayoutBinding bindings[26];
     memset(bindings, 0, sizeof(bindings));
     bindings[0].binding = 0;
     bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
@@ -574,8 +623,12 @@ static bool initlightpipeline()
         bindings[i].descriptorCount = 1;
         bindings[i].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
     }
+    bindings[25].binding = 25;
+    bindings[25].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    bindings[25].descriptorCount = 1;
+    bindings[25].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
     VkDescriptorSetLayoutCreateInfo setinfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-    setinfo.bindingCount = 25;
+    setinfo.bindingCount = 26;
     setinfo.pBindings = bindings;
     r = vkCreateDescriptorSetLayout(hwrtdev.device, &setinfo, NULL, &tr.lightsetlayout);
     if(r != VK_SUCCESS) { conoutf(CON_WARN, "hwrt: hit-light descriptor layout failed (%s)", hwrtresultstr(r)); return false; }
@@ -707,6 +760,7 @@ bool hwrtinittrace()
         if(tr.lightpipelayout) { vkDestroyPipelineLayout(hwrtdev.device, tr.lightpipelayout, NULL); tr.lightpipelayout = VK_NULL_HANDLE; }
         if(tr.lightsetlayout) { vkDestroyDescriptorSetLayout(hwrtdev.device, tr.lightsetlayout, NULL); tr.lightsetlayout = VK_NULL_HANDLE; }
         if(tr.lightmodule) { vkDestroyShaderModule(hwrtdev.device, tr.lightmodule, NULL); tr.lightmodule = VK_NULL_HANDLE; }
+        destroyskybluenoise();
     }
     if(tr.lightpipeline && !initcomposepipeline())
     {
@@ -729,7 +783,8 @@ bool hwrtinittrace()
     // GL depth, both halves of the skyvis history, and both halves of the age
     // count. Miss the pool and vkAllocateDescriptorSets fails silently.
     // Light set: colour, depth, skyvis pair, age pair, plus 8 NRD/payload images.
-    if(tr.lightpipeline) { nstorage += 14*copies; nas += copies; nssbo += 5*copies; ncombined += 5*copies; maxsets += copies; }
+    // Six SSBOs: verts, indices, tris, lights, model geometry, sky blue noise.
+    if(tr.lightpipeline) { nstorage += 14*copies; nas += copies; nssbo += 6*copies; ncombined += 5*copies; maxsets += copies; }
     if(tr.composepipeline) { nstorage += 7*copies; nssbo += copies; maxsets += copies; }
     poolsizes[0].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
     poolsizes[0].descriptorCount = uint32_t(nstorage);
@@ -793,6 +848,18 @@ bool hwrtinittrace()
                 if(tr.lightpipeline) { vkDestroyPipeline(hwrtdev.device, tr.lightpipeline, NULL); tr.lightpipeline = VK_NULL_HANDLE; }
                 break;
             }
+        }
+        // Binding 25 never changes: write it once per set.
+        if(tr.lightpipeline) loopi(HWRT_FRAMES_IN_FLIGHT)
+        {
+            VkDescriptorBufferInfo bninfo = { tr.skybnbuf, 0, VK_WHOLE_SIZE };
+            VkWriteDescriptorSet write = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+            write.dstSet = tr.lightset[i];
+            write.dstBinding = 25;
+            write.descriptorCount = 1;
+            write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            write.pBufferInfo = &bninfo;
+            vkUpdateDescriptorSets(hwrtdev.device, 1, &write, 0, NULL);
         }
     }
     if(tr.composepipeline)
@@ -896,6 +963,7 @@ void hwrtdestroytrace()
     if(tr.aomodule) vkDestroyShaderModule(hwrtdev.device, tr.aomodule, NULL);
     if(tr.rtmodule) vkDestroyShaderModule(hwrtdev.device, tr.rtmodule, NULL);
     if(tr.module) vkDestroyShaderModule(hwrtdev.device, tr.module, NULL);
+    destroyskybluenoise();
     memset(&tr, 0, sizeof(tr));
 }
 
@@ -1047,7 +1115,9 @@ static bool reclaimslot(int slot)
     if(vkGetFenceStatus(hwrtdev.device, tr.fence[slot]) == VK_NOT_READY)
     {
         hwrtfencestalls++;
+        double t0 = latency_watchblocks() ? latency_now() : 0;
         HWRTCHECK(vkWaitForFences(hwrtdev.device, 1, &tr.fence[slot], VK_TRUE, 1000000000ULL), "vkWaitForFences");
+        if(t0) latency_blocked(t0, latency_now());
     }
     harveststamps(slot);
     HWRTCHECK(vkResetFences(hwrtdev.device, 1, &tr.fence[slot]), "vkResetFences");

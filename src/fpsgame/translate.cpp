@@ -123,9 +123,11 @@ static void tlangadd(int cn, const char *name, const char *code)
     for(; code[n] && n < 7; n++) buf[n] = char(tolower((uchar)code[n]));
     buf[n] = 0;
 
+    // a record belongs to one client number; the name is only a fallback when
+    // there is no cn (same nick on two players must not share languages)
     tlangrec *r = NULL;
     if(cn >= 0) loopv(tlangs) if(tlangs[i].cn == cn) { r = &tlangs[i]; break; }
-    if(!r && name && name[0]) loopv(tlangs) if(!strcasecmp(tlangs[i].name, name)) { r = &tlangs[i]; break; }
+    if(!r && cn < 0 && name && name[0]) loopv(tlangs) if(tlangs[i].cn < 0 && !strcasecmp(tlangs[i].name, name)) { r = &tlangs[i]; break; }
     if(!r)
     {
         r = &tlangs.add();
@@ -147,7 +149,7 @@ const char *translatelangsof(fpsent *d)
     if(!d) return buf;
     tlangrec *r = NULL;
     if(d->clientnum >= 0) loopv(tlangs) if(tlangs[i].cn == d->clientnum) { r = &tlangs[i]; break; }
-    if(!r && d->name[0]) loopv(tlangs) if(!strcasecmp(tlangs[i].name, d->name)) { r = &tlangs[i]; break; }
+    if(!r && d->clientnum < 0 && d->name[0]) loopv(tlangs) if(tlangs[i].cn < 0 && !strcasecmp(tlangs[i].name, d->name)) { r = &tlangs[i]; break; }
     if(!r || r->n <= 0) return buf;
     int pos = 0;
     loopi(r->n)
@@ -1839,6 +1841,7 @@ static bool tlastfor(fpsent *d, char *text, int textlen, char *spk, int spklen)
 void translategone(int cn)
 {
     loopv(tspeaks) if(tspeaks[i].cn == cn) tspeaks.remove(i--);
+    loopv(tlangs) if(tlangs[i].cn == cn) tlangs.remove(i--); // cn gets reused by the next player
 }
 
 void translateclear()
@@ -2166,7 +2169,12 @@ void polltranslation()
         tunlock();
         tnoteconn(j->ok);
         if(!j->own && !j->serv && !j->outgoing && j->srclang[0])
-            tlangadd(j->cn, j->speaker, j->srclang);
+        {
+            // the job may finish seconds later: only credit the language if that
+            // cn is still the same player (not someone who took the slot since)
+            fpsent *sp = j->cn >= 0 ? getclient(j->cn) : NULL;
+            if(sp && !strcmp(sp->name, j->speaker)) tlangadd(j->cn, j->speaker, j->srclang);
+        }
         if(j->board) { delete j; tlock(); continue; }
         if(j->preview)
         {
@@ -2321,6 +2329,7 @@ static void tretryfrom(tretryline src, bool inplace)
     tjob *j = new tjob;
     memset(j, 0, sizeof(*j));
     j->force = true;
+    j->cn = -1; // speaker's cn is not kept for retries: don't credit a language to cn 0
     j->serv = src.serv;
     j->outgoing = false;
     j->own = src.own;
@@ -2787,5 +2796,11 @@ ICOMMAND(translatestatus, "", (),
     conoutf("traduction : %s, recu -> %s, envoi -> %s, auto-translate %s, femme %s, service %s:%d (%s), %d en attente",
         on, tlangin(), tlangout(), tautolabel(), translatefemme ? "on" : "off", thost(), tport(), svc, pending);
 });
+
+// settings assistant (engine/menus.cpp): same local service, blocking call, run from its own thread
+bool assistanthttp(const char *pathq, const char *body, int bodylen, char *resp, int resplen, int timeoutms)
+{
+    return tplainhttp("POST", pathq, body, bodylen, resp, resplen, timeoutms);
+}
 
 }

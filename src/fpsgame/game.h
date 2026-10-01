@@ -742,7 +742,7 @@ namespace game
     extern fpsent *player1;
     extern vector<fpsent *> players, clients;
     extern int lastspawnattempt;
-    extern int lasthit;
+    extern int lasthit, lasthitcn;
     extern int respawnent;
     extern int following;
     extern int smoothmove, smoothdist;
@@ -775,6 +775,7 @@ namespace game
     extern void timeupdate(int timeremain);
     extern void msgsound(int n, physent *d = NULL);
     extern void drawicon(int icon, float x, float y, float sz = 120);
+    extern void addflagfeed(const char *text, int icon); // big CTF message (flag taken / scored)
     const char *mastermodecolor(int n, const char *unknown);
     const char *mastermodeicon(int n, const char *unknown);
 
@@ -820,6 +821,7 @@ namespace game
     extern int mycolor;
     extern bool isfriendname(const char *name);
     extern bool isselfplayer(fpsent *d);
+    extern const char *vsscore(fpsent *d);
     extern bool isfriend(fpsent *d);
     extern bool isfriendally(fpsent *d);
     extern bool friendhascolor(bool ally);
@@ -939,6 +941,7 @@ namespace demohd
     void onplaybackreset();
     const char *hudstatus();
     bool hastrack(int cn);
+    bool hdaim(fpsent *d);
     int recordercn();
     bool isrecorder(fpsent *d);
     bool ally(fpsent *d);

@@ -8,7 +8,7 @@ namespace game
     bool intermission = false;
     int maptime = 0, maprealtime = 0, maplimit = -1;
     int respawnent = -1;
-    int lasthit = 0, lastspawnattempt = 0;
+    int lasthit = 0, lasthitcn = -1, lastspawnattempt = 0; // lasthitcn: who the hit crosshair is for
 
     int following = -1, followdir = 0;
 
@@ -441,6 +441,7 @@ namespace game
         {
             if(hitsound && lasthit != lastmillis) playsound(S_HIT);
             lasthit = lastmillis;
+            lasthitcn = d->clientnum;
         }
         if(d==h)
         {
@@ -523,6 +524,8 @@ namespace game
         string killer, victim;
         int gun;
         bool suicide, teamkill, mine, myteam;
+        string actorteam;   // the filter follows whoever you watch, so it is decided when drawn
+        int vsak, vsvk;     // kills of the actor on the victim and back, at the time of this frag
         int millis;
         int actorcn, victimcn;
         int fovms, xhms, waitmillis;
@@ -550,6 +553,66 @@ namespace game
     static vector<streakpopup> streakpopups;
 
     static void clearkillfeed() { killfeedlines.setsize(0); }
+
+    // per-opponent score for this match: "kills-deaths" against that player
+    VARP(killfeedvs, 0, 1, 1);
+
+    // every "a killed b" of the match, by client number, so the counter can be
+    // shown from whoever you watch (spectating / demo), not only from you
+    struct vspair { int actor, victim, n; };
+    static vector<vspair> vspairs;
+
+    static int vscount(int actor, int victim)
+    {
+        loopv(vspairs) if(vspairs[i].actor == actor && vspairs[i].victim == victim) return vspairs[i].n;
+        return 0;
+    }
+
+    static void countvs(fpsent *victim, fpsent *actor, bool suicide)
+    {
+        if(suicide || actor->type!=ENT_PLAYER || victim->type!=ENT_PLAYER) return;
+        if(actor->clientnum < 0 || victim->clientnum < 0) return;
+        loopv(vspairs) if(vspairs[i].actor == actor->clientnum && vspairs[i].victim == victim->clientnum) { vspairs[i].n++; return; }
+        vspair &p = vspairs.add();
+        p.actor = actor->clientnum;
+        p.victim = victim->clientnum;
+        p.n = 1;
+    }
+
+    static void forgetvs(int cn) // the cn is reused by the next player who joins
+    {
+        loopv(vspairs) if(vspairs[i].actor == cn || vspairs[i].victim == cn) vspairs.remove(i--);
+    }
+
+    // point of view: the player you follow, else in your demo the recorder, else you
+    static fpsent *vsviewer()
+    {
+        if(fpsent *f = followingplayer()) return f;
+        if(demoplayback && demohd::recordercn() >= 0)
+        {
+            fpsent *r = getclient(demohd::recordercn());
+            if(r) return r;
+        }
+        return player1;
+    }
+
+    static const char *vsscorefrom(fpsent *viewer, int cn)
+    {
+        static string buf;
+        buf[0] = 0;
+        if(!viewer || viewer->clientnum < 0 || cn < 0 || cn == viewer->clientnum) return buf;
+        int k = vscount(viewer->clientnum, cn), d = vscount(cn, viewer->clientnum);
+        if(k || d) formatstring(buf, "\f0%d\f7-\f3%d", k, d);
+        return buf;
+    }
+
+    const char *vsscore(fpsent *d)
+    {
+        if(!d || d->state==CS_SPECTATOR) return "";
+        return vsscorefrom(vsviewer(), d->clientnum);
+    }
+
+    // killfeed line: the score of the watched player against the other one
     static void clearstreakpopups() { streakpopups.setsize(0); }
 
     static bool isstreaktier(int n)
@@ -604,7 +667,7 @@ namespace game
                 actor->killstreak++;
                 if(killstreak && isstreaktier(actor->killstreak))
                 {
-                    bool mine = actor == player1;
+                    bool mine = actor == vsviewer();
                     if(mine || killstreakothers)
                     {
                         string buf;
@@ -660,6 +723,7 @@ namespace game
     static int react_hitfov[FRAGRT_CN], react_hitxh[FRAGRT_CN], react_hittime[FRAGRT_CN];
 
     static int react_born = 0;
+    static fpsent *react_viewer = NULL; // whose eyes the react times are measured from
 
     static void reactclear(reactstreak &s) { s.enter = s.last = s.ended = 0; }
 
@@ -682,7 +746,7 @@ namespace game
     void fragreactspawned(fpsent *d)
     {
         if(!d) return;
-        if(d == player1) clearfragreact();
+        if(d == player1 || d == react_viewer) clearfragreact();
         else clearfragreactcn(d->clientnum);
     }
 
@@ -776,16 +840,16 @@ namespace game
         return 0;
     }
 
-    static void trackonefragreact(fpsent *d, float myhfov, float myvfov, float thfov, float tvfov)
+    static void trackonefragreact(fpsent *v, fpsent *d, float myhfov, float myvfov, float thfov, float tvfov)
     {
         int cn = d->clientnum;
-        bool xh = reactmyxhair(d);
-        bool seen = xh || (reactincone(player1->o, player1->yaw, player1->pitch, myhfov, myvfov, d) && reactlosbody(player1->o, d));
+        bool xh = v == player1 ? reactmyxhair(d) : reactxhair(v->o, v->yaw, v->pitch, d);
+        bool seen = xh || (reactincone(v->o, v->yaw, v->pitch, myhfov, myvfov, d) && reactlosbody(v->o, d));
         reactset(react_myfov[cn], seen);
         reactset(react_myxh[cn], xh);
 
-        bool txh = reactxhair(d->o, d->yaw, d->pitch, player1);
-        bool tseen = txh || (reactincone(d->o, d->yaw, d->pitch, thfov, tvfov, player1) && reactlosbody(d->o, player1));
+        bool txh = reactxhair(d->o, d->yaw, d->pitch, v);
+        bool tseen = txh || (reactincone(d->o, d->yaw, d->pitch, thfov, tvfov, v) && reactlosbody(d->o, v));
         reactset(react_theirfov[cn], tseen);
         reactset(react_theirxh[cn], txh);
     }
@@ -837,18 +901,31 @@ namespace game
         react_hittime[cn] = lastmillis;
     }
 
+    // you while you play; when you spectate or watch a demo, the player you
+    // watch, but only if their aim is exact (HD), else nothing is measured
+    static fpsent *reactviewerof()
+    {
+        if(!player1) return NULL;
+        if(!demoplayback && player1->state != CS_SPECTATOR) return player1;
+        fpsent *v = vsviewer();
+        if(!v || v == player1 || !demohd::hdaim(v)) return NULL;
+        return v;
+    }
+
     static void updatefragreact()
     {
-        if(!reacttime || !player1 || intermission || demoplayback || m_edit) return;
-        if(player1->state != CS_ALIVE) return;
+        fpsent *v = reacttime && !intermission && !m_edit ? reactviewerof() : NULL;
+        if(v != react_viewer) { clearfragreact(); react_viewer = v; }
+        if(!v || v->state != CS_ALIVE) return;
 
         float myhfov, myvfov, thfov, tvfov;
         fragreactfovs(myhfov, myvfov, thfov, tvfov);
+        if(v != player1 && v != followingplayer()) { myhfov = thfov; myvfov = tvfov; } // not rendered from their eyes
 
         loopv(players)
         {
             fpsent *d = players[i];
-            if(!d || d == player1) continue;
+            if(!d || d == v || d == player1) continue;
             int cn = d->clientnum;
             if(cn < 0 || cn >= FRAGRT_CN) continue;
             if(d->state != CS_ALIVE)
@@ -859,7 +936,7 @@ namespace game
                 reactclear(react_theirxh[cn]);
                 continue;
             }
-            trackonefragreact(d, myhfov, myvfov, thfov, tvfov);
+            trackonefragreact(v, d, myhfov, myvfov, thfov, tvfov);
         }
     }
 
@@ -977,6 +1054,14 @@ namespace game
         bool teamkill = !suicide && m_teammode && isteam(victim->team, actor->team);
         updatekillstreak(victim, actor, suicide, teamkill);
         int gun = resolvefeedgun(actor, victim, suicide);
+        countvs(victim, actor, suicide);
+        string vstxt; // for your kill log (F8): your own score at that moment
+        vstxt[0] = 0;
+        if(!suicide && killfeedvs && player1)
+        {
+            if(actor==player1) copystring(vstxt, vsscorefrom(player1, victim->clientnum));
+            else if(victim==player1) copystring(vstxt, vsscorefrom(player1, actor->clientnum));
+        }
 
         string vname, aname;
         colorfeedname(victim, vname);
@@ -984,7 +1069,7 @@ namespace game
         else
         {
             colorfeedname(actor, aname);
-            if(killstreak && !teamkill && actor==player1 && actor->killstreak >= 2)
+            if(killstreak && !teamkill && actor==vsviewer() && actor->killstreak >= 2)
                 concformatstring(aname, " \f4x%d", actor->killstreak);
         }
 
@@ -998,6 +1083,9 @@ namespace game
             e.teamkill = teamkill;
             e.mine = victim==player1 || actor==player1;
             e.myteam = victim==player1 || (!suicide && (actor==player1 || isteam(actor->team, player1->team)));
+            copystring(e.actorteam, actor->team);
+            e.vsak = vscount(actor->clientnum, victim->clientnum);
+            e.vsvk = vscount(victim->clientnum, actor->clientnum);
             e.gun = gun;
             e.millis = lastmillis;
             e.actorcn = actor->clientnum;
@@ -1008,7 +1096,19 @@ namespace game
 
         int fovms = 0, xhms = 0, waitmillis = 0;
         bool showreact = false, approx = false, pending = false;
-        if(reacttime && !suicide && !teamkill && (victim==player1 || actor==player1) && actor->type!=ENT_INANIMATE)
+        fpsent *rv = react_viewer;
+        if(rv && rv != player1 && reacttime && !suicide && !teamkill && (victim==rv || actor==rv) && actor->type!=ENT_INANIMATE)
+        {
+            // watched player (HD): their own view; the killer's view is exact only if the killer is HD too
+            showreact = true;
+            if(actor==rv) samplefragreact(victim, true, fovms, xhms);
+            else
+            {
+                samplefragreact(actor, false, fovms, xhms);
+                approx = !demohd::hdaim(actor);
+            }
+        }
+        else if(reacttime && !suicide && !teamkill && (victim==player1 || actor==player1) && actor->type!=ENT_INANIMATE)
         {
             showreact = true;
             if(actor==player1)
@@ -1034,7 +1134,7 @@ namespace game
         if(killfeed && killfeedlines.length())
         {
             killfeedline &e = killfeedlines.last();
-            if(e.mine && e.victimcn==victim->clientnum && e.actorcn==actor->clientnum)
+            if((e.mine || showreact) && e.victimcn==victim->clientnum && e.actorcn==actor->clientnum)
             {
                 e.fovms = fovms;
                 e.xhms = xhms;
@@ -1065,6 +1165,7 @@ namespace game
             if(gname) formatstring(line, "%s \f3fragged\f7 %s \f4(%s)", aname, vname, gname);
             else formatstring(line, "%s \f3fragged\f7 %s", aname, vname);
         }
+        if(vstxt[0]) concformatstring(line, " \f7[%s\f7]", vstxt);
         kdlogline &kd = addkdlog(line);
         kd.actorcn = actor->clientnum;
         kd.victimcn = victim->clientnum;
@@ -1089,6 +1190,8 @@ namespace game
 
         if(cmode) cmode->died(d, actor);
 
+        // before the names: the feed uses colorname too, whose 3 buffers rotate
+        addkillfeed(d, actor);
         fpsent *h = followingplayer(player1);
         int contype = d==h || actor==h ? CON_FRAG_SELF : CON_FRAG_OTHER;
         const char *dname = "", *aname = "";
@@ -1102,7 +1205,6 @@ namespace game
             dname = colorname(d, NULL, "", "", "you");
             aname = colorname(actor, NULL, "", "", "you");
         }
-        addkillfeed(d, actor);
         if(!killfeed || killfeedconsole)
         {
             if(actor->type==ENT_AI)
@@ -1201,8 +1303,10 @@ namespace game
         }
         unignore(cn);
         translategone(cn);
+        forgetvs(cn);
         fpsent *d = clients[cn];
         if(!d) return;
+        if(d == react_viewer) react_viewer = NULL;
         if(cn >= 0 && cn < FRAGRT_CN) clearfragreactcn(cn);
         if(notify && d->name[0]) conoutf("\f4leave:\f7 %s", colorname(d));
         removeweapons(d);
@@ -1234,6 +1338,7 @@ namespace game
         if(kdlog.length()) rotatekdlog();
         formatstring(kdlogtitle, "%s (%s)", clientmap[0] ? clientmap : "map", server::modename(gamemode));
         clearkillfeed();
+        vspairs.setsize(0);
         clearstreakpopups();
         clearfragreact();
         clearmovables();
@@ -1540,6 +1645,8 @@ namespace game
 
     void drawhudicons(fpsent *d)
     {
+        hudscope part("icons", "Health, armour, ammo");
+        hudrect(HICON_X, HICON_Y, 3*HICON_STEP, HICON_SIZE);
         pushhudmatrix();
         hudmatrix.scale(2, 2, 1);
         flushhudmatrix();
@@ -1590,6 +1697,7 @@ namespace game
 
     void drawgameclock(int w, int h)
     {
+        hudscope part("gameclock", "Match clock");
         int secs = max(maplimit-lastmillis + 999, 0)/1000, mins = secs/60;
         secs %= 60;
 
@@ -1608,6 +1716,7 @@ namespace game
 
         int color = mins < 1 ? gameclocklowcolour : gameclockcolour;
         draw_text(buf, int(offset.x), int(offset.y), (color>>16)&0xFF, (color>>8)&0xFF, color&0xFF, gameclockalpha);
+        hudrect(offset.x, offset.y, tw, th);
 
         pophudmatrix();
     }
@@ -1633,6 +1742,7 @@ namespace game
         int alpha = p->ammo[gun] ? 0xFF : 0x7F;
         gle::color(bvec(0xFF, 0xFF, 0xFF), alpha);
         drawicon(HICON_FIST + gun, icondrawpos.x, icondrawpos.y);
+        hudrect(icondrawpos.x, icondrawpos.y, HICON_SIZE, HICON_SIZE);
 
         int fw, fh; text_bounds("000", fw, fh);
         float labeloffset = HICON_SIZE / 2.0f + ammobarcountsep + ammobarcountscale * (ammobarhorizontal ? fh : fw) / 2.0f;
@@ -1650,6 +1760,7 @@ namespace game
         float ammoratio = (float)p->ammo[gun] / itemstats[gun-GUN_SG].add;
         bvec color = bvec::hexcolor(p->ammo[gun] == 0 || ammoratio >= 1.0f ? 0xFFFFFF : (ammoratio >= 0.5f ? 0xFFC040 : 0xFF0000));
         draw_text(label, textdrawpos.x, textdrawpos.y, color.r, color.g, color.b, alpha);
+        hudrect(textdrawpos.x, textdrawpos.y, tw, th);
 
         pophudmatrix();
     }
@@ -1662,6 +1773,7 @@ namespace game
     void drawammobar(int w, int h, fpsent *p)
     {
         if(m_insta) return;
+        hudscope part("ammobar", "Ammo bar");
 
         int NUMPLAYERGUNS = GUN_PISTOL - GUN_SG + 1;
         int numvisibleguns = NUMPLAYERGUNS;
@@ -1808,7 +1920,8 @@ namespace game
         int lifetime = killfeedfade * 1000;
         while(killfeedlines.length() && lastmillis - killfeedlines[0].millis >= lifetime)
             killfeedlines.remove(0);
-        if(killfeedlines.empty()) return;
+        if(killfeedlines.empty() && !hudeditactive()) return;
+        hudscope part("killfeed", "Kill feed");
 
         pushhudmatrix();
         hudmatrix.scale(killfeedscale, killfeedscale, 1);
@@ -1828,8 +1941,16 @@ namespace game
             killfeedline &e = killfeedlines[i];
             int age = lastmillis - e.millis;
             if(age < 0 || age >= lifetime) continue;
-            if(killfeedfilter == 2 && !e.mine) continue;
-            if(killfeedfilter == 1 && !e.myteam) continue;
+            // "mine" / "my team" = the player whose view you have (spectated
+            // player, demo recorder), yourself otherwise
+            if(killfeedfilter)
+            {
+                fpsent *v = vsviewer();
+                bool vmine = e.victimcn == v->clientnum || e.actorcn == v->clientnum;
+                bool vteam = e.victimcn == v->clientnum || (!e.suicide && (e.actorcn == v->clientnum || isteam(e.actorteam, v->team)));
+                if(killfeedfilter == 2 && !vmine) continue;
+                if(killfeedfilter == 1 && !vteam) continue;
+            }
 
             int alpha = 255;
             int fadetime = max(lifetime / 4, 1);
@@ -1846,13 +1967,25 @@ namespace game
             if(e.showreact && !e.pending)
             {
                 formatreact(rtxt, sizeof(rtxt), e.fovms, e.xhms, e.approx);
-                text_bounds(rtxt, rw, rh);
             }
+            // the score of that moment, seen by the player you watch (a later frag does not change old lines)
+            string vs = "";
+            if(killfeedvs && !e.suicide)
+            {
+                fpsent *v = vsviewer();
+                int k = -1, d = -1;
+                if(v && e.actorcn == v->clientnum) { k = e.vsak; d = e.vsvk; }
+                else if(v && e.victimcn == v->clientnum) { k = e.vsvk; d = e.vsak; }
+                if(k >= 0 && (k || d)) formatstring(vs, "\f0%d\f7-\f3%d", k, d);
+            }
+            if(vs[0]) concformatstring(rtxt, "%s\f7[%s\f7]", rtxt[0] ? "  " : "", vs);
+            if(rtxt[0]) text_bounds(rtxt, rw, rh);
             int totalw = (e.suicide ? vw : kw + gap + vw) + (iconw ? gap + iconw : 0) + (rw ? gap + rw : 0);
 
             float lx = x;
             if(killfeedalign > 0) lx -= totalw;
             else if(!killfeedalign) lx -= totalw / 2.0f;
+            hudrect(lx, y, totalw, lineh);
 
             int texty = int(y) + (lineh - fonth) / 2;
             int icony = int(y) + (lineh - iconsz) / 2;
@@ -1889,6 +2022,12 @@ namespace game
             y += lineh;
             shown++;
         }
+        if(!shown && hudeditactive())
+        {
+            // nothing to show: where the first line would go, so it can be moved
+            float sw = 14*fonth, sx = x - (killfeedalign > 0 ? sw : (!killfeedalign ? sw/2 : 0));
+            hudrect(sx, y, sw, lineh);
+        }
 
         pophudmatrix();
     }
@@ -1898,9 +2037,25 @@ namespace game
         int lifetime = killstreakfade * 1000;
         while(streakpopups.length() && lastmillis - streakpopups[0].millis >= lifetime)
             streakpopups.remove(0);
-        if(!killstreak || streakpopups.empty()) return;
+        if(!killstreak || (streakpopups.empty() && !hudeditactive())) return;
+        hudscope part("killstreak", "Killing spree");
 
         float y = killstreaky * h;
+        if(streakpopups.empty())
+        {
+            // editing with nothing to show: a sample line where it would be
+            float scale = max(killstreakscale, 0.15f);
+            int tw = 0, th = 0;
+            text_bounds("PLAYER  5 STREAK", tw, th);
+            pushhudmatrix();
+            hudmatrix.scale(scale, scale, 1);
+            flushhudmatrix();
+            float x = killstreakx * w / scale;
+            if(killstreakalign > 0) x -= tw;
+            else if(!killstreakalign) x -= tw / 2.0f;
+            hudrect(x, y / scale - th / 2.0f, tw, th);
+            pophudmatrix();
+        }
         loopv(streakpopups)
         {
             streakpopup &p = streakpopups[i];
@@ -1928,10 +2083,83 @@ namespace game
 
             int r = p.mine ? 255 : 220, g = p.mine ? 220 : 220, b = p.mine ? 32 : 220;
             draw_text(p.text, int(x), int(ly), r, g, b, alpha);
+            hudrect(x, ly, tw, th);
 
             pophudmatrix();
             y += th * scale + 8;
         }
+    }
+
+    // big CTF messages, apart from the kill feed: a flag stolen or picked
+    // up, a flag scored (with the run time when it came from the base)
+    VARP(flagfeed, 0, 1, 1);
+    VARP(flagfeedfade, 1, 4, 20);
+    struct flagfeedline { string text; int icon, millis; };
+    static vector<flagfeedline> flagfeedlines;
+
+    void addflagfeed(const char *text, int icon)
+    {
+        if(!flagfeed) return;
+        while(flagfeedlines.length() >= 3) flagfeedlines.remove(0);
+        flagfeedline &l = flagfeedlines.add();
+        copystring(l.text, text);
+        l.icon = icon;
+        l.millis = lastmillis;
+    }
+
+    void drawflagfeed(int w, int h)
+    {
+        int lifetime = flagfeedfade*1000;
+        while(flagfeedlines.length() && (lastmillis - flagfeedlines[0].millis >= lifetime || lastmillis < flagfeedlines[0].millis))
+            flagfeedlines.remove(0);
+        if(!flagfeed || (flagfeedlines.empty() && !hudeditactive())) return;
+        hudscope part("flagfeed", "Flag messages (CTF)");
+
+        float sc = h/1800.0f*1.3f;
+        pushhudmatrix();
+        hudmatrix.scale(sc, sc, 1);
+        flushhudmatrix();
+
+        int dummy, fonth;
+        text_bounds("Ag", dummy, fonth);
+        float iconsz = fonth*1.3f, gap = fonth*0.4f, lineh = iconsz + fonth*0.3f;
+        float cx = w*0.5f/sc, y = h*0.2f/sc;
+        if(flagfeedlines.empty())
+        {
+            // editing with nothing to show: where a line would go
+            int tw, th;
+            text_bounds("PLAYER stole the enemy flag", tw, th);
+            float tot = iconsz + gap + tw;
+            hudrect(cx - tot/2, y, tot, lineh);
+        }
+        loopv(flagfeedlines)
+        {
+            flagfeedline &l = flagfeedlines[i];
+            int age = lastmillis - l.millis, alpha = 255, fadetime = max(lifetime/4, 1);
+            if(age > lifetime - fadetime) alpha = 255*(lifetime - age)/fadetime;
+            // a short pop when it arrives
+            float pop = age < 150 ? 1.25f - 0.25f*age/150.0f : 1;
+            int tw, th;
+            text_bounds(l.text, tw, th);
+            float tot = (l.icon >= 0 ? iconsz + gap : 0) + tw;
+            pushhudmatrix();
+            hudmatrix.translate(cx, y + lineh/2, 0);
+            hudmatrix.scale(pop, pop, 1);
+            flushhudmatrix();
+            float x = -tot/2, ty = -th/2.0f;
+            if(l.icon >= 0)
+            {
+                gle::color(bvec(0xFF, 0xFF, 0xFF), alpha);
+                drawicon(l.icon, x, -iconsz/2, iconsz);
+                gle::color(bvec(0xFF, 0xFF, 0xFF), 255);
+                x += iconsz + gap;
+            }
+            draw_text(l.text, int(x), int(ty), 255, 255, 255, alpha);
+            hudrect(-tot/2, -lineh/2, tot, lineh);
+            pophudmatrix();
+            y += lineh;
+        }
+        pophudmatrix();
     }
 
     void gameplayhud(int w, int h)
@@ -1950,12 +2178,15 @@ namespace game
             text_bounds(f ? colorname(f) : " ", fw, fh);
             fh = max(fh, ph);
             int specy = demoplayback ? 1480 : 1650;
+            hudscope part("spectator", "Spectator / watched player");
             draw_text("SPECTATOR", w*1800/h - tw - pw, specy - th - fh);
+            hudrect(w*1800/h - tw - pw, specy - th - fh, tw, th);
             if(f)
             {
                 int color = demoplayback ? demohd::namecolor(f, statuscolor(f, 0xFFFFFF)) : statuscolor(f, 0xFFFFFF);
                 color = friendnamecolor(f, color);
                 draw_text(colorname(f), w*1800/h - fw - pw, specy - fh, (color>>16)&0xFF, (color>>8)&0xFF, color&0xFF);
+                hudrect(w*1800/h - fw - pw, specy - fh, fw, fh);
             }
             const char *st = demohd::hudstatus();
             if(st && st[0])
@@ -1965,6 +2196,7 @@ namespace game
                 int hdcol = (strstr(st, "HD") && !strstr(st, "unavailable")) ? 0x80FF80 : 0xC0C0C0;
                 if(strstr(st, "vanilla") || strstr(st, "free cam") || strstr(st, "off")) hdcol = 0xC0C0C0;
                 draw_text(st, w*1800/h - sw - pw, specy - th - fh - sh - 8, (hdcol>>16)&0xFF, (hdcol>>8)&0xFF, hdcol&0xFF);
+                hudrect(w*1800/h - sw - pw, specy - th - fh - sh - 8, sw, sh);
             }
         }
 
@@ -1973,6 +2205,39 @@ namespace game
         {
             if(d->state!=CS_SPECTATOR) drawhudicons(d);
             if(cmode) cmode->drawhud(d, w, h);
+        }
+        // HUD editor: frames at the default place of the parts that only
+        // show in some modes, so they can be placed from anywhere
+        if(hudeditactive())
+        {
+            if(!cmode)
+            {
+                int s = 1800/4, x = 1800*w/h - s - s/10, y = s/10;
+                hudscope part("radar", "Radar / minimap");
+                hudrect(x - 0.04f*s, y - 0.04f*s, 1.08f*s, 1.08f*s);
+            }
+            if(!m_ctf)
+            {
+                extern int flagtimer;
+                if(flagtimer)
+                {
+                    hudscope part("flagtimer", "Flag timer");
+                    pushhudmatrix();
+                    hudmatrix.scale(2, 2, 1);
+                    flushhudmatrix();
+                    int tw, th;
+                    text_bounds("0:12.3", tw, th);
+                    hudrect((1800*w/h - 40)/2 - tw, 1700/2 - th, tw, th);
+                    pophudmatrix();
+                }
+            }
+            if(player1->state!=CS_SPECTATOR)
+            {
+                int tw, th;
+                text_bounds("SPECTATOR", tw, th);
+                hudscope part("spectator", "Spectator / watched player");
+                hudrect(w*1800/h - 2*tw, 1650 - 3*th, 2*tw - th, 3*th);
+            }
         }
 
         pophudmatrix();
@@ -1983,6 +2248,7 @@ namespace game
         {
             if(killfeed) drawkillfeed(w, h);
             drawkillstreak(w, h);
+            drawflagfeed(w, h);
         }
 
         if(d->state!=CS_EDITING && d->state!=CS_SPECTATOR && d->state!=CS_DEAD)
@@ -2005,6 +2271,7 @@ namespace game
 
     VARP(teamcrosshair, 0, 1, 1);
     VARP(hitcrosshair, 0, 425, 1000);
+    VARP(crosshairreloaddim, 0, 0, 1); // 1 = crosshair at half brightness between shots (vanilla)
 
     const char *defaultcrosshair(int index)
     {
@@ -2035,12 +2302,32 @@ namespace game
             }
         }
 
-        if(crosshair!=1 && !editmode && !m_insta)
+        bool tinted = false;
+        if(crosshair==2 && lasthitcn >= 0)
+        {
+            // hit crosshair in the colour of the friend you hit
+            fpsent *t = getclient(lasthitcn);
+            if(t && isfriend(t) && friendhascolor(isfriendally(t)))
+            {
+                color = friendcolorvec(isfriendally(t));
+                tinted = true;
+            }
+            else if(t)
+            {
+                // anyone else: blue if on the watched player's team, red otherwise (FFA too)
+                int vt = demohd::visteam(t);
+                bool ally = vt ? vt==1 : (m_teammode && isteam(t->team, d->team));
+                color = ally ? vec(0.25f, 0.5f, 1) : vec(1, 0.2f, 0.1f);
+                tinted = true;
+            }
+        }
+
+        if(crosshair!=1 && !tinted && !editmode && !m_insta)
         {
             if(d->health<=25) color = vec(1, 0, 0);
             else if(d->health<=50) color = vec(1, 0.5f, 0);
         }
-        if(d->gunwait) color.mul(0.5f);
+        if(d->gunwait && crosshairreloaddim) color.mul(0.5f);
         return crosshair;
     }
 

@@ -1,0 +1,18 @@
+﻿# Empty starter for this language. Do NOT copy French examples here.
+# Live file: exemples.txt (prefix "es in exact |" or "es in ex |").
+#
+# Two kinds (in-game examples tab radios, also used by /tfix):
+#   es in exact | original | translation   = this phrase only, no extra AI work
+#   es in ex    | original | translation   = few-shot; more = slower AI
+# Keep as many as you want. The warning in the menu is enough.
+#
+# In-game: Esc → options → console → chat translation → examples tab.
+#
+# in  = incoming chat
+# out = what you send
+# f   = only if I am a woman is checked
+# = as the translation means: do not translate.
+#
+# Uncomment to try:
+# es in exact | original here | translation here
+# es in ex | original here | translation here

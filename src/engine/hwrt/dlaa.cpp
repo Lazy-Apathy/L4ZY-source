@@ -3837,7 +3837,9 @@ static bool submitvk(bool roundtrip, const hwrttemporalinput *tin, bool reset, b
     VkResult wr = vkWaitForFences(hwrtdev.device, 1, &fences[fifslot], VK_TRUE, 0);
     if(wr == VK_TIMEOUT)
     {
+        double t0 = latency_watchblocks() ? latency_now() : 0;
         vkWaitForFences(hwrtdev.device, 1, &fences[fifslot], VK_TRUE, UINT64_MAX);
+        if(t0) latency_blocked(t0, latency_now());
         hwrtfencestalls++;
     }
     vkResetCommandBuffer(cmdbuf[fifslot], 0);

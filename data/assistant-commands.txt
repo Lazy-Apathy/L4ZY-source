@@ -1,0 +1,50 @@
+# Commands the settings assistant may propose (Settings > Assistant).
+# Settings themselves (crosshairsize 30, gamma 110...) need nothing here:
+# any setting of the menus or saved in config.cfg is already allowed, inside
+# its own limits. This file lists the other commands.
+#
+#   cmd NAME ARGS | what it does | extra search words
+#   action NAME ARGS | what it does | extra search words
+#
+# "action" = only allowed as what a key does (bind KEY action).
+# ARGS: KEY (key name), ACTION (one allowed command or action), INT, NUM,
+# WORD, TEXT, PAGE (a settings page); "?" = optional.
+# Whatever this file says, the game never lets the assistant run quit,
+# connect, exec, alias, say, writecfg and the like, nor any script.
+# /assistantreload re-reads this file.
+
+cmd bind KEY ACTION | put an action on a key (while playing) | touche touches clavier bouton assigner raccourci key keys shortcut
+cmd specbind KEY ACTION | put an action on a key (while spectating) | touche spectateur spec clavier
+cmd showgui PAGE | open a settings page | ouvrir menu page afficher
+cmd cyclemycolor | change my own name colour to the next one | couleur nom pseudo
+cmd mixreset | put all sound mix sliders back to default | son mix defaut reinitialiser
+cmd clearconsole | empty the console | console effacer vider
+cmd hudedit | open the HUD editor: every part of the HUD gets a frame the player drags with the mouse (right click puts one back, Esc when done) | hud deplacer placer disposition glisser bouger interface ecran position
+cmd hudlayoutreset | put every HUD part back in its original place | hud reinitialiser remettre position origine
+
+action forward | move forward | avancer avant deplacement
+action backward | move backward | reculer arriere deplacement
+action left | strafe left | gauche deplacement
+action right | strafe right | droite deplacement
+action jump | jump | sauter saut
+action attack | shoot | tirer tir feu
+action togglezoom | zoom in/out (rifle scope) | zoom viser lunette
+action saycommand | open the chat to type a message | chat ecrire message parler
+action sayteamcommand | open the team chat | chat equipe message
+action showscores | show the scoreboard while held | tableau scores classement
+action toggleconsole | open/close the full console | console
+action togglechat | open/close the full chat | chat historique
+action togglekilllog | open/close the full kill list | killfeed frags liste
+action toggletranslate | turn chat translation on/off | traduction traduire
+action tretry | translate the last message again | traduction retraduire
+action togglematchrecord | start/stop the match video recording | video enregistrement
+action toggledemorecord | start/stop the demo recording | demo enregistrement
+action screenshot | take a screenshot | capture ecran photo
+action setweapon WORD | choose a weapon: FI fist, SG shotgun, CG chaingun, RL rockets, RI rifle, GL grenades, PI pistol | arme armes fusil roquette grenade pistolet
+action weapon | switch to the next weapon | arme suivante changer
+action nextweapon INT? | next (1) or previous (-1) weapon | arme suivante precedente molette
+action dropflag | drop the flag (ctf) | drapeau lacher
+action taunt | taunt | provoquer
+action edittoggle | switch edit mode | edition editer carte
+action follow | follow a player (spectator) | suivre spectateur
+action nextfollow INT? | follow the next (1) or previous (-1) player | suivre suivant spectateur

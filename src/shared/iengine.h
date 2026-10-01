@@ -329,6 +329,19 @@ extern void resethudmatrix();
 extern void pushhudmatrix();
 extern void flushhudmatrix(bool flushparams = true);
 extern void pophudmatrix(bool flush = true, bool flushparams = true);
+
+// movable HUD parts (engine/hudlayout.cpp): draw a part between hudbegin and
+// hudend (or inside a hudscope) and report where with hudrect, in the
+// coordinates it draws with; the player can then drag it (/hudedit)
+extern void hudbegin(const char *id, const char *label);
+extern void hudend();
+extern void hudrect(float x, float y, float w, float h);
+extern bool hudeditactive();
+struct hudscope
+{
+    hudscope(const char *id, const char *label) { hudbegin(id, label); }
+    ~hudscope() { hudend(); }
+};
 extern void pushhudscale(float sx, float sy = 0);
 extern void pushhudtranslate(float tx, float ty, float sx = 0, float sy = 0);
 
@@ -569,6 +582,8 @@ struct g3d_gui
         return button(str, color, icon);
     }
     virtual int title(const char *text, int color, const char *icon = NULL) = 0;
+    // laid out like button() but greyed out, and it never reports a click
+    virtual int disabledbutton(const char *text, const char *icon = NULL) { return this->text(text, 0x707070, icon) & G3D_ROLLOVER; }
     int titlef(const char *fmt, int color, const char *icon = NULL, ...) PRINTFARGS(2, 5)
     {
         defvformatstring(str, icon, fmt);

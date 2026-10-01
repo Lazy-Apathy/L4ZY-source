@@ -57,9 +57,15 @@ namespace game
 
     static const char *friendsfile() { return "friends.cfg"; }
 
+    // "same team" as seen by the viewer: in your own HD demo, the recorder's team;
+    // when spectating, the team of the player you follow; otherwise yours
     bool isfriendally(fpsent *d)
     {
-        return d && player1 && m_teammode && isteam(d->team, player1->team);
+        if(!d || !player1) return false;
+        if(int vt = demohd::visteam(d)) return vt == 1;
+        fpsent *ref = player1;
+        if(player1->state==CS_SPECTATOR) { fpsent *f = followingplayer(); if(f) ref = f; }
+        return m_teammode && isteam(d->team, ref->team);
     }
 
     static int friendcoloridx(bool ally)
@@ -197,6 +203,7 @@ namespace game
         if(!d || !player1) return false;
         if(d == player1) return true;
         if(d->aitype != AI_NONE) return false;
+        if(demohd::isrecorder(d)) return true; // you, in a demo you recorded
         return d->clientnum >= 0 && d->clientnum == player1->clientnum;
     }
 
@@ -208,13 +215,16 @@ namespace game
 
     int friendnamecolor(fpsent *d, int fallback)
     {
+        int c;
         if(isselfplayer(d))
         {
             if(!selfhascolor()) return fallback;
-            return selfrgb();
+            c = selfrgb();
         }
-        if(!isfriend(d) || !friendhascolor(isfriendally(d))) return fallback;
-        return friendrgb(isfriendally(d));
+        else if(!isfriend(d) || !friendhascolor(isfriendally(d))) return fallback;
+        else c = friendrgb(isfriendally(d));
+        if(d->state==CS_DEAD) c = (c>>1)&0x7F7F7F; // dimmed like any other dead name
+        return c;
     }
 
     static void addfriendnick(const char *raw)

@@ -1617,6 +1617,27 @@ static void read_curve_swap()
     hflush();
 }
 
+// Low latency: DXGI lets up to three presents wait for the screen by default;
+// with V-Sync that is up to three refreshes between the frame and the screen.
+// One keeps the GPU fed. Without V-Sync the flip model already drops stale
+// frames and a shorter queue only costs frame rate, so it is left alone, as
+// it is with Off.
+static int g_framelatency = 0;
+static void apply_framelatency()
+{
+    extern int lowlatency;
+    int want = lowlatency && curvsync > 0 ? 1 : 3;
+    if(!g_dev || want == g_framelatency || (!g_framelatency && want == 3)) return;
+    IDXGIDevice1 *d1 = NULL;
+    if(SUCCEEDED(g_dev->QueryInterface(IID_IDXGIDevice1, (void **)&d1)) && d1)
+    {
+        HRESULT hr = d1->SetMaximumFrameLatency(want);
+        d1->Release();
+        logoutf("hdrout api SetMaximumFrameLatency %d hr 0x%08X", want, (unsigned)hr);
+    }
+    g_framelatency = want;
+}
+
 static bool present_dx()
 {
     if(!g_ctx || !g_srv || !g_swap || !g_vs)
@@ -1679,6 +1700,7 @@ static bool present_dx()
         abandon_hdr("simulation: Present echoue");
         return false;
     }
+    apply_framelatency();
     UINT sync = curvsync > 0 ? 1u : 0u;
     double t1 = perf_now();
     HRESULT hr = g_swap->Present(sync, 0);
@@ -2985,6 +3007,15 @@ void hdrout_start()
     g_adapter[0] = g_output[0] = g_gl[0] = g_luid[0] = g_reason[0] = 0;
     const GLubyte *rend = glGetString(GL_RENDERER);
     copystring(g_gl, rend ? (const char *)rend : "inconnu", sizeof(g_gl));
+    // Diagnostic switch (black screen reports): with hdrout-off.txt in the
+    // profile, no D3D device / DXGI surface is created at all, only OpenGL.
+    if(fileexists(findfile("hdrout-off.txt", "r"), "r"))
+    {
+        set_reason("desactive par hdrout-off.txt");
+        logoutf("hdrout desactive: hdrout-off.txt present, aucune surface D3D/DXGI creee (OpenGL seul)");
+        log_state("demarrage");
+        return;
+    }
     if(!screen)
     {
         set_reason("fenetre SDL absente");
@@ -3125,6 +3156,7 @@ void hdrout_shutdown()
     g_dx = NULL;
     if(g_ctx) { g_ctx->Release(); g_ctx = NULL; }
     if(g_dev) { g_dev->Release(); g_dev = NULL; }
+    g_framelatency = 0;
     if(g_factory) { g_factory->Release(); g_factory = NULL; }
     if(g_child) { DestroyWindow(g_child); g_child = NULL; }
     g_child_on = false;

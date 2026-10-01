@@ -1,0 +1,184 @@
+# Settings search keywords (Settings > Search).
+# "variable: words" adds search words to that setting.
+# "=word: other words" makes a typed word also look for the other words.
+# Accents and upper case do not matter. Any setting in the menus is already
+# found by its label, its page and its variable name: this file only adds
+# other ways to say it (French, synonyms). /settingsearchreload re-reads it.
+
+# --- query synonyms (French -> English words used in the menus) ---
+=son: sound volume audio mix music
+=sons: sound volume audio mix
+=bruit: sound volume mix
+=musique: music musicvol
+=volume: sound volume soundvol musicvol
+=souris: mouse sensitivity invmouse
+=sensibilite: mouse sensitivity sens
+=inverser: invert invmouse
+=viseur: crosshair
+=croix: crosshair
+=reticule: crosshair
+=lumiere: light lighting fullbright bright
+=eclairage: light lighting hwrt
+=luminosite: gamma bright fullbright hdr
+=clair: fullbright bright
+=sombre: gamma fullbright bright
+=ombre: shadow selfshadow blobs
+=ombres: shadow blobs
+=reflet: reflection envmap
+=reflets: reflection envmap
+=eau: water waterrefract waterreflect caustics
+=herbe: grass
+=sang: blood
+=cadavre: ragdoll dead
+=cadavres: ragdoll dead
+=mort: death dead deathscore
+=morts: deaths dead
+=ecran: display screen fullscreen hud
+=pleinecran: fullscreen windowmode
+=plein: fullscreen windowmode
+=fenetre: windowmode fullscreen
+=vsync: vsync
+=synchro: vsync
+=champ: fov field
+=vision: fov field view
+=fps: fps showfps
+=images: fps
+=horloge: clock wallclock gameclock
+=heure: clock wallclock
+=temps: clock time gameclock react
+=chrono: gameclock clock
+=scores: scoreboard score
+=tableau: scoreboard
+=classement: scoreboard
+=colonne: scoreboard columns
+=colonnes: scoreboard columns
+=langue: lang languages translate
+=langues: languages lang translate
+=traduction: translate translation
+=traduire: translate
+=chat: chat console translate
+=console: console
+=amis: friends friend
+=ami: friend friends
+=couleur: colour color colors tint
+=couleurs: colors colour
+=equipe: team teamskins teammates
+=coequipier: teammates team
+=modele: model models playermodel
+=modeles: models playermodels
+=personnage: model playermodel
+=arme: gun weapon hudgun
+=armes: guns weapons hudgun ammo
+=munitions: ammo ammobar
+=balles: ammo
+=kill: kill killfeed killstreak
+=frag: frags killfeed
+=frags: frags killfeed
+=serie: streak killstreak
+=reaction: react reacttime
+=demo: demo record
+=demos: demo record demokeep
+=enregistrer: record recording
+=enregistrement: record recording
+=video: record video matchrec
+=videos: record video matchkeep
+=qualite: quality detail
+=performance: fps quality detail lowdetail
+=anticrenelage: antialiasing aa fsaa taa dlaa
+=aliasing: antialiasing aa fsaa
+=flou: blur motionblur
+=raytracing: ray tracing rt hwrt
+=rt: ray tracing hwrt
+=hdr: hdr
+=menu: menus gui
+=menus: menus gui
+=transparence: opacity alpha
+=opacite: opacity alpha
+=taille: size scale
+=position: align x y
+=noir: dark gamma fullbright bright
+=obscur: dark gamma fullbright
+=fort: volume loud
+=faible: volume quiet
+=petit: size scale
+=grand: size scale
+=gros: size scale
+=touche: bind key keys
+=clavier: bind key keys
+=joueurs: players playermodel fullbright
+=ennemis: players enemy playermodel fullbright
+=tirs: weapons shots
+=vitesse: sensitivity speed
+=lent: sensitivity
+=rapide: sensitivity
+
+# --- extra words on settings ---
+soundvol: son general principal master volume
+musicvol: musique music
+hitsound: son touche hit ping impact
+mixweapons: son armes tirs explosions
+mixhits: son touche impact
+mixpain: son douleur mort cris
+mixitems: son objets ramasser
+mixannounce: son annonces quad
+mixflags: son drapeaux ctf
+mixmove: son pas saut atterrissage
+mixworld: son ambiance carte
+mumble: vocal voix
+son3d: son 3d spatial spatialise casque ecouteurs hrtf binaural enceintes haut-parleurs steam audio devant derriere direction
+son3docclusion: occlusion murs mur etouffe etouffement son 3d
+crosshairsize: taille viseur
+crosshairfx: effets viseur
+crosshaircolors: vie couleur viseur
+crosshaircolour: couleur viseur hexadecimal hex teinte
+mycolor: couleur perso personnage joueur corps pseudo nom
+friendallycolor: couleur ami amis equipe allie coequipier
+friendenemycolor: couleur ami amis adversaire ennemi autre equipe
+teamcrosshair: equipe coequipier viseur couleur bleu
+hitcrosshair: touche hit viseur couleur rouge bleu amis
+crosshairreloaddim: grise gris rechargement recharge
+fullbrightmodels: lumineux eclaire joueurs visible
+forceplayermodels: meme modele joueurs identiques
+teamskins: equipe couleurs rouge bleu
+hudgun: arme main bras premiere personne
+hudgunsway: balancement arme
+muzzleflash: flash tir
+muzzlelight: lumiere tir
+showfps: images par seconde compteur
+fov: champ de vision angle
+vsync: synchronisation verticale dechirement
+lowlatency: latence faible retard souris input lag reflex reactivite
+windowmode: plein ecran fenetre exclusif
+gamma: luminosite
+blood: sang gore
+ragdoll: cadavre physique corps
+hidedead: cacher morts corps
+killfeed: morts liste frags qui a tue
+reacttime: temps de reaction ms
+killfeedvs: compteur duel contre tue morte
+showvs: compteur duel contre tue morte
+showlang: langues langue
+showkd: ratio tues morts
+showaccuracy: precision
+showping: latence ping
+deathscore: tableau a la mort
+scoreboardalpha: transparence opacite tableau
+translatechat: traduction traduire chat recu
+translateteamchat: traduction equipe
+translatepreview: apercu frappe traduction
+translatefemme: femme feminin accord
+hwrt: ray tracing rt eclairage raytracing
+hdroutpref: hdr sdr sortie ecran
+hwrtngxmode: dlss dlaa anticrenelage
+looktaa: anticrenelage temporel taa
+lookao: ombres occlusion ssao
+lookselfshadow: ombre soleil
+invmouse: inverser souris
+consize: console lignes taille
+miniconfilter: chat console
+demokeep: demos garder nombre
+matchkeep: videos garder nombre
+flagtimer: drapeau chrono compteur temps ctf porteur
+=deplacer: move hudedit
+=disposition: hudedit layout
+flagfeed: drapeau message annonce vol marque capture ctf gros

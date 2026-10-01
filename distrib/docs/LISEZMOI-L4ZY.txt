@@ -1,0 +1,47 @@
+SAUER-RT - NOTICE JOUEUR
+========================
+
+Installer
+  Lance L4ZY-Setup-<version>.exe. Pas besoin des droits administrateur,
+  pas besoin d'installer Python ni autre chose. Dossier par defaut :
+  %LOCALAPPDATA%\Programs\L4ZY.
+
+Jouer
+  Lance "L4ZY" (bureau ou menu Demarrer). C'est le seul programme a
+  ouvrir : il demarre aussi la traduction du chat et verifie les mises a
+  jour, puis arrete tout quand tu quittes le jeu.
+
+Traduction du chat
+  Aucun modele n'est installe d'office. Dans le jeu : Chat Translation ->
+  Model -> Install (Small 2,5 Go, Normal 5 Go...), avec taille et
+  progression ; tu peux jouer pendant le telechargement.
+  Si la carte graphique ne peut pas le faire tourner, il passe sur le
+  processeur (plus lent) et le menu l'indique.
+
+Mettre a jour
+  Menu principal -> "L4ZY <version> - Updates".
+  "Check for updates" pour chercher, puis "Update and restart".
+  Le telechargement se fait en fond ; le jeu redemarre quand tu le dis.
+  Tes reglages, tes corrections de traduction et tes modeles sont gardes.
+
+Revenir en arriere
+  Menu Demarrer -> "L4ZY - revenir a la version precedente"
+  (jeu ferme). Sinon, reinstaller l'ancienne version par son installateur.
+
+Tes donnees (jamais touchees par une mise a jour)
+  Documents\My Games\L4ZY  : reglages du jeu, captures, demos
+  %LOCALAPPDATA%\L4ZY        : traduction (reglages, corrections,
+                                   cle API eventuelle) et modeles
+
+Materiel
+  Windows 10/11 64 bits. Teste sur NVIDIA RTX. Le rendu RT, DLSS/DLAA et le
+  HDR natif demandent une carte NVIDIA RTX recente ; sans eux, utiliser
+  l'eclairage classique. Aucune garantie sur les autres cartes.
+
+-----------------------------------------------------------------------
+SAUER-RT - PLAYER NOTES (short)
+  Install: run the setup (no admin, no Python needed).
+  Play: start "L4ZY"; it also runs chat translation and update checks.
+  Update: main menu -> "L4ZY <version> - Updates" -> "Update and restart".
+  Roll back: Start menu -> "L4ZY - go back to the previous version".
+  Your settings, corrections and models are kept across updates.

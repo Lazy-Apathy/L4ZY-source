@@ -578,6 +578,8 @@ extern bool hwrtensureskyhistory();
 extern bool hwrtskyhistready();
 extern void hwrtinvalidateskyhistory();
 extern void hwrtskyhistsize(int &w, int &h);
+// hitlight's sky-ray blue-noise tile (binding 25) is uploaded and bound.
+extern bool hwrtskybluenoiseready();
 
 // NRD REBLUR_DIFFUSE on the raw skyvis scalar. Failure leaves skyage running.
 extern void hwrtnrdpreload();
@@ -616,6 +618,22 @@ extern void hwrtfail(const char *what, VkResult r);
 extern void hwrtfail(const char *what);
 extern const char *hwrtresultstr(VkResult r);
 extern bool hwrtwaitidle(const char *what);  // waits, names the real fault, disables the layer
+
+// Why the RT option cannot be offered, for the menu and the assistant (hwrtraison).
+// The first cause recorded during bring-up wins; a later hwrtfailed reads as FAILED.
+enum
+{
+    HWRT_WHY_NONE = 0,
+    HWRT_WHY_NOVULKAN,   // no Vulkan loader, no Vulkan driver or no Vulkan device
+    HWRT_WHY_DRIVER,     // driver too old: no GL/Vulkan sharing, or Vulkan below 1.2
+    HWRT_WHY_NOMATCH,    // Vulkan does not list the GPU OpenGL runs on
+    HWRT_WHY_NORT,       // the GPU has no hardware ray tracing (no ray query)
+    HWRT_WHY_FAILED      // it should work but failed to start: see the console
+};
+extern void hwrtunavailable(int why);
+// SAUER_HWRT_SIMULATE=novulkan|driver|nort|failed, read once at bring-up, fakes an
+// incompatible GPU through the real fallback path. Returns true if MODE is simulated.
+extern bool hwrtsimulating(const char *mode);
 
 #define HWRTCHECK(call, what) \
     do { \

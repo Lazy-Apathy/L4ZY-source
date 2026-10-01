@@ -344,7 +344,7 @@ void text_boundsf(const char *str, float &width, float &height, int maxwidth)
     #undef TEXTWORD
 }
 
-void draw_text(const char *str, int left, int top, int r, int g, int b, int a, int cursor, int maxwidth) 
+static void draw_text_raw(const char *str, int left, int top, int r, int g, int b, int a, int cursor, int maxwidth)
 {
     #define TEXTINDEX(idx) if(idx == cursor) { cx = x; cy = y; }
     #define TEXTWHITE(idx)
@@ -382,6 +382,22 @@ void draw_text(const char *str, int left, int top, int r, int g, int b, int a, i
     #undef TEXTCOLOR
     #undef TEXTCHAR
     #undef TEXTWORD
+}
+
+// a HUD part resized in the HUD editor can keep its text at the normal size
+// (engine/hudlayout.cpp): the text still goes where the stretched part puts
+// it, but its letters are drawn without the stretch
+float hudtextscalex = 1, hudtextscaley = 1;
+
+void draw_text(const char *str, int left, int top, int r, int g, int b, int a, int cursor, int maxwidth)
+{
+    if(hudtextscalex == 1 && hudtextscaley == 1) { draw_text_raw(str, left, top, r, g, b, a, cursor, maxwidth); return; }
+    pushhudmatrix();
+    hudmatrix.translate(left, top, 0);
+    hudmatrix.scale(hudtextscalex, hudtextscaley, 1);
+    flushhudmatrix();
+    draw_text_raw(str, 0, 0, r, g, b, a, cursor, maxwidth);
+    pophudmatrix();
 }
 
 void reloadfonts()

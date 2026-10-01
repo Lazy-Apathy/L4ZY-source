@@ -2467,6 +2467,29 @@ VARP(crosshairsize, 0, 15, 50);
 VARP(cursorsize, 0, 30, 50);
 VARP(crosshairfx, 0, 1, 1);
 VARP(crosshaircolors, 0, 1, 1);
+HVARP(crosshaircolour, 0, 0xFFFFFF, 0xFFFFFF); // resting colour; hit/teammate/health tints still override
+
+static vec crosshairbase()
+{
+    return vec(((crosshaircolour>>16)&0xFF)/255.0f, ((crosshaircolour>>8)&0xFF)/255.0f, (crosshaircolour&0xFF)/255.0f);
+}
+
+// crosshairhex "#FF8800" / "ff8800" / "0xFF8800" sets it; no argument returns "FF8800"
+ICOMMAND(crosshairhex, "s", (char *s),
+{
+    const char *p = s;
+    while(*p==' ' || *p=='#') p++;
+    if(p[0]=='0' && (p[1]=='x' || p[1]=='X')) p += 2;
+    if(*p)
+    {
+        char *end = NULL;
+        long c = strtol(p, &end, 16);
+        if(end == p + 6 && !*end) crosshaircolour = int(c);
+        else conoutf(CON_ERROR, "\f4crosshair colour: 6 hex digits, e.g. #FF8800");
+    }
+    defformatstring(hex, "%06X", crosshaircolour);
+    result(hex);
+});
 
 #define MAXCROSSHAIRS 4
 static Texture *crosshairs[MAXCROSSHAIRS] = { NULL, NULL, NULL, NULL };
@@ -2527,13 +2550,13 @@ void drawcrosshair(int w, int h)
 
     if(!menucursor)
     {
-        vec color(1, 1, 1);
+        vec base = crosshairbase(), color = base;
         int index = game::selectcrosshair(color);
-        if(index < 0 && democursor) { index = 0; color = vec(1, 1, 1); }
+        if(index < 0 && democursor) { index = 0; color = base; }
         if(index >= 0)
         {
             if(!crosshairfx) index = 0;
-            if(!crosshairfx || !crosshaircolors) color = vec(1, 1, 1);
+            if(!crosshairfx || !crosshaircolors) color = base;
             Texture *crosshair = crosshairs[index];
             if(!crosshair)
             {
@@ -2630,7 +2653,8 @@ void gl_drawhud()
     hudshader->set();
 
     int conw = int(w/conscale), conh = int(h/conscale), abovehud = conh - FONTH, limitgui = abovehud;
-    if(!hidehud && !mainmenu)
+    // the HUD editor also works from the main menu: the HUD is drawn over its background
+    if(!hidehud && (!mainmenu || hudeditactive()))
     {
         hwrtdrawtimes(conw, conh);
         if(!hidestats)
@@ -2640,6 +2664,7 @@ void gl_drawhud()
             flushhudmatrix();
 
             int roffset = 0;
+            hudbegin("stats", "FPS and clock");
             if(showfps)
             {
                 static int lastfps = 0, prevfps[3] = { 0, 0, 0 }, curfps[3] = { 0, 0, 0 };
@@ -2653,9 +2678,11 @@ void gl_drawhud()
                 loopi(3) if(prevfps[i]==curfps[i]) curfps[i] = nextfps[i];
                 if(showfpsrange) draw_textf("fps %d+%d-%d", conw-7*FONTH, conh-FONTH*3/2, curfps[0], curfps[1], curfps[2]);
                 else draw_textf("fps %d", conw-5*FONTH, conh-FONTH*3/2, curfps[0]);
+                hudrect(conw-(showfpsrange ? 7 : 5)*FONTH, conh-FONTH*3/2, (showfpsrange ? 7 : 5)*FONTH - FONTH/2, FONTH);
                 int ngxshow = hwrtngxmodeapplied();
                 if(ngxshow >= 2) draw_textf("DLSS-%c %dx%d", conw-13*FONTH, conh-FONTH*3/2 - FONTH, ngxshow==2?'Q':(ngxshow==3?'B':'P'), hwrtrenderw(), hwrtrenderh());
                 else if(ngxshow == 1) draw_textf("DLAA", conw-5*FONTH, conh-FONTH*3/2 - FONTH);
+                if(ngxshow) hudrect(conw-(ngxshow >= 2 ? 13 : 5)*FONTH, conh-FONTH*3/2 - FONTH, (ngxshow >= 2 ? 13 : 5)*FONTH - FONTH/2, FONTH);
                 roffset += FONTH;
                 if(ngxshow) roffset += FONTH;
             }
@@ -2675,10 +2702,13 @@ void gl_drawhud()
                     while(*src) *dst++ = tolower(*src++);
                     *dst++ = '\0'; 
                     draw_text(buf, conw-5*FONTH, conh-FONTH*3/2-roffset);
+                    hudrect(conw-5*FONTH, conh-FONTH*3/2-roffset, 5*FONTH - FONTH/2, FONTH);
                     roffset += FONTH;
                 }
             }
                        
+            hudend();
+
             if(editmode || showeditstats)
             {
                 static int laststats = 0, prevstats[8] = { 0, 0, 0, 0, 0, 0, 0 }, curstats[8] = { 0, 0, 0, 0, 0, 0, 0 };
@@ -2768,6 +2798,11 @@ void gl_drawhud()
     if(!hidehud || fullconsole || fullchat || game::fullkilllog) renderconsole(conw, conh, abovehud - FONTH/2);
     pophudmatrix();
 
+    extern void drawhudeditor(int w, int h);
+    glEnable(GL_BLEND);
+    drawhudeditor(w, h);
+    glDisable(GL_BLEND);
+    glEnable(GL_BLEND);
     drawcrosshair(w, h);
     hdrout_drawlabel();
 
@@ -2777,6 +2812,7 @@ void gl_drawhud()
 void cleanupgl()
 {
     hdrout_shutdown();
+    latency_cleanup();
     hwrtcleanup();
 
     cleanupmotionblur();

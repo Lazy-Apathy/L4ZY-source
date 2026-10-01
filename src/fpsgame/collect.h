@@ -452,11 +452,15 @@ struct collectclientmode : clientmode
             flushhudmatrix();
             draw_textf("%d", (x + HICON_SIZE + HICON_SPACE)/2, HICON_TEXTY/2, d->tokens);
             pophudmatrix();
+            hudscope part("icons", "Health, armour, ammo");
             drawicon(HICON_TOKEN, x, HICON_Y);
+            hudrect(x, HICON_Y, 2*HICON_SIZE, HICON_SIZE);
         }
 
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         int s = 1800/4, x = 1800*w/h - s - s/10, y = s/10;
+        hudscope radarpart("radar", "Radar / minimap");
+        hudrect(x - 0.04f*s, y - 0.04f*s, 1.08f*s, 1.08f*s);
         gle::colorf(1, 1, 1, minimapalpha);
         if(minimapalpha >= 1) glDisable(GL_BLEND);
         bindminimap();

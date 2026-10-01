@@ -1085,6 +1085,31 @@ static hwrtmodelblas *buildmodelblas(model *m)
         return NULL;
     }
 
+    // Cache full and not even an unpinned prune could free a slot: the slot
+    // search below would allocate and upload two buffers, wait for the device,
+    // prune nothing and drop the model anyway (thousands of times per second on
+    // triforts). Give up here instead. The gathering above stays first because
+    // it also registers this model's skins and envmaps.
+    if(dyn.ncache >= HWRT_MAX_MODEL_BLAS)
+    {
+        bool full = true;
+        loopi(dyn.ncache) if(!dyn.cache[i].m) { full = false; break; }
+        if(full && !cachehasunused(false))
+        {
+            // cachehasunused() may load a model on demand: look at the slots again.
+            loopi(dyn.ncache) if(!dyn.cache[i].m) { full = false; break; }
+            if(full && dyn.ncache >= HWRT_MAX_MODEL_BLAS)
+            {
+                if(!dyn.overflowlogged)
+                {
+                    conoutf(CON_WARN, "hwrt: more than %d unique model BLASes, extras dropped", int(HWRT_MAX_MODEL_BLAS));
+                    dyn.overflowlogged = true;
+                }
+                return NULL;
+            }
+        }
+    }
+
     const uint nverts = uint(positions.length());
     const uint nidx = uint(indices.length());
     const uint ntris = nidx/3;

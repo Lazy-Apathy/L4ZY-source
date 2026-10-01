@@ -268,6 +268,14 @@ SDK. Only after editing `shaders/debug.comp`, `shaders/silhouette.comp`,
 python tools/compile-hwrt-shaders.py
 ```
 
+The sky-ray blue-noise tile `shaders/bluenoise_tab.h` is generated and committed
+the same way. It only needs regenerating if the tile itself changes (the
+output is deterministic, so a rerun rewrites the same bytes; needs numpy):
+
+```
+python tools/generate-hwrt-bluenoise.py
+```
+
 **Launch.** Use `sauerbraten.bat`, or pass the home directory yourself — but it
 contains a space and *must* stay quoted:
 
@@ -361,6 +369,7 @@ config always wins.
 | `hwrtskyrays` | cosine-weighted hemisphere rays for skylight (default 4, cap 4). One ray is a coin flip; filter + TAA did not reach zero dots, so the default stays at the cap. `hwrtskyfilter` still averages leftover grain with a 5×5 on the same plane before the bake-style `max()`. Unfiltered on `authentic` at 1440p: 331 / 294 / 224 fps at 1 / 2 / 4 rays (GL 869) |
 | `hwrtskyfilter` | 1 (default) = the workgroup skyvis filter. Neighbours on the same plane share leftover grain. 0 is the raw term |
 | `hwrtskytemporal` | frames of skyvis to accumulate on top of the spatial filter (default 32, cap 128; 0 or 1 is off). skyvis is view-independent geometry, so a hit recognised as the same surface point inherits the whole running average that point carries — no colour clamp, and therefore not capped by its own neighbourhood the way `looktaa` is. History lives in a ping-pong `RGBA16F` pair (bindings 13/14), 59 MB at 1440p. 96 frames measure the same as 32: the ceiling is the rejection test, not the frame count |
+| `hwrtskybluenoise` | 1 (default) = the sky rays of the world pixels NRD denoises come from a 128×128 blue-noise tile (binding 25, two void-and-cluster masks, u1/u2) shifted every frame by the R2 sequence, the four rays of a pixel spread on a (1/2, 1/4) lattice. Same ray count, same estimator, same converged value; less grain into REBLUR. The skyage path (Sauer filter, models, NRD off) keeps the pcg hash. 0 = the hash everywhere. Not saved; a change reseeds the sky history |
 | `looktaa` | 0 (default) = FXAA. 1 = homemade temporal AA (Halton jitter + depth reprojection). Default is off: it smears moving players (no velocity) and did not remove 4-ray dots. The shader stays in `data/hwrt.cfg` / `data/glsl.cfg` as the DLAA foundation. `LOOK_apply` installs FXAA while this is 0 |
 | `hwrtvelocity` | 0 (default) = no extra work. 1 = write the velocity image every frame (static world, rigid mapmodels, colour-visible skinned players, first-person hudgun). Does not change the presented picture. Not VARP, so it is not saved |
 | `hwrtdlaajitter` | 0 (default) = off. 1 = trial Halton(2,3) subpixel offset once per main view, not saved. Independent of looktaa accumulation; looktaa jitter and resolve are skipped while this is on so the offset is not applied twice. The FPS gun gets the same pixel shift despite its own FOV. Turning it off restores the usual looktaa path. The jittered picture can shimmer: that is not DLAA quality |
@@ -372,6 +381,8 @@ config always wins.
 | `rtaobias` | origin offset along the reconstructed normal, so the ray does not self-hit |
 | `dlaa`, `dlss`, `dlssquality` | registered for later phases; they refuse to turn on and say why |
 | `hwrtavailable`, `hwrtrayquery`, `hwrtngx` | read-only capability flags |
+| `hwrtisavailable`, `hwrtraison` | 1 when RT can run; otherwise one short English line saying why (no Vulkan, driver too old, no hardware RT, failed to start). `data/menus.cfg` declares `settinglock hwrt 1 [hwrtraison]`, which greys out the "Ray tracing" radio, the settings search entry and makes the assistant refuse `hwrt 1` |
+| `SAUER_HWRT_SIMULATE` (environment) | diagnostic only, read at bring-up: `novulkan`, `driver`, `nort` or `failed` fakes an incompatible GPU through the real fallback path; `hwrtsimulated` returns the mode in force |
 | `hwrtstalls` | read-only count of frames where the CPU had to wait on a Vulkan fence. Should stay 0 |
 | `hwrttimes` | 1 draws a HUD overlay of the last completed interop stage times in milliseconds (GL mask / depth / composite, Vulkan BLAS / TLAS / dispatch, plus CPU skin/gather). Samples lag by a few frames; the CPU does not wait on them. `hwrtstats` always prints the same numbers |
 
@@ -590,6 +601,8 @@ rays already carry the grain; two 7×7 passes smeared mid/far lighting.
 World vs model is the smear gate, not hit-distance along the view: a floor
 seen at a graze changes T across a kernel and used to leave leftover dots.
 That is the whole spatial denoiser: skyvis is the only stochastic term.
+`hwrtskybluenoise` (on) only changes where those rays point for the world
+pixels NRD denoises; see "Sky-ray blue noise" below.
 The workgroup is 16×16 so a 5×5 kernel has a usable neighbourhood; 8×8
 showed as a tile, and an extra skyvis apron around each tile cost more
 than four rays.
@@ -679,6 +692,56 @@ Overlay 1, RTAO (5), hit-shade (6), diagnostics
 2/3/4, `hwrt` 0, `hwrtfailed`, and `!hwrtrayquery` keep sampling the bake.
 Mode 6 must: that view *is* the bake. If the reserved texs are missing, one
 log line and the bake stays on. `calclight` is untouched.
+
+## Sky-ray blue noise
+
+`hwrtskybluenoise` (default on) changes where the sky rays point, nothing
+else: same count (`hwrtskyrays`), same cosine-weighted estimator, same 5×5,
+same history, same NRD settings. It applies to the world pixels NRD denoises.
+
+The tile is `shaders/bluenoise_tab.h`: two independent 128×128
+void-and-cluster masks (Ulichney), 16 bits each, generated from scratch by
+`tools/generate-hwrt-bluenoise.py` (deterministic, no third-party data). A
+scalar void-and-cluster mask is the property that matters here: every
+threshold of it is an even scatter, so an occluder edge that cuts the
+hemisphere along u1 or u2 splits neighbouring pixels in the right
+proportion and the 5×5 averages less error. A first attempt with a 2D-vector
+(Georgiev–Fajardo) tile spread the pairs but not each coordinate and gave
+nothing through the filter; it is not used.
+
+Per pixel, the base sample is the tile value, in 0.32 fixed point. Every
+frame adds the same R2 step (plastic-number Kronecker sequence) to every pixel:
+a constant shift mod 1 keeps the tile's spatial layout, and each pixel walks a
+low-discrepancy sequence over time, so its running mean converges to the same
+value the pcg rays do (checked: no bias without temporal reuse, raw or
+filtered). The four rays of a pixel are the base plus k·(1/2, 1/4), a 4-point
+lattice, so a pixel already covers four azimuths and both radius halves.
+`hwrtskystable` keeps frame 0. A spatiotemporal (STBN-style) 64×64×32 mask was
+built and simulated as well; for 1/age accumulation and REBLUR's history it was
+no better than the R2 shift and eight times larger.
+
+Measured (lab, 2026-10-01, RTX 4070 Ti SUPER, 1600×900 window, SDR, still
+camera, 11 canon maps, 9 with sky light; reference = same chain with 256
+pcg rays per pixel averaged over 24 frames; error = RMSE of the skyvis view
+over world pixels, final image after DLAA/DLSS): with NRD the error falls by
+10 % on the first frame and 15 % after 64 frames in native, 7 % / 15 % with
+DLAA, 7 % / 16 % with DLSS Quality; frame-to-frame flicker of a still camera
+falls by 24 / 19 / 19 %. Under a 1.5°/frame camera turn the error is unchanged
+to 6 % lower and the lag (trailing bias) identical. No 16-pixel workgroup grid
+and no 128-pixel tile repetition above chance. GPU cost of the lighting pass:
+no measurable change (≤ 0.01 ms on 1.2–1.7 ms; triforts within its own
+block-to-block noise). Classic lighting never runs this shader.
+
+Why the skyage path (Sauer filter, models, NRD off) keeps the pcg hash: the
+first frames do improve (about −30 %), but its hold re-reads the frozen
+history every frame through a sub-pixel reprojection offset, which slowly
+smears and darkens it (−0.005 skyvis over 64 frames with a constant input,
+pcg or blue alike, `hwrtskystable 1`). Blue-noise estimates sit within the
+hold threshold more often, so they freeze more and inherit more of that drift:
+after 64 frames the error was 5–8 % higher, the mean about 0.0025 lower, the
+workgroup tile borders stood out more against a cleaner interior, and the
+frozen residual repeated faintly with the 128-pixel tile. That drift is a
+skyage defect of its own, worth fixing before revisiting this.
 
 ## Phase 6: mapmodels and dynents in the TLAS
 
@@ -897,6 +960,7 @@ the two queues deadlock.
 | `shaders/rtao.comp` | phase 3 depth reconstruct + hemisphere `rayQueryKHR`. Same compile script |
 | `shaders/hitshade.comp` | phase 4 camera primary ray + interpolated UV, `diffuse * lightmap`. Same compile script |
 | `shaders/hitlight.comp` | camera primary ray + Lambert point lights + sun + sky + shadow rays. Mode 7 also shades model hits (`SHADE_MODELS`) from a parallel attribute SSBO. `hwrtskyfilter` averages skyvis in 16×16 shared memory before the combine, then `hwrtskytemporal` reprojects and blends it against the ping-pong history. Same compile script |
+| `shaders/bluenoise_tab.h` | 128×128 sky-ray blue-noise tile (two void-and-cluster masks, 16 bits each), generated by `tools/generate-hwrt-bluenoise.py`, uploaded once into hitlight's binding 25 |
 
 Engine hooks: `gl_init` calls `hwrtinit`, `gl_drawframe` calls `hwrtrender`
 right after `hwrtsnapscenedepth()` and before the decals and the first-person

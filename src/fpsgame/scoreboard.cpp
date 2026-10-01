@@ -1,6 +1,8 @@
 // creation of scoreboard
 #include "game.h"
 
+extern bool gui2dvisible(); // engine: a menu is open
+
 namespace game
 {
     VARP(scoreboard2d, 0, 1, 1);
@@ -19,6 +21,7 @@ namespace game
     VARP(showflags, 0, 0, 1);
     VARP(showaccuracy, 0, 0, 1);
     VARP(showlang, 0, 1, 1);
+    VARP(showvs, 0, 1, 1);          // per-opponent kills-deaths this match
     VARP(showstatus, 0, 0, 1);
 
     static hashset<teaminfo> teaminfos;
@@ -142,15 +145,27 @@ namespace game
         return numgroups;
     }
 
+    // privilege no longer colours the name (friend colours use the same hues):
+    // it is shown as a tag after the name, see privtag()
     int statuscolor(fpsent *d, int color)
     {
-        if(d->privilege)
-        {
-            color = d->privilege>=PRIV_ADMIN ? 0xFF8000 : (d->privilege>=PRIV_AUTH ? 0xC040C0 : 0x40FF80);
-            if(d->state==CS_DEAD) color = (color>>1)&0x7F7F7F;
-        }
-        else if(d->state==CS_DEAD) color = 0x606060;
+        if(d->state==CS_DEAD) color = 0x606060;
         return color;
+    }
+
+    static const char *privtag(fpsent *d)
+    {
+        if(d->privilege>=PRIV_ADMIN) return " \f6admin";
+        if(d->privilege>=PRIV_AUTH) return " \f5auth";
+        if(d->privilege>=PRIV_MASTER) return " \f0master";
+        return "";
+    }
+
+    static const char *sbname(fpsent *d)
+    {
+        static string buf;
+        formatstring(buf, "%s%s", colorname(d), privtag(d));
+        return buf;
     }
 
     static bool sbmulti() { return multiplayer(false) || demoplayback; }
@@ -341,9 +356,22 @@ namespace game
             loopscoregroup(o,
             {
                 int ncol = friendnamecolor(o, demohd::namecolor(o, statuscolor(o, 0xFFFFDD)));
-                g.textf("%s ", ncol, NULL, colorname(o));
+                g.textf("%s ", ncol, NULL, sbname(o));
             });
             g.poplist();
+
+            if(showvs)
+            {
+                g.pushlist();
+                g.text("vs", fgcolor);
+                g.strut(5);
+                loopscoregroup(o,
+                {
+                    const char *vs = vsscore(o);
+                    g.text(vs[0] ? vs : " ", 0xFFFFDD);
+                });
+                g.poplist();
+            }
 
             if(showlang)
             {
@@ -433,7 +461,7 @@ namespace game
                         g.pushlist();
                         g.background(0x808080, 3);
                     }
-                    g.text(colorname(o), friendnamecolor(o, demohd::namecolor(o, statuscolor(o, 0xFFFFDD))), "spectator");
+                    g.text(sbname(o), friendnamecolor(o, demohd::namecolor(o, statuscolor(o, 0xFFFFDD))), "spectator");
                     if(o==player1 && highlightscore) g.poplist();
                 }
                 g.poplist();
@@ -494,7 +522,7 @@ namespace game
                         g.pushlist();
                         g.background(0x808080);
                     }
-                    g.text(colorname(o), friendnamecolor(o, statuscolor(o, 0xFFFFDD)));
+                    g.text(sbname(o), friendnamecolor(o, statuscolor(o, 0xFFFFDD)));
                     if(o==player1 && highlightscore) g.poplist();
                     if(i+1<spectators.length() && (i+1)%3) g.space(1);
                     else g.poplist();
@@ -530,7 +558,8 @@ namespace game
 
         void render()
         {
-            if(showing) g3d_addgui(this, menupos, (scoreboard2d ? GUI_FORCE_2D : GUI_2D | GUI_FOLLOW) | GUI_BOTTOM);
+            // not under an open menu: the two would draw over each other
+            if(showing && !gui2dvisible()) g3d_addgui(this, menupos, (scoreboard2d ? GUI_FORCE_2D : GUI_2D | GUI_FOLLOW) | GUI_BOTTOM);
         }
 
     } scoreboard;
@@ -629,8 +658,14 @@ namespace game
         int color = hudscoreplayercolour, color2 = hudscoreenemycolour;
         if(!best) swap(color, color2);
 
+        hudscope part("hudscore", "Score");
         draw_text(buf, int(offset.x), int(offset.y), (color>>16)&0xFF, (color>>8)&0xFF, color&0xFF, hudscorealpha);
-        if(score2 > INT_MIN) draw_text(buf2, int(offset2.x), int(offset2.y), (color2>>16)&0xFF, (color2>>8)&0xFF, color2&0xFF, hudscorealpha);
+        hudrect(offset.x, offset.y, tw, th);
+        if(score2 > INT_MIN)
+        {
+            draw_text(buf2, int(offset2.x), int(offset2.y), (color2>>16)&0xFF, (color2>>8)&0xFF, color2&0xFF, hudscorealpha);
+            hudrect(offset2.x, offset2.y, tw2, th2);
+        }
 
         pophudmatrix();
     }

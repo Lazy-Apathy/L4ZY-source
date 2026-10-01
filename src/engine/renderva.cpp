@@ -313,6 +313,21 @@ bool checkquery(occludequery *query, bool nowait)
             glGetQueryObjectiv_(query->id, GL_QUERY_RESULT_AVAILABLE, &avail);
             if(!avail) return false;
         }
+        else if(latency_watchblocks())
+        {
+            // Low latency: a result that is not ready makes the CPU wait for
+            // the previous frame on the GPU; count that wait.
+            GLint avail;
+            glGetQueryObjectiv_(query->id, GL_QUERY_RESULT_AVAILABLE, &avail);
+            if(!avail)
+            {
+                double t0 = latency_now();
+                glGetQueryObjectuiv_(query->id, GL_QUERY_RESULT, &fragments);
+                latency_blocked(t0, latency_now());
+                query->fragments = fragments;
+                return fragments < uint(oqfrags);
+            }
+        }
         glGetQueryObjectuiv_(query->id, GL_QUERY_RESULT, &fragments);
         query->fragments = fragments;
     }

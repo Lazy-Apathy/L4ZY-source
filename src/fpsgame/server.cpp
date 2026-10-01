@@ -3972,7 +3972,13 @@ namespace server
                     ci->clanmodok = true;
                     ci->clanmodlocked = false;
                     sendf(ci->clientnum, 1, "ris", N_SERVMSG, CLANMOD_WELCOME);
-                    if(ci->state.state==CS_SPECTATOR && mastermode < MM_LOCKED) unspectate(ci);
+                    if(ci->state.state==CS_SPECTATOR && mastermode < MM_LOCKED)
+                    {
+                        unspectate(ci);
+                        // arrive alive like a vanilla join (welcomepacket), not dead
+                        if(ci->state.state==CS_DEAD && m_mp(gamemode) && !interm && (!smode || smode->canspawn(ci, true)))
+                            sendspawn(ci);
+                    }
                 }
                 break;
 

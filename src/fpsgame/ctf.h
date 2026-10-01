@@ -8,6 +8,8 @@ VAR(ctftkpenalty, 0, 1, 1);
 
 struct ctfservmode : servmode
 #else
+VARP(flagtimer, 0, 1, 1); // how long the watched player has held a flag stolen from the enemy base
+
 struct ctfclientmode : clientmode
 #endif
 {
@@ -36,6 +38,7 @@ struct ctfclientmode : clientmode
         vec interploc;
         float interpangle;
         int interptime, vistime;
+        int stealtime; // when it was taken from its base (0 = picked up from the ground, or unknown)
 #endif
 
         flag() : id(-1) { reset(); }
@@ -57,6 +60,7 @@ struct ctfclientmode : clientmode
             interpangle = 0;
             interptime = 0;
             vistime = -1000;
+            stealtime = 0;
 #endif
             team = 0;
             droptime = owntime = holdtime = 0;
@@ -552,7 +556,9 @@ struct ctfclientmode : clientmode
             {
                 flag &f = flags[i];
                 int x = HICON_X + 3*HICON_STEP + (d->quadmillis ? HICON_SIZE + HICON_SPACE : 0);
+                hudscope part("icons", "Health, armour, ammo");
                 drawicon(m_hold ? HICON_NEUTRAL_FLAG : (f.team==ctfteamflag(player1->team) ? HICON_BLUE_FLAG : HICON_RED_FLAG), x, HICON_Y);
+                hudrect(x, HICON_Y, HICON_SIZE, HICON_SIZE);
                 if(m_hold)
                 {
                     pushhudmatrix();
@@ -565,8 +571,31 @@ struct ctfclientmode : clientmode
             }
         }
 
+        // bottom right: time since the watched player stole the flag from the enemy base
+        int carried = -1;
+        if(flagtimer && d->state == CS_ALIVE) loopv(flags) if(flags[i].owner == d && flags[i].stealtime) { carried = i; break; }
+        if(flagtimer && (carried >= 0 || hudeditactive()))
+        {
+            hudscope part("flagtimer", "Flag timer");
+            int secs = carried >= 0 ? max(lastmillis - flags[carried].stealtime, 0)/100 : 123;
+            defformatstring(t, "%d:%02d.%d", secs/600, (secs/10)%60, secs%10);
+            pushhudmatrix();
+            hudmatrix.scale(2, 2, 1);
+            flushhudmatrix();
+            int tw, th;
+            text_bounds(t, tw, th);
+            // above the SPECTATOR / name / playback lines when watching someone
+            int bottom = player1->state == CS_SPECTATOR ? (demoplayback ? 1480 : 1650) - 3*th - 24 : 1700;
+            // editing without a flag: only the frame, so it can be placed
+            if(carried >= 0) draw_text(t, (1800*w/h - 40)/2 - tw, bottom/2 - th, 0xFF, 0xC0, 0x40);
+            hudrect((1800*w/h - 40)/2 - tw, bottom/2 - th, tw, th);
+            pophudmatrix();
+        }
+
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         int s = 1800/4, x = 1800*w/h - s - s/10, y = s/10;
+        hudscope radarpart("radar", "Radar / minimap");
+        hudrect(x - 0.04f*s, y - 0.04f*s, 1.08f*s, 1.08f*s);
         gle::colorf(1, 1, 1, minimapalpha);
         if(minimapalpha >= 1) glDisable(GL_BLEND);
         bindminimap();
@@ -806,6 +835,7 @@ struct ctfclientmode : clientmode
                 }
                 f.droptime = dropped ? lastmillis : 0;
                 f.droploc = dropped ? droploc : f.spawnloc;
+                f.stealtime = 0; // joined mid-carry: where it was taken is unknown
                 f.vistime = invis>0 ? 0 : -1000;
                 f.interptime = 0;
 
@@ -924,6 +954,10 @@ struct ctfclientmode : clientmode
 
     void scoreflag(fpsent *d, int relay, int relayversion, int goal, int goalversion, int goalspawn, int team, int score, int dflags)
     {
+        // the run time, when the flag scored was stolen from its base (read before it goes home)
+        int carried = relay >= 0 ? relay : goal, runms = -1;
+        if(flags.inrange(carried) && flags[carried].owner == d && flags[carried].stealtime) runms = lastmillis - flags[carried].stealtime;
+        int feedicon = flags.inrange(carried) && !m_hold ? (flags[carried].team==ctfteamflag(player1->team) ? HICON_BLUE_FLAG : HICON_RED_FLAG) : HICON_NEUTRAL_FLAG;
         setscore(team, score);
         if(flags.inrange(goal))
         {
@@ -949,6 +983,12 @@ struct ctfclientmode : clientmode
         }
         d->flags = dflags;
         conoutf(CON_GAMEINFO, "%s scored for %s", teamcolorname(d), teamcolor("your team", ctfflagteam(team), "the enemy team"));
+        {
+            string msg;
+            formatstring(msg, "%s scored for %s", teamcolorname(d), teamcolor("your team", ctfflagteam(team), "the enemy team"));
+            if(runms >= 0) concformatstring(msg, " \f7in %d.%ds", runms/1000, (runms/100)%10);
+            addflagfeed(msg, feedicon);
+        }
         playsound(team==ctfteamflag(player1->team) ? S_FLAGSCORE : S_FLAGFAIL);
 
         if(score >= FLAGLIMIT) conoutf(CON_GAMEINFO, "%s captured %d flags", teamcolor("your team", ctfflagteam(team), "the enemy team"), score);
@@ -961,9 +1001,14 @@ struct ctfclientmode : clientmode
         f.version = version;
         f.interploc = interpflagpos(f, f.interpangle);
         f.interptime = lastmillis;
-        if(m_hold) conoutf(CON_GAMEINFO, "%s picked up the flag for %s", teamcolorname(d), teamcolor("your team", d->team, "the enemy team"));
-        else if(m_protect || f.droptime) conoutf(CON_GAMEINFO, "%s picked up %s", teamcolorname(d), teamcolorflag(f));
-        else conoutf(CON_GAMEINFO, "%s stole %s", teamcolorname(d), teamcolorflag(f));
+        // the timer only runs for a steal from the base, not for a flag picked up from the ground
+        f.stealtime = !m_hold && !m_protect && !f.droptime ? lastmillis : 0;
+        string msg;
+        if(m_hold) formatstring(msg, "%s picked up the flag for %s", teamcolorname(d), teamcolor("your team", d->team, "the enemy team"));
+        else if(m_protect || f.droptime) formatstring(msg, "%s picked up %s", teamcolorname(d), teamcolorflag(f));
+        else formatstring(msg, "%s stole %s", teamcolorname(d), teamcolorflag(f));
+        conoutf(CON_GAMEINFO, "%s", msg);
+        addflagfeed(msg, m_hold ? HICON_NEUTRAL_FLAG : (f.team==ctfteamflag(player1->team) ? HICON_BLUE_FLAG : HICON_RED_FLAG));
         ownflag(i, d, lastmillis, m_hold ? ctfteamflag(d->team) : -1);
         teamsound(d, S_FLAGPICKUP);
     }
