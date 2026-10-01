@@ -1707,6 +1707,9 @@ int main(int argc, char **argv)
         updateparticles();
         updatesounds();
 
+        // diagnostic views are refused online, before anything is drawn
+        hwrtonlineguard();
+
         // Only trust "minimized" while SDL still reports the window iconic: a
         // stray MINIMIZED at startup (focus / HDR swapchain) otherwise froze the
         // last loading screen until the Windows key sent a new window event.

@@ -272,6 +272,76 @@ VARP(hwrtmask, 0, 1, 1);
 // BLAS never sees. 0 is the old see-through behaviour.
 VARP(hwrtdepthmask, 0, 1, 1);
 
+// Diagnostic views and test drives are for offline work only. Online (a
+// remote server, or other players on our listen server; demo playback is
+// left alone) they are put back to their play value before every frame, so
+// setting one by hand, by script or from a saved config is refused, and one
+// still on when we connect is switched off. `hwrtdebug 4` (the "LSD mode")
+// paints every triangle, players included, in a flat barycentric colour.
+// What stays allowed is the normal player choice: hwrt 0/1 with hwrtdebug
+// 7 or 0 (hwrtlight is the alias of 7), AA, HDR, vanilla fullbrightmodels.
+static const struct { const char *name; float play, alsook; } hwrtonlineonly[] =
+{
+    { "hwrtdebug", 7, 0 },          // 1-6: probe, flat clear, barycentric, RTAO, hybrid
+    { "rtaodebug", 0, 0 },          // alias of hwrtdebug 5: grey AO overlay
+    { "hwrtshade", 0, 0 },          // alias of hwrtdebug 6
+    { "hwrtveldebug", 0, 0 },       // motion vectors light up whoever moves
+    { "hwrtnrddbg", 0, 0 },         // NRD false-colour views (5 = motion vectors)
+    { "hwrtdiffvis", 0, 0 },        // albedo only (no shadows) / lighting only (no textures)
+    { "hwrtskyvisdbg", 0, 0 },      // sky visibility heatmaps
+    { "hdrlightdbg", 0, 0 },        // classic world: light alone / texture alone
+    { "hwrtdepthmask", 1, 1 },      // 0 draws traced hits over grass, water, world alpha
+    // test drives: they move or pin the camera, the player, other players or a mapmodel
+    { "hwrtvelwalk", 0, 0 },
+    { "hwrtvelholdplayer", 0, 0 },
+    { "hwrtvelholdcam", 0, 0 },
+    { "hwrtvelholdothers", 0, 0 },
+    { "hwrtvelfreezepose", 0, 0 },
+    { "hwrtveldrive", -1, -1 },
+    { "hwrtvelspin", 0, 0 },
+    { "hwrtvelpitchspin", 0, 0 },
+    { "hwrtvelslide", 0, 0 },
+    { "hwrtvelpush", 0, 0 },
+};
+
+void hwrtonlineguard()
+{
+    if(!multiplayer(false) || game::isdemoplayback()) return;
+    const int n = int(sizeof(hwrtonlineonly)/sizeof(hwrtonlineonly[0]));
+    static ident *ids[sizeof(hwrtonlineonly)/sizeof(hwrtonlineonly[0])];
+    static bool looked = false;
+    if(!looked)
+    {
+        loopi(n) ids[i] = getident(hwrtonlineonly[i].name);
+        looked = true;
+    }
+    // Say it for every new refusal. Only something that sets a view again
+    // on every frame (a queued lab capture) is held to one line a second.
+    static int lastmsg = -1000000;
+    static bool lastframe = false;
+    bool say = !lastframe || totalmillis - lastmsg >= 1000, reset = false;
+    loopi(n)
+    {
+        ident *id = ids[i];
+        if(!id) continue;
+        float cur;
+        if(id->type == ID_VAR) cur = float(*id->storage.i);
+        else if(id->type == ID_FVAR) cur = *id->storage.f;
+        else continue;
+        if(cur == hwrtonlineonly[i].play || cur == hwrtonlineonly[i].alsook) continue;
+        if(id->type == ID_VAR) setvar(id->name, int(hwrtonlineonly[i].play));
+        else setfvar(id->name, hwrtonlineonly[i].play);
+        if(say) logoutf("online: %s %g refused, back to %g", id->name, cur, hwrtonlineonly[i].play);
+        reset = true;
+    }
+    if(reset && say)
+    {
+        conoutf(CON_WARN, "debug view disabled online");
+        lastmsg = totalmillis;
+    }
+    lastframe = reset;
+}
+
 // 0 (default) keeps the map skybox. 1 is the old lighting-view stand-in:
 // skip the cubemap and draw a disk on sunlightdir so a painted sun cannot
 // disagree with the shadow. The bake skip does not depend on this.

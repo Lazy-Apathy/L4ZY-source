@@ -152,6 +152,86 @@ namespace game
 
     bool clanmodactive() { return clanmod != 0; }
 
+    bool isdemoplayback() { return demoplayback; }
+
+    // Client announce, the WC-NG way (Jed, 01/10): once a remote server has
+    // welcomed us, one N_SERVCMD "__L4ZY <version>". The leading underscore is
+    // what keeps it quiet: zeromod only parses a servcmd that starts with a
+    // letter or a digit, and vanilla, remod and our clan server drop anything
+    // they do not know. Older mods that answer every servcmd (hopmod, the old
+    // zeromod, spaghettimod with its command module) get their one refusal
+    // hidden below. Not sent for a local game or a local demo.
+    static bool l4zyannounced = false;
+    static int l4zyannouncemillis = 0;
+
+    // Version the launcher hands us (L4ZY_VERSION, read from state\installed.ini);
+    // without the launcher, that file itself; else "dev".
+    static const char *l4zyversion()
+    {
+        static string ver = "";
+        if(ver[0]) return ver;
+        string raw = "";
+        const char *env = getenv("L4ZY_VERSION");
+        if(env) copystring(raw, env);
+        if(!raw[0] || !strcmp(raw, "?"))
+        {
+            raw[0] = '\0';
+            FILE *f = fopen("state/installed.ini", "r");
+            if(f)
+            {
+                char line[256];
+                while(fgets(line, sizeof(line), f))
+                {
+                    if(strncmp(line, "version=", 8)) continue;
+                    copystring(raw, line + 8);
+                    break;
+                }
+                fclose(f);
+            }
+        }
+        // keep a plain token: letters, digits and . - _ + ; stop at the line end
+        int len = 0;
+        for(const char *c = raw; *c && len < 32; c++)
+        {
+            if(isalnum(uchar(*c)) || *c == '.' || *c == '-' || *c == '_' || *c == '+') ver[len++] = *c;
+            else break;
+        }
+        ver[len] = '\0';
+        if(!ver[0]) copystring(ver, "dev");
+        return ver;
+    }
+    ICOMMAND(l4zyversion, "", (), result(l4zyversion()));
+
+    static void announcel4zy()
+    {
+        if(l4zyannounced) return;
+        l4zyannounced = true;
+        l4zyannouncemillis = totalmillis ? totalmillis : 1;
+        defformatstring(msg, "__L4ZY %s", l4zyversion());
+        addmsg(N_SERVCMD, "rs", msg);
+        logoutf("announce: %s", msg);
+    }
+
+    // The single "unknown command" a server may send back within 10 s of the
+    // announce: it names __L4ZY (old zeromod, spaghettimod) or is hopmod's
+    // bare "Command not found.". Anything else goes through untouched.
+    static bool hidel4zyreply(const char *text)
+    {
+        if(!l4zyannouncemillis || totalmillis - l4zyannouncemillis > 10000) return false;
+        string plain;
+        filtertext(plain, text, true, false);
+        bool hide = !strcmp(plain, "Command not found.");
+        if(!hide)
+        {
+            for(char *c = plain; *c; c++) *c = tolower(uchar(*c));
+            hide = strstr(plain, "__l4zy") != NULL;
+        }
+        if(!hide) return false;
+        l4zyannouncemillis = 0;
+        logoutf("announce: server reply hidden: %s", plain);
+        return true;
+    }
+
     VARP(deadpush, 1, 2, 20);
 
     void switchname(const char *name)
@@ -929,6 +1009,8 @@ namespace game
         if(remote) stopfollowing();
         ignores.setsize(0);
         connected = remote = false;
+        l4zyannounced = false;
+        l4zyannouncemillis = 0;
         player1->clientnum = -1;
         sessionid = 0;
         mastermode = MM_OPEN;
@@ -1343,6 +1425,7 @@ namespace game
             {
                 connected = true;
                 notifywelcome();
+                if(remote && !demopacket) announcel4zy();
                 break;
             }
 
@@ -1868,6 +1951,7 @@ namespace game
 
             case N_SERVMSG:
                 getstring(text, p);
+                if(hidel4zyreply(text)) break;
                 translateservmsg(text);
                 break;
 

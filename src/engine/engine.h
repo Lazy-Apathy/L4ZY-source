@@ -343,6 +343,7 @@ extern void cleanupvelocity();
 extern void hwrtdrawveldebug();
 extern void hwrtflushvelshot();
 extern bool hwrtvelneeddraw();
+extern void hwrtonlineguard();
 extern void hwrtveldraweffects();
 extern const char *hwrtdynentmdlname(dynent *d);
 extern void hwrtentxform(const extentity &e, vec &o, float &yaw);

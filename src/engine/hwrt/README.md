@@ -386,6 +386,17 @@ config always wins.
 | `hwrtstalls` | read-only count of frames where the CPU had to wait on a Vulkan fence. Should stay 0 |
 | `hwrttimes` | 1 draws a HUD overlay of the last completed interop stage times in milliseconds (GL mask / depth / composite, Vulkan BLAS / TLAS / dispatch, plus CPU skin/gather). Samples lag by a few frames; the CPU does not wait on them. `hwrtstats` always prints the same numbers |
 
+**Online, diagnostics are off.** On a remote server (or with other players on
+our own listen server; demo playback is left alone), `hwrtonlineguard()` runs
+before every frame and puts these back to their play value, printing
+`debug view disabled online`: `hwrtdebug` other than 0 and 7 (back to 7),
+`rtaodebug`, `hwrtshade`, `hwrtveldebug`, `hwrtnrddbg`, `hwrtdiffvis`,
+`hwrtskyvisdbg`, `hdrlightdbg` (back to 0), `hwrtdepthmask 0` (back to 1), and
+the velocity test drives `hwrtvelwalk`, `hwrtvelholdplayer`, `hwrtvelholdcam`,
+`hwrtvelholdothers`, `hwrtvelfreezepose`, `hwrtveldrive`, `hwrtvelspin`,
+`hwrtvelpitchspin`, `hwrtvelslide`, `hwrtvelpush`. A view still on when we
+connect is switched off. Offline nothing changes. The table is in `hwrt.cpp`.
+
 Commands: `hwrtstats` prints device, resolution, stall count, world triangle
 count, TLAS instance counts (world + mapmodels + dynents), animated BLAS
 count (rebuilds / refits this frame), point-light count
