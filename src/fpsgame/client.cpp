@@ -189,15 +189,19 @@ namespace game
                 fclose(f);
             }
         }
-        // keep a plain token: letters, digits and . - _ + ; stop at the line end
-        int len = 0;
-        for(const char *c = raw; *c && len < 32; c++)
+        // Servers turn this into an integer, so only a released version goes out
+        // as is: exactly four dot-separated numbers, YEAR.MONTH.DAY.N. Anything
+        // else (unreleased lab or dev build) is announced as the word "dev".
+        int len = 0, parts = 0, digits = 0;
+        bool valid = true;
+        for(const char *c = raw; *c && *c != '\r' && *c != '\n'; c++)
         {
-            if(isalnum(uchar(*c)) || *c == '.' || *c == '-' || *c == '_' || *c == '+') ver[len++] = *c;
-            else break;
+            if(isdigit(uchar(*c)) && digits < 4) { digits++; ver[len++] = *c; }
+            else if(*c == '.' && digits && parts < 3) { parts++; digits = 0; ver[len++] = '.'; }
+            else { valid = false; break; }
         }
         ver[len] = '\0';
-        if(!ver[0]) copystring(ver, "dev");
+        if(!valid || parts != 3 || !digits) copystring(ver, "dev");
         return ver;
     }
     ICOMMAND(l4zyversion, "", (), result(l4zyversion()));
