@@ -976,21 +976,27 @@ struct gui : g3d_gui
             }
             e->draw(drawx, cury, drawcolor, hit && editing);
             
-            if(!underline || editing)
+            hudnotextureshader->set();
+            glDisable(GL_BLEND);
+            if(underline)
             {
-                hudnotextureshader->set();
-                glDisable(GL_BLEND);
-                if(editing) gle::colorub(255, 122, 24, 220);
-                else gle::colorub(color>>16, (color>>8)&0xFF, color&0xFF);
-                if(underline)
+                // orange outline so an empty field is visible without hovering it
+                gle::colorub(255, 122, 24);
+                rect_(curx, cury, w, h, true);
+                if(editing)
                 {
                     int tw = text_width(e->currentline().text);
                     rect_(drawx - INSERT, cury+h-2, max(tw, 8) + INSERT*2, 2);
                 }
-                else rect_(curx, cury, w, h, true);
-                glEnable(GL_BLEND);
-                hudshader->set();
             }
+            else
+            {
+                if(editing) gle::colorub(255, 122, 24, 220);
+                else gle::colorub(color>>16, (color>>8)&0xFF, color&0xFF);
+                rect_(curx, cury, w, h, true);
+            }
+            glEnable(GL_BLEND);
+            hudshader->set();
         }
         layout(w, h);
         

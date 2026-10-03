@@ -587,6 +587,359 @@ bool hwrtuploadtexarray(VkCommandBuffer cmd, const vector<GLuint> &ids, int maxd
     return true;
 }
 
+// The same layers as hwrtuploadtexarray, byte for byte (same nearest
+// stretch to the largest size in the list, same box mips), but the image keeps
+// spare layers and a later call can append only the layers that are new. The
+// model-skin array used to be thrown away and read back out of GL in full each
+// time one skin appeared (an armour or a quad spawning for the first time:
+// ~100 layers, ~0.85 s frozen). Appending touches only the new layers, which no
+// frame in flight can be sampling yet (each frame refuses layers at or above the
+// count it was given), so it needs no device wait: the copy is fenced on its own
+// command buffer and its staging buffer is freed once that fence has signalled.
+// first 0 = fresh image of `capacity` layers holding the whole list.
+// first > 0 = append ids[first..] into `out`; refused (false, nothing changed)
+// if the stretch size or the mip count of the whole list would change, or if the
+// spare layers are used up, so the caller falls back to a full upload.
+struct hwrttexupload
+{
+    VkCommandPool pool;
+    VkCommandBuffer cmd;
+    VkFence fence;
+    hwrtbuf staging;
+    bool pending;
+};
+static hwrttexupload l2up;
+
+static bool texupready()
+{
+    if(l2up.cmd && l2up.fence) return true;
+    VkCommandPoolCreateInfo poolinfo = { VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
+    poolinfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    poolinfo.queueFamilyIndex = hwrtdev.queuefamily;
+    if(!l2up.pool && vkCreateCommandPool(hwrtdev.device, &poolinfo, NULL, &l2up.pool) != VK_SUCCESS) { l2up.pool = VK_NULL_HANDLE; return false; }
+    if(!l2up.cmd)
+    {
+        VkCommandBufferAllocateInfo cmdinfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
+        cmdinfo.commandPool = l2up.pool;
+        cmdinfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        cmdinfo.commandBufferCount = 1;
+        if(vkAllocateCommandBuffers(hwrtdev.device, &cmdinfo, &l2up.cmd) != VK_SUCCESS) { l2up.cmd = VK_NULL_HANDLE; return false; }
+    }
+    if(!l2up.fence)
+    {
+        VkFenceCreateInfo finfo = { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+        if(vkCreateFence(hwrtdev.device, &finfo, NULL, &l2up.fence) != VK_SUCCESS) { l2up.fence = VK_NULL_HANDLE; return false; }
+    }
+    return true;
+}
+
+void hwrtreaptexupload(bool wait)
+{
+    if(!l2up.pending || !hwrtdev.device) return;
+    if(vkGetFenceStatus(hwrtdev.device, l2up.fence) == VK_NOT_READY)
+    {
+        if(!wait) return;
+        vkWaitForFences(hwrtdev.device, 1, &l2up.fence, VK_TRUE, ~0ULL);
+    }
+    destroybuf(l2up.staging);
+    vkResetFences(hwrtdev.device, 1, &l2up.fence);
+    l2up.pending = false;
+}
+
+void hwrtdestroytexupload()
+{
+    hwrtreaptexupload(true);
+    if(hwrtdev.device)
+    {
+        if(l2up.fence) vkDestroyFence(hwrtdev.device, l2up.fence, NULL);
+        if(l2up.pool) vkDestroyCommandPool(hwrtdev.device, l2up.pool, NULL);
+    }
+    memset(&l2up, 0, sizeof(l2up));
+}
+
+// Same bytes as boxmip4. With both source sides even every output texel has
+// exactly its 2x2 block (n = 4), which is all boxmip4 computes there; only
+// odd sides need its clamped general path.
+static void fastboxmip4(const uchar *src, int sw, int sh, uchar *dst, int dw, int dh)
+{
+    if((sw & 1) || (sh & 1) || dw*2 != sw || dh*2 != sh) { boxmip4(src, sw, sh, dst, dw, dh); return; }
+    size_t srow = size_t(sw)*4;
+    loopi(dh)
+    {
+        const uchar *r0 = src + size_t(i*2)*srow, *r1 = r0 + srow;
+        uchar *o = dst + size_t(i)*size_t(dw)*4;
+        loopj(dw)
+        {
+            const uchar *a = r0 + j*8, *b = r1 + j*8;
+            o[0] = uchar((a[0] + a[4] + b[0] + b[4]) / 4);
+            o[1] = uchar((a[1] + a[5] + b[1] + b[5]) / 4);
+            o[2] = uchar((a[2] + a[6] + b[2] + b[6]) / 4);
+            o[3] = uchar((a[3] + a[7] + b[3] + b[7]) / 4);
+            o += 4;
+        }
+    }
+}
+
+// The mip chain of one layer only reads that layer, so layers are split
+// between threads; each layer's bytes are computed exactly as before.
+struct texmipjob
+{
+    uchar *pixels;
+    int nnew, maxw, maxh, miplevels, start, step;
+};
+
+static int texmipwork(void *data)
+{
+    texmipjob &j = *(texmipjob *)data;
+    for(int l = j.start; l < j.nnew; l += j.step)
+    {
+        int sw = j.maxw, sh = j.maxh;
+        VkDeviceSize srcoff = 0;
+        for(int mip = 1; mip < j.miplevels; mip++)
+        {
+            int dw = max(1, sw/2), dh = max(1, sh/2);
+            VkDeviceSize srcstride = VkDeviceSize(sw)*VkDeviceSize(sh)*4;
+            VkDeviceSize dststride = VkDeviceSize(dw)*VkDeviceSize(dh)*4;
+            VkDeviceSize dstoff = srcoff + srcstride*VkDeviceSize(j.nnew);
+            fastboxmip4(j.pixels + size_t(srcoff + srcstride*VkDeviceSize(l)), sw, sh,
+                        j.pixels + size_t(dstoff + dststride*VkDeviceSize(l)), dw, dh);
+            srcoff = dstoff;
+            sw = dw;
+            sh = dh;
+        }
+    }
+    return 0;
+}
+
+bool hwrtuploadtexlayers(const vector<GLuint> &ids, int first, int maxdim, int capacity, hwrttexarray &out, int &outcap, const char *what, bool mips)
+{
+    int n = ids.length();
+    if(n < 1 || first < 0 || first >= n) return false;
+    if(!loadshadefuncs() || !texupready()) return false;
+    hwrtreaptexupload(true);
+
+    GLint prev = 0, packalign = 4, packrow = 0, packbuf = 0, activetex = 0;
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &prev);
+    glGetIntegerv(GL_PACK_ALIGNMENT, &packalign);
+    glGetIntegerv(GL_PACK_ROW_LENGTH, &packrow);
+    glGetIntegerv(GL_PIXEL_PACK_BUFFER_BINDING, &packbuf);
+    glGetIntegerv(GL_ACTIVE_TEXTURE, &activetex);
+    glActiveTexture_(GL_TEXTURE0);
+    if(glBindBuffer_) glBindBuffer_(GL_PIXEL_PACK_BUFFER, 0);
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glPixelStorei(GL_PACK_ROW_LENGTH, 0);
+    glPixelStorei(GL_PACK_SKIP_PIXELS, 0);
+    glPixelStorei(GL_PACK_SKIP_ROWS, 0);
+    while(glGetError() != GL_NO_ERROR);
+#define TEXUP_RESTOREGL() do { \
+        glBindTexture(GL_TEXTURE_2D, prev); \
+        glPixelStorei(GL_PACK_ALIGNMENT, packalign); \
+        glPixelStorei(GL_PACK_ROW_LENGTH, packrow); \
+        if(glBindBuffer_) glBindBuffer_(GL_PIXEL_PACK_BUFFER, packbuf); \
+        glActiveTexture_(uint(activetex)); } while(0)
+
+    // The stretch target is the largest texture of the WHOLE list, exactly as a
+    // full upload would compute it, so an appended layer is the same bytes it
+    // would have been in a full upload.
+    int maxw = 1, maxh = 1;
+    vector<int> ws, hs;
+    loopv(ids)
+    {
+        int w = 1, h = 1;
+        if(ids[i])
+        {
+            glBindTexture(GL_TEXTURE_2D, ids[i]);
+            GLint tw = 0, th = 0;
+            glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &tw);
+            glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &th);
+            if(tw > 0) w = tw;
+            if(th > 0) h = th;
+        }
+        ws.add(w);
+        hs.add(h);
+        if(w > maxw) maxw = w;
+        if(h > maxh) maxh = h;
+    }
+    if(maxdim < 1) maxdim = HWRT_MAX_TEXDIM;
+    maxw = min(maxw, maxdim);
+    maxh = min(maxh, maxdim);
+    int miplevels = mips ? countmips(maxw, maxh) : 1;
+    if(miplevels > 16) miplevels = 16;
+    if(first > 0 && (!out.image || out.w != maxw || out.h != maxh || out.mips != miplevels || outcap < n))
+    {
+        TEXUP_RESTOREGL();
+        return false;
+    }
+    if(first == 0 && capacity < n) capacity = n;
+    int nnew = n - first;
+
+    const VkDeviceSize layerbytes = VkDeviceSize(maxw)*VkDeviceSize(maxh)*4;
+    VkDeviceSize total = 0;
+    int mw = maxw, mh = maxh;
+    loopi(miplevels)
+    {
+        total += VkDeviceSize(mw)*VkDeviceSize(mh)*4*VkDeviceSize(nnew);
+        mw = max(1, mw/2);
+        mh = max(1, mh/2);
+    }
+    // Every byte is written below (stretch or magenta, then every mip texel),
+    // so the full upload's memset is not needed for the same contents.
+    uchar *pixels = new uchar[size_t(total)];
+    // A texture already at the target size is read straight into its layer
+    // (blitstretch would be a plain copy); a successful read fills every byte,
+    // which is why the old zero fill of the scratch buffer changed nothing.
+    vector<uchar> tmp;
+    loopi(nnew)
+    {
+        int li = first + i;
+        uchar *dst = pixels + size_t(i)*size_t(layerbytes);
+        int w = ws[li], h = hs[li];
+        bool ok = false;
+        if(ids[li] && w > 0 && h > 0)
+        {
+            bool direct = w == maxw && h == maxh;
+            if(!direct && tmp.length() < w*h*4) tmp.growbuf(w*h*4);
+            uchar *target = direct ? dst : tmp.getbuf();
+            glBindTexture(GL_TEXTURE_2D, ids[li]);
+            while(glGetError() != GL_NO_ERROR);
+            glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, target);
+            ok = glGetError() == GL_NO_ERROR;
+            if(ok && !direct) blitstretch(target, w, h, dst, maxw, maxh);
+        }
+        if(!ok)
+        {
+            for(VkDeviceSize p = 0; p < layerbytes; p += 4)
+            {
+                dst[p+0] = 255;
+                dst[p+1] = 0;
+                dst[p+2] = 255;
+                dst[p+3] = 255;
+            }
+        }
+    }
+    TEXUP_RESTOREGL();
+    if(miplevels > 1)
+    {
+        int nthreads = clamp(SDL_GetCPUCount(), 1, 8);
+        if(nthreads > nnew) nthreads = nnew;
+        texmipjob jobs[8];
+        SDL_Thread *threads[8];
+        loopi(nthreads)
+        {
+            jobs[i].pixels = pixels; jobs[i].nnew = nnew; jobs[i].maxw = maxw; jobs[i].maxh = maxh;
+            jobs[i].miplevels = miplevels; jobs[i].start = i; jobs[i].step = nthreads;
+            threads[i] = i ? SDL_CreateThread(texmipwork, "texture mips", &jobs[i]) : NULL;
+        }
+        texmipwork(&jobs[0]);
+        for(int i = 1; i < nthreads; i++)
+        {
+            if(threads[i]) SDL_WaitThread(threads[i], NULL);
+            else texmipwork(&jobs[i]);
+        }
+    }
+#undef TEXUP_RESTOREGL
+
+    if(first == 0)
+    {
+        if(!createimg(out, maxw, maxh, capacity, miplevels))
+        {
+            delete[] pixels;
+            outcap = 0;
+            return false;
+        }
+        outcap = capacity;
+    }
+
+    if(!createstorage(l2up.staging, total, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) ||
+       !uploadstorage(l2up.staging, pixels, total))
+    {
+        destroybuf(l2up.staging);
+        delete[] pixels;
+        if(first == 0) { destroytex(out); outcap = 0; }
+        return false;
+    }
+    delete[] pixels;
+
+    VkCommandBuffer cmd = l2up.cmd;
+    VkResult r = vkResetCommandBuffer(cmd, 0);
+    VkCommandBufferBeginInfo begin = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+    begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    if(r == VK_SUCCESS) r = vkBeginCommandBuffer(cmd, &begin);
+    if(r != VK_SUCCESS)
+    {
+        destroybuf(l2up.staging);
+        if(first == 0) { destroytex(out); outcap = 0; }
+        return texfail(what, "vkBeginCommandBuffer (texture layers)", r);
+    }
+
+    // A fresh image: every layer, the spare ones included, leaves UNDEFINED so
+    // the whole view is in one layout. An append: only the new layers move.
+    uint32_t baselayer = first == 0 ? 0 : uint32_t(first);
+    uint32_t nlayers = first == 0 ? uint32_t(capacity) : uint32_t(nnew);
+    VkImageMemoryBarrier barrier = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = out.image;
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.levelCount = uint32_t(miplevels);
+    barrier.subresourceRange.baseArrayLayer = baselayer;
+    barrier.subresourceRange.layerCount = nlayers;
+    barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.srcAccessMask = 0;
+    barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         0, 0, NULL, 0, NULL, 1, &barrier);
+
+    VkBufferImageCopy copies[16];
+    int ncopy = 0;
+    VkDeviceSize offset = 0;
+    mw = maxw;
+    mh = maxh;
+    loopi(miplevels)
+    {
+        VkBufferImageCopy &copy = copies[ncopy++];
+        memset(&copy, 0, sizeof(copy));
+        copy.bufferOffset = offset;
+        copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        copy.imageSubresource.mipLevel = uint32_t(i);
+        copy.imageSubresource.baseArrayLayer = uint32_t(first);
+        copy.imageSubresource.layerCount = uint32_t(nnew);
+        copy.imageExtent.width = uint32_t(mw);
+        copy.imageExtent.height = uint32_t(mh);
+        copy.imageExtent.depth = 1;
+        offset += VkDeviceSize(mw)*VkDeviceSize(mh)*4*VkDeviceSize(nnew);
+        mw = max(1, mw/2);
+        mh = max(1, mh/2);
+    }
+    hwrtCmdCopyBufferToImage(cmd, l2up.staging.buffer, out.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, uint32_t(ncopy), copies);
+
+    barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         0, 0, NULL, 0, NULL, 1, &barrier);
+    r = vkEndCommandBuffer(cmd);
+    VkSubmitInfo submit = { VK_STRUCTURE_TYPE_SUBMIT_INFO };
+    submit.commandBufferCount = 1;
+    submit.pCommandBuffers = &cmd;
+    if(r == VK_SUCCESS) r = vkQueueSubmit(hwrtdev.queue, 1, &submit, l2up.fence);
+    if(r != VK_SUCCESS)
+    {
+        destroybuf(l2up.staging);
+        if(first == 0) { destroytex(out); outcap = 0; }
+        return texfail(what, "vkQueueSubmit (texture layers)", r);
+    }
+    l2up.pending = true;
+    // A fresh image replaces one the caller already waited out; keep the same
+    // blocking contract as the full upload there.
+    if(first == 0) hwrtreaptexupload(true);
+    out.layers = n;
+    return true;
+}
+
 static bool createcubeimg(hwrttexarray &t, int w)
 {
     destroytex(t);
@@ -1457,6 +1810,7 @@ void hwrtdestroyworld()
 {
     if(hwrtdev.device) vkDeviceWaitIdle(hwrtdev.device);
     hwrtdestroydynents();
+    hwrtdestroytexupload();
     destroyaslocked();
     if(hwrtdev.device)
     {

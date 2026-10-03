@@ -894,11 +894,26 @@ namespace game
         loopi(int(sizeof(vweps)/sizeof(vweps[0]))) hwrtpreloadmodel(vweps[i]);
     }
 
+    // Same rule as entities::preloadentities() and the server's canspawnitem():
+    // a pickup the current mode can never spawn (insta, no ammo) is not worth a
+    // BLAS slot or a skin layer.
+    bool itemcanspawnforrt(int type)
+    {
+        if(type >= I_SHELLS && type <= I_CARTRIDGES) return !m_noitems && !m_noammo;
+        if(type >= I_HEALTH && type <= I_QUAD) return !m_noitems;
+        if(type == CARROT || type == RESPAWNPOINT) return m_classicsp;
+        return true;
+    }
 }
 
 void hwrtpreloadplayermodels()
 {
     game::preloadallplayermodelsforrt();
+}
+
+bool hwrtitemcanspawn(const extentity &e)
+{
+    return game::itemcanspawnforrt(e.type);
 }
 
 const char *hwrtdynentmdlname(dynent *d)

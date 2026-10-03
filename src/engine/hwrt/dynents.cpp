@@ -83,7 +83,7 @@ struct hwrtdynslot
 
 struct hwrtdynstate
 {
-    hwrtmodelblas cache[HWRT_MAX_MODEL_BLAS];
+    hwrtmodelblas cache[HWRT_MODEL_BLAS_CAP];
     int ncache;
     hwrtdynslot slot[HWRT_FRAMES_IN_FLIGHT];
     VkCommandPool cmdpool;
@@ -96,9 +96,15 @@ struct hwrtdynstate
 
 static hwrtdynstate dyn;
 
+// How many rest-pose BLASes the cache may hold (see HWRT_MODEL_BLAS_CAP).
+static int modelcap() { return int(HWRT_MODEL_BLAS_CAP); }
+
+
 // Model skins are per-`skin` in animmodel, not in the world diffuse array, so
 // they get a second sampled 2D array. A layer index is stable until compact,
 // which rewrites every triangle buffer that still points at the old list.
+// cap is how many layers the image really has (spare layers included),
+// dim the stretch size it was built at, so a new skin can be appended.
 struct hwrtskinstate
 {
     vector<GLuint> ids;
@@ -106,6 +112,7 @@ struct hwrtskinstate
     VkSampler sampler;
     int uploaded;
     bool failed, overflowlogged;
+    int cap, dim;
 };
 
 static hwrtskinstate skins;
@@ -503,6 +510,8 @@ static void destroyslot(hwrtdynslot &s)
 
 static void destroyskins()
 {
+    hwrtreaptexupload(true);
+    skins.cap = skins.dim = 0;
     hwrtdestroytexarray(skins.tex);
     hwrtdestroysampler(skins.sampler);
     skins.ids.setsize(0);
@@ -782,6 +791,36 @@ static int findoraddskin(uint texid)
 // Rebuilds the whole array whenever a new skin turns up. That is a GL readback
 // plus a device wait, so it only ever runs where the rest-pose BLAS builds
 // already do: model first use, never inside the traced frame.
+// A skin that turns up after the array exists (first armour / boost /
+// quad spawn, a new attachment) is appended into a spare layer instead of
+// reading every layer back out of GL again. Same bytes per layer, same layer
+// order; the full path below still runs whenever the array has to change shape
+// (first upload, a compaction, the 512 fallback, no spare layer left).
+static const int HWRT_SPARESKINS = 16;
+static int skindim()
+{
+    int dim = HWRT_MAX_SKINDIM;
+    int nskin = skins.ids.length();
+    if(nskin > 0 && (long long)nskin * dim * dim * 4 > skinbudgetbytes()) dim = 512;
+    return dim;
+}
+
+static bool appendskins()
+{
+    if(!skins.tex.view || skins.uploaded <= 0 || skins.uploaded >= skins.ids.length()) return false;
+    if(allowskinprune && skinsunderpressure()) return false;
+    int dim = skindim();
+    if(dim != skins.dim || skins.ids.length() > skins.cap) return false;
+    int first = skins.uploaded;
+    if(!hwrtuploadtexlayers(skins.ids, first, dim, skins.cap, skins.tex, skins.cap, "model skins", true)) return false;
+    skins.uploaded = skins.ids.length();
+    hwrtskinlayers = skins.tex.layers;
+    hwrtskinw = skins.tex.w;
+    hwrtskinh = skins.tex.h;
+    conoutf("hwrt: +%d model skin layers (%d of %d) %dx%d", skins.uploaded - first, skins.tex.layers, skins.cap, skins.tex.w, skins.tex.h);
+    return true;
+}
+
 static void syncskins()
 {
     if(skins.failed || skins.ids.empty()) return;
@@ -793,6 +832,7 @@ static void syncskins()
         conoutf(CON_WARN, "hwrt: no sampler for model skins, models stay lit by GL");
         return;
     }
+    if(appendskins()) return;
     vkDeviceWaitIdle(hwrtdev.device);
     if(allowskinprune && skinsunderpressure())
     {
@@ -814,7 +854,10 @@ static void syncskins()
         conoutf(CON_WARN, "hwrt: %d model skins exceed %d MB at %d, using 512",
                 nskin, int(hwrtskinbudget), int(HWRT_MAX_SKINDIM));
     }
-    if(!hwrtuploadtexarray(dyn.cmd, skins.ids, dim, skins.tex, "model skins", true))
+    int cap = min(nskin + HWRT_SPARESKINS, int(HWRT_MAX_SKINS));
+    bool uploaded = hwrtuploadtexlayers(skins.ids, 0, dim, cap, skins.tex, skins.cap, "model skins", true);
+    skins.dim = uploaded ? dim : 0;
+    if(!uploaded)
     {
         skins.failed = true;
         skins.uploaded = 0;
@@ -1040,7 +1083,7 @@ static hwrtmodelblas *findcache(model *m)
 
 static void rememberempty(model *m)
 {
-    if(!m || dyn.ncache >= HWRT_MAX_MODEL_BLAS) return;
+    if(!m || dyn.ncache >= modelcap()) return;
     if(findcache(m)) return;
     hwrtmodelblas &slot = dyn.cache[dyn.ncache];
     memset(&slot, 0, sizeof(slot));
@@ -1053,7 +1096,7 @@ static hwrtmodelblas *buildmodelblas(model *m)
     if(dyn.failed || !m) return NULL;
     hwrtmodelblas *hit = findcache(m);
     if(hit) return hit->addr ? hit : NULL;
-    if(dyn.ncache >= HWRT_MAX_MODEL_BLAS)
+    if(dyn.ncache >= modelcap())
     {
         bool full = true;
         loopi(dyn.ncache) if(!dyn.cache[i].m) { full = false; break; }
@@ -1061,7 +1104,7 @@ static hwrtmodelblas *buildmodelblas(model *m)
         {
             if(!dyn.overflowlogged)
             {
-                conoutf(CON_WARN, "hwrt: more than %d unique model BLASes, extras dropped", int(HWRT_MAX_MODEL_BLAS));
+                conoutf(CON_WARN, "hwrt: more than %d unique model BLASes, extras dropped", modelcap());
                 dyn.overflowlogged = true;
             }
             return NULL;
@@ -1090,7 +1133,7 @@ static hwrtmodelblas *buildmodelblas(model *m)
     // prune nothing and drop the model anyway (thousands of times per second on
     // triforts). Give up here instead. The gathering above stays first because
     // it also registers this model's skins and envmaps.
-    if(dyn.ncache >= HWRT_MAX_MODEL_BLAS)
+    if(dyn.ncache >= modelcap())
     {
         bool full = true;
         loopi(dyn.ncache) if(!dyn.cache[i].m) { full = false; break; }
@@ -1098,11 +1141,11 @@ static hwrtmodelblas *buildmodelblas(model *m)
         {
             // cachehasunused() may load a model on demand: look at the slots again.
             loopi(dyn.ncache) if(!dyn.cache[i].m) { full = false; break; }
-            if(full && dyn.ncache >= HWRT_MAX_MODEL_BLAS)
+            if(full && dyn.ncache >= modelcap())
             {
                 if(!dyn.overflowlogged)
                 {
-                    conoutf(CON_WARN, "hwrt: more than %d unique model BLASes, extras dropped", int(HWRT_MAX_MODEL_BLAS));
+                    conoutf(CON_WARN, "hwrt: more than %d unique model BLASes, extras dropped", modelcap());
                     dyn.overflowlogged = true;
                 }
                 return NULL;
@@ -1176,7 +1219,7 @@ static hwrtmodelblas *buildmodelblas(model *m)
 
     hwrtmodelblas *slotp = NULL;
     loopi(dyn.ncache) if(!dyn.cache[i].m) { slotp = &dyn.cache[i]; break; }
-    if(!slotp && dyn.ncache < HWRT_MAX_MODEL_BLAS) slotp = &dyn.cache[dyn.ncache];
+    if(!slotp && dyn.ncache < modelcap()) slotp = &dyn.cache[dyn.ncache];
     if(!slotp && allowskinprune)
     {
         vkDeviceWaitIdle(hwrtdev.device);
@@ -1187,13 +1230,13 @@ static hwrtmodelblas *buildmodelblas(model *m)
             prunecache(false);
             loopi(dyn.ncache) if(!dyn.cache[i].m) { slotp = &dyn.cache[i]; break; }
         }
-        if(!slotp && dyn.ncache < HWRT_MAX_MODEL_BLAS) slotp = &dyn.cache[dyn.ncache];
+        if(!slotp && dyn.ncache < modelcap()) slotp = &dyn.cache[dyn.ncache];
     }
     if(!slotp)
     {
         if(!dyn.overflowlogged)
         {
-            conoutf(CON_WARN, "hwrt: more than %d unique model BLASes, extras dropped", int(HWRT_MAX_MODEL_BLAS));
+            conoutf(CON_WARN, "hwrt: more than %d unique model BLASes, extras dropped", modelcap());
             dyn.overflowlogged = true;
         }
         destroybuf(vbuf); destroybuf(ibuf);
@@ -1443,7 +1486,7 @@ static hwrtmodelblas *buildbulletblas()
 
     hwrtmodelblas *slotp = NULL;
     loopi(dyn.ncache) if(!dyn.cache[i].m) { slotp = &dyn.cache[i]; break; }
-    if(!slotp && dyn.ncache < HWRT_MAX_MODEL_BLAS) slotp = &dyn.cache[dyn.ncache];
+    if(!slotp && dyn.ncache < modelcap()) slotp = &dyn.cache[dyn.ncache];
     if(!slotp)
     {
         destroybuf(vbuf); destroybuf(ibuf);
@@ -1579,7 +1622,7 @@ static bool ensuretlasbuffers()
         // The geometry table is per frame in flight for the same reason the
         // instances are: the previous frame may still be reading last frame's
         // addresses.
-        const VkDeviceSize geombytes = VkDeviceSize(HWRT_MAX_GEOMS)*sizeof(hwrtmodelgeom);
+        const VkDeviceSize geombytes = VkDeviceSize(HWRT_MAX_GEOMS_CAP)*sizeof(hwrtmodelgeom);
         if(!createbuf(s.geombuf, geombytes,
                       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT|VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT))
@@ -2209,7 +2252,9 @@ __attribute__((weak)) int hwrtdynentuid(dynent *d)
 static uint32_t customforcache(const hwrtmodelblas *c)
 {
     if(!c) return 0;
-    return uint32_t(HWRT_GEOM_MODEL0 + int(c - dyn.cache));
+    int i = int(c - dyn.cache);
+    if(i >= int(HWRT_MAX_MODEL_BLAS)) return uint32_t(HWRT_GEOM_EXTRA0 + (i - int(HWRT_MAX_MODEL_BLAS)));
+    return uint32_t(HWRT_GEOM_MODEL0 + i);
 }
 
 static uint32_t customforanim(const hwrtdynslot &s, const hwrtanimslot *a)
@@ -2220,7 +2265,7 @@ static uint32_t customforanim(const hwrtdynslot &s, const hwrtanimslot *a)
 
 static void writegeom(hwrtdynslot &s, uint32_t custom, const hwrtbuf &attr, const hwrtbuf &idx, const hwrtbuf &tri, uint ntris, uint nopaque)
 {
-    if(!s.geommap || custom < 1 || custom >= HWRT_MAX_GEOMS) return;
+    if(!s.geommap || custom < 1 || custom >= HWRT_MAX_GEOMS_CAP) return;
     hwrtmodelgeom &g = s.geommap[custom];
     bool ok = attr.address && idx.address && tri.address && ntris;
     g.verts = ok ? attr.address : 0;
@@ -2253,7 +2298,7 @@ static void writegeom(hwrtdynslot &s, uint32_t custom, const hwrtbuf &attr, cons
 // cannot go stale onto a crate that happens to reuse the slot next frame.
 static void markfullbright(hwrtdynslot &s, uint32_t custom)
 {
-    if(!s.geommap || custom < 1 || custom >= HWRT_MAX_GEOMS) return;
+    if(!s.geommap || custom < 1 || custom >= HWRT_MAX_GEOMS_CAP) return;
     s.geommap[custom].flags |= HWRT_GEOM_FULLBRIGHT;
 }
 
@@ -2411,7 +2456,7 @@ static uint32_t gatherinstances(hwrtdynslot &s, hwrtinstance *dst, int *nmap, in
     hwrtgeomcount = 0;
     if(s.geommap)
     {
-        memset(s.geommap, 0, sizeof(hwrtmodelgeom)*HWRT_MAX_GEOMS);
+        memset(s.geommap, 0, sizeof(hwrtmodelgeom)*HWRT_MAX_GEOMS_CAP);
         // Slot 0 is never a model (customIndex 0 is the world). ntris here is
         // the uploaded skin-layer count so the shader can refuse a layer
         // instead of sampling the placeholder descriptor.
@@ -2593,7 +2638,7 @@ bool hwrtmodelshadeready()
 static bool ensuredummygeom()
 {
     if(dummygeom.buffer) return true;
-    const VkDeviceSize bytes = VkDeviceSize(HWRT_MAX_GEOMS)*sizeof(hwrtmodelgeom);
+    const VkDeviceSize bytes = VkDeviceSize(HWRT_MAX_GEOMS_CAP)*sizeof(hwrtmodelgeom);
     if(!allocbuf(dummygeom, bytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, false))
         return false;
@@ -2673,6 +2718,7 @@ void hwrtsyncdynents()
 {
     if(dyn.failed || !dyn.ready) return;
     if(!hwrtdev.ok() || !hwrtdev.rayquery) return;
+    hwrtreaptexupload(false);
     if(!bulletc) buildbulletblas();
     syncmodels(true);
     if(allowskinprune && skinsunderpressure() && cachehasunused(true))
@@ -2686,6 +2732,36 @@ void hwrtsyncdynents()
     // while skinning frame N therefore lands in the array at frame N+1.
     syncskins();
     syncmdlenv();
+}
+
+// The game knows which pickups the current mode can spawn; an unpatched
+// fpsgame answers "all of them".
+__attribute__((weak)) bool hwrtitemcanspawn(const extentity &e)
+{
+    (void)e;
+    return true;
+}
+
+// Pickups that are not spawned yet -- armours, health boost and quad
+// wait 20 to 70 s on the server's timer, anything already taken waits for its
+// respawn -- get their BLAS and skin layers here, behind the loading screen,
+// instead of in the middle of a frame the first time the server spawns them.
+// That first spawn used to rebuild the whole skin array (the ~0.85 s freeze
+// after "quad damage will spawn"). Runs after syncmodels() has served every
+// spawned pickup and every mapmodel, so it only ever takes slots that were
+// still free and cannot push one of those out.
+static void preloadpickups()
+{
+    const vector<extentity *> &ents = entities::getents();
+    loopv(ents)
+    {
+        extentity &e = *ents[i];
+        if(e.type == ET_MAPMODEL) continue;
+        if(e.spawned() || hwrtalwaysvisibleent(e)) continue;
+        const char *name = entities::entmodel(e);
+        if(!name || !name[0] || !hwrtitemcanspawn(e)) continue;
+        blasforname(name, true);
+    }
 }
 
 void hwrtrebuilddynents()
@@ -2727,6 +2803,7 @@ void hwrtrebuilddynents()
         hwrtpreloadplayermodels();
     }
     syncmodels(true);
+    if(hwrtworldtris > 64 && !dyn.failed) preloadpickups();
     if(dyn.failed)
     {
         destroylocked();

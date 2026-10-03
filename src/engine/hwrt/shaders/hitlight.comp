@@ -3,6 +3,19 @@
 #extension GL_EXT_buffer_reference2 : require
 #extension GL_EXT_buffer_reference_uvec2 : require
 #extension GL_EXT_nonuniform_qualifier : require
+#extension GL_KHR_shader_subgroup_basic : require
+#extension GL_KHR_shader_subgroup_ballot : require
+#extension GL_KHR_shader_subgroup_arithmetic : require
+
+// Lot 2 (shots/rt-performance-lot2): the lighting pass with the same result for every
+// pixel and less invariant work. What changed, and why it cannot change a pixel:
+//  - the light loops only visit the lamps that can pass their own range test
+//    somewhere in this 16x16 tile. Every hit of the tile is inside the tile's
+//    box, a lamp whose sphere misses that box (with a margin far above float
+//    rounding) fails `mag < radius` / `x >= 1` for every pixel of the tile, and
+//    the survivors are visited in the same increasing index order, so the same
+//    lamps are elected, with the same ties, the same caps and the same sums.
+//  - the extra rest-pose BLAS slots of the lot 2 cache (customIndex 97..160).
 
 // Point lights + sun + skylight (hwrtdebug 7 / hwrtlight 1).
 //
@@ -142,9 +155,17 @@ struct LightEnv {
     vec4 nrdHit; // A, B, C, denoisingRange
 };
 struct Light { vec3 pos; float radius; vec3 color; float flags; };
+// Same buffer as hitlight.comp; lot 2 appends one word per lamp after the 256
+// lamp slots: bit 0 = the first loop evaluates it (radius 0 within the first
+// 16, or a glow within the first 96, counted in index order exactly as that
+// loop counts them), bit 1 = it is a finite lamp the nearest-N loop may elect.
+const int MAXLIGHTS = 256;
+const uint KIND_ALWAYS = 1u;
+const uint KIND_NEAR = 2u;
 layout(std430, binding = 6) readonly buffer Lights {
     LightEnv env;
-    Light l[];
+    Light l[MAXLIGHTS];
+    uint kind[MAXLIGHTS];
 } lights;
 
 // Per-BLAS attributes, reached by device address so each rest-pose / animated
@@ -273,6 +294,100 @@ shared vec3 sh_n[16][16];
 shared vec3 sh_p[16][16];
 shared float sh_mdl[16][16];
 shared float sh_hit[16][16];
+
+// Geometry table size with the lot 2 cache (HWRT_MAX_GEOMS_CAP in hwrt.h).
+const uint MAXGEOMS = 161u;
+
+// Lot 2 tile culling. The box of every hit the tile will light, then the two
+// ordered lamp lists that can pass a range test somewhere inside it.
+const int MAXSUBGROUPS = 64;
+shared vec3 sh_lo[MAXSUBGROUPS];
+shared vec3 sh_hi[MAXSUBGROUPS];
+shared uint sh_cntA[MAXSUBGROUPS];
+shared uint sh_cntB[MAXSUBGROUPS];
+shared uint sh_listA[MAXLIGHTS];
+shared uint sh_listB[MAXLIGHTS];
+shared uint sh_nA, sh_nB;
+
+// Could a lamp at `pos` reach any point of the box? The margin is relative and
+// absolute, orders of magnitude above the rounding of `length(pos - hit)`, so a
+// lamp is dropped only when every hit of the tile fails its range test anyway.
+bool tileReach(vec3 pos, float radius, vec3 bmin, vec3 bmax)
+{
+    vec3 q = clamp(pos, bmin, bmax);
+    return distance(pos, q) <= radius * 1.0001 + 0.05;
+}
+
+void tileCull(bool reach, vec3 hit, int nlights)
+{
+    vec3 lo = reach ? hit : vec3(1e30);
+    vec3 hi = reach ? hit : vec3(-1e30);
+    lo = subgroupMin(lo);
+    hi = subgroupMax(hi);
+    if(subgroupElect())
+    {
+        sh_lo[gl_SubgroupID] = lo;
+        sh_hi[gl_SubgroupID] = hi;
+    }
+    barrier();
+    vec3 bmin = vec3(1e30), bmax = vec3(-1e30);
+    for(uint s = 0u; s < gl_NumSubgroups; s++)
+    {
+        bmin = min(bmin, sh_lo[s]);
+        bmax = max(bmax, sh_hi[s]);
+    }
+    // One lamp per invocation, in index order across the subgroups.
+    bool full = gl_NumSubgroups * gl_SubgroupSize == 256u;
+    uint li = gl_SubgroupID * gl_SubgroupSize + gl_SubgroupInvocationID;
+    bool inA = false, inB = false;
+    if(full && int(li) < nlights)
+    {
+        uint k = lights.kind[li];
+        float r = lights.l[li].radius;
+        vec3 lp = lights.l[li].pos;
+        if((k & KIND_ALWAYS) != 0u) inA = r <= 0.0 || tileReach(lp, r, bmin, bmax);
+        if((k & KIND_NEAR) != 0u) inB = tileReach(lp, r, bmin, bmax);
+    }
+    uvec4 bA = subgroupBallot(inA);
+    uvec4 bB = subgroupBallot(inB);
+    uint preA = subgroupBallotExclusiveBitCount(bA);
+    uint preB = subgroupBallotExclusiveBitCount(bB);
+    if(subgroupElect())
+    {
+        sh_cntA[gl_SubgroupID] = subgroupBallotBitCount(bA);
+        sh_cntB[gl_SubgroupID] = subgroupBallotBitCount(bB);
+    }
+    barrier();
+    if(full)
+    {
+        uint offA = 0u, offB = 0u, totA = 0u, totB = 0u;
+        for(uint s = 0u; s < gl_NumSubgroups; s++)
+        {
+            if(s < gl_SubgroupID) { offA += sh_cntA[s]; offB += sh_cntB[s]; }
+            totA += sh_cntA[s];
+            totB += sh_cntB[s];
+        }
+        if(inA) sh_listA[offA + preA] = li;
+        if(inB) sh_listB[offB + preB] = li;
+        if(gl_LocalInvocationIndex == 0u) { sh_nA = totA; sh_nB = totB; }
+    }
+    else if(gl_LocalInvocationIndex == 0u)
+    {
+        // Unusual subgroup layout: one invocation builds the same lists in order.
+        uint na = 0u, nb = 0u;
+        for(int i = 0; i < nlights; i++)
+        {
+            uint k = lights.kind[i];
+            float r = lights.l[i].radius;
+            vec3 lp = lights.l[i].pos;
+            if((k & KIND_ALWAYS) != 0u && (r <= 0.0 || tileReach(lp, r, bmin, bmax))) sh_listA[na++] = uint(i);
+            if((k & KIND_NEAR) != 0u && tileReach(lp, r, bmin, bmax)) sh_listB[nb++] = uint(i);
+        }
+        sh_nA = na;
+        sh_nB = nb;
+    }
+    barrier();
+}
 
 uint pcg(uint v)
 {
@@ -459,7 +574,7 @@ bool alphaTexel(uint custom, uint prim, uint geomid, vec2 bary)
     uint geom = custom & 0xFFu;
     uint opac = (custom >> 8) & 0xFFu;
     if(geom == 0u) return true;
-    if(geom >= 97u) return false;
+    if(geom >= MAXGEOMS) return false;
     // Smoke puffs pack 1-255 here. A grey sprite is not a solid wall: keep
     // this ray with probability opac/255 so the shadow thins as the trail
     // fades. 0 means a normal model (no extra channel).
@@ -713,6 +828,15 @@ void shadePixel()
     bool valid = false;
     vec4 outc = vec4(0.0);
     bool nrdOn = (int(lights.env.diffPad1 + 0.5) & 32) != 0;
+    // Lot 2: hoisted out of the first block, which now stops where the lamps
+    // start so the whole tile can cull them together (tileCull has barriers).
+    bool reach = false;
+    vec3 hit = vec3(0.0);
+    vec3 sorigin = vec3(0.0);
+    float tmax = 0.0;
+    uint omnimask = 0u, nearmask = 0u, sunmask = 0u, skymask = 0u;
+    uint skipInst = 0xFFFFFFFFu;
+    int nuse = 1;
 
     if(live) do
     {
@@ -728,7 +852,7 @@ void shadePixel()
     dir /= len;
 
     float tmin = max(pc.origin.w, 0.01);
-    float tmax = max(pc.range.x, tmin + 1.0);
+    tmax = max(pc.range.x, tmin + 1.0);
 
     // SHADE_MODELS: primary rays hit world + other models, never SELF (the
     // first-person body). SELF stays in the TLAS so shadow / sun / sky rays
@@ -769,7 +893,7 @@ void shadePixel()
     float b = bary.x;
     float c = bary.y;
     float hitT = rayQueryGetIntersectionTEXT(q, true);
-    vec3 hit = origin + dir * hitT;
+    hit = origin + dir * hitT;
     hitp = hit;
     hitdist = hitT;
     // Window depth is the edge-stop the brief asked for: a player standing
@@ -957,7 +1081,7 @@ void shadePixel()
         // A model hit. Do not feed prim into the world SSBOs. No shade flag
         // (overflow, static OBJ, pose not yet known) stores transparent so
         // GL's raster shows through.
-        if((pc.mode & SHADE_MODELS) == 0 || (custom & 0xFFu) >= 97u)
+        if((pc.mode & SHADE_MODELS) == 0 || (custom & 0xFFu) >= MAXGEOMS)
             break;
         // customIndex is per-instance, so neighbouring pixels in a subgroup
         // hit different BLASes. Without nonuniformEXT the whole subgroup can
@@ -1059,12 +1183,10 @@ void shadePixel()
         if(fullbright && modelspec > 0.0)
             specMul = hasmask ? modelspec * maskrgb.r : modelspec;
     }
-    int nlights = int(pc.lighting.w);
-    nlights = clamp(nlights, 0, 256);
-    int nuse = int(pc.range.z + 0.5);
+    nuse = int(pc.range.z + 0.5);
     nuse = clamp(nuse, 1, 4);
 
-    vec3 sorigin = hit + noffset * (ismodel ? MODEL_SHADOW_BIAS : SHADOW_BIAS);
+    sorigin = hit + noffset * (ismodel ? MODEL_SHADOW_BIAS : SHADOW_BIAS);
     // hwrtshadowself: what the first-person body occludes. The levels are
     // ordered by how badly the light type distorts the body's own shadow.
     // The sun is directional, so its rays are parallel and the silhouette is
@@ -1091,7 +1213,7 @@ void shadePixel()
     // omnimask is the always-evaluated omnis, nearmask the nearest-N finite
     // lamps. Gating cannot depend on the hit: a per-pixel decision would cut
     // the shadow along its own threshold, which is the defect level 3 has.
-    uint omnimask = noself, nearmask = noself, sunmask = noself, skymask = noself;
+    omnimask = noself; nearmask = noself; sunmask = noself; skymask = noself;
     {
         float ss = lights.env.shadowSelf;
         if(ss >= 0.5) sunmask = withself;
@@ -1099,7 +1221,16 @@ void shadePixel()
         if(ss >= 2.5) nearmask = withself;
         if(ss >= 3.5) omnimask = nearmask = sunmask = skymask = RAYMASK_ALL;
     }
-    uint skipInst = ismodel ? hitInst : 0xFFFFFFFFu;
+    skipInst = ismodel ? hitInst : 0xFFFFFFFFu;
+    reach = true;
+    } while(false);
+
+    // The lamp count is a push constant, the same in every invocation, including
+    // the ones that did not get this far: all of them reach the barriers inside.
+    tileCull(reach, hit, clamp(int(pc.lighting.w), 0, MAXLIGHTS));
+
+    if(reach) do
+    {
 
     // Radius 0: baker unlimited omni. Always contribute (they lose nearest-N
     // when they sit high / far). Packed first; 16 is a safety cap.
@@ -1111,27 +1242,29 @@ void shadePixel()
     // lets the punched teleporter rim block without player / leaf silhouettes
     // from the pad, so the lamp stays in the hole instead of flooding the
     // floor in front of the ring.
-    int nunlim = 0, nglights = 0;
-    for(int i = 0; i < nlights; i++)
+    // Lot 2: the always-evaluated lamps of this tile, in index order. The 16 /
+    // 96 caps were applied by the CPU (kind bit 0) counting in that same order,
+    // and a glow dropped by the tile box would have returned at x >= 1 below.
+    int nA = int(sh_nA);
+    for(int j = 0; j < nA; j++)
     {
+        int i = int(sh_listA[j]);
         bool unlim = lights.l[i].radius <= 0.0;
         bool glowL = lights.l[i].flags >= 1.5 && !unlim;
-        if(!unlim && !glowL) continue;
-        if(unlim && nunlim >= 16) continue;
-        if(glowL && nglights >= 96) continue;
         uint gmask = omnimask;
         if(glowL && lights.l[i].flags >= 2.5) gmask = RAYMASK_WORLD | RAYMASK_PORTAL;
         addOmni(i, hit, n, sorigin, gmask, skipInst, ismodel, direct, dir, specMul, specAcc);
-        if(unlim) nunlim++;
-        else nglights++;
     }
 
+    // Nearest-N among the finite lamps the tile box can reach, same order, same
+    // strict comparisons, so the same lamps win the same ties.
     int besti[4] = int[](-1, -1, -1, -1);
     float bestd[4] = float[](1e30, 1e30, 1e30, 1e30);
-    for(int i = 0; i < nlights; i++)
+    int nB = int(sh_nB);
+    for(int j = 0; j < nB; j++)
     {
+        int i = int(sh_listB[j]);
         float radius = lights.l[i].radius;
-        if(radius <= 0.0 || lights.l[i].flags >= 1.5) continue;
         vec3 L = lights.l[i].pos - hit;
         float mag = length(L);
         if(mag >= radius) continue;

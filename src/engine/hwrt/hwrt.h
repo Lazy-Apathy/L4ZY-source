@@ -402,6 +402,16 @@ enum
     HWRT_GEOM_ANIM0 = HWRT_GEOM_MODEL0 + HWRT_MAX_MODEL_BLAS,
     HWRT_MAX_GEOMS = HWRT_GEOM_ANIM0 + HWRT_MAX_ANIM_BLAS
 };
+// Room for more rest-pose BLASes (64 used to fill up on triforts). The first 64 keep their customIndex
+// (1..64), the extra slots go after the animated ones (97..), so every index the
+// old layout produced is unchanged and the whole table still fits the 8 bits the
+// smoke puffs leave for it (customIndex bits 8-15 carry their opacity).
+enum
+{
+    HWRT_MODEL_BLAS_CAP = 128,
+    HWRT_GEOM_EXTRA0 = HWRT_MAX_GEOMS,
+    HWRT_MAX_GEOMS_CAP = HWRT_GEOM_EXTRA0 + (HWRT_MODEL_BLAS_CAP - HWRT_MAX_MODEL_BLAS)
+};
 
 // Skins are per-`skin` in animmodel and are not in the world diffuse array, so
 // they get a second sampled 2D array. compactskins() may rewrite layer indices.
@@ -546,6 +556,11 @@ struct hwrttexarray
 
 extern bool hwrtuploadtexarray(VkCommandBuffer cmd, const vector<GLuint> &ids, int maxdim, hwrttexarray &out, const char *what, bool mips = false);
 extern bool hwrtuploadcubemap(VkCommandBuffer cmd, GLuint gltex, hwrttexarray &out, const char *what);
+// Same layers as hwrtuploadtexarray into an image with spare layers;
+// first > 0 appends ids[first..] without touching the others (see as.cpp).
+extern bool hwrtuploadtexlayers(const vector<GLuint> &ids, int first, int maxdim, int capacity, hwrttexarray &out, int &outcap, const char *what, bool mips);
+extern void hwrtreaptexupload(bool wait);
+extern void hwrtdestroytexupload();
 extern void hwrtdestroytexarray(hwrttexarray &t);
 extern void hwrtnoteenvmap(GLuint gltex);
 extern bool hwrtcreatesampler(bool repeat, VkSampler &out, bool mips = false);

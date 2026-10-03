@@ -121,8 +121,13 @@ struct hwrtlightupload
 {
     hwrtlightenv env;
     hwrtlight lights[HWRT_MAX_LIGHTS];
+    // One word per lamp after the 256 slots, read by hitlight.comp. bit 0: the always-evaluated loop takes
+    // it (radius 0 within the first 16, glow within the first 96, counted in
+    // index order like that loop counts them). bit 1: a finite lamp the
+    // nearest-N loop may elect (radius > 0, flags < 1.5).
+    uint kind[HWRT_MAX_LIGHTS];
 };
-static_assert(sizeof(hwrtlightupload) == 432 + 256 * 32, "light ssbo");
+static_assert(sizeof(hwrtlightupload) == 432 + 256 * 32 + 256 * 4, "light ssbo");
 
 struct hwrtlightstate
 {
@@ -718,6 +723,24 @@ void hwrtupdatelights()
         L.flags = (e.flags & EF_NOSHADOW) ? 1.0f : 0.0f;
     }
 
+    // Which loop of hitlight.comp visits each lamp, decided once here
+    // with the shader's own float tests and counting order.
+    {
+        int nunlimk = 0, nglowk = 0;
+        loopi(n)
+        {
+            const hwrtlight &L = packed.lights[i];
+            bool unlim = L.radius <= 0.0f;
+            bool glowL = L.flags >= 1.5f && !unlim;
+            uint k = 0;
+            if(unlim && nunlimk < 16) { k |= 1; nunlimk++; }
+            else if(glowL && nglowk < 96) { k |= 1; nglowk++; }
+            else if(unlim) nunlimk++;
+            else if(glowL) nglowk++;
+            if(!unlim && L.flags < 1.5f) k |= 2;
+            packed.kind[i] = k;
+        }
+    }
     void *mapped = NULL;
     VkResult r = vkMapMemory(hwrtdev.device, lights.memory, 0, sizeof(packed), 0, &mapped);
     if(r != VK_SUCCESS || !mapped)

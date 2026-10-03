@@ -1,8 +1,8 @@
 # L4ZY
 
-A Cube 2: Sauerbraten (2020) client with **hardware ray-traced lighting**, **NVIDIA DLAA/DLSS**, **native HDR output**, **local AI chat translation** and a **settings assistant**, a **drag-and-drop HUD editor**, and a lot of quality-of-life additions: friends list, kill feed, CTF flag timer, automatic match recording, HD-aim demos and more.
+A Cube 2: Sauerbraten (2020) client with **hardware ray-traced lighting**, **NVIDIA DLAA/DLSS**, **native HDR output**, **local AI chat translation** and a **settings assistant**, **3D sound**, a **drag-and-drop HUD editor**, and a lot of quality-of-life additions: friends list, kill feed, CTF flag timer, automatic match recording, HD-aim demos and more.
 
-It plays on normal Sauerbraten servers. Nothing extra is sent to public or vanilla servers.
+It plays on normal Sauerbraten servers. The only extra thing it sends is one `__L4ZY <version>` line when you connect, which vanilla servers ignore (see [Online rules](#online-rules)).
 
 This repository only hosts the **installers and updates**. The game updates itself from the in-game **Updates** menu.
 
@@ -124,6 +124,23 @@ Useful commands:
 
 Menu status lines tell you whether RT is really running.
 
+If your graphics card or driver cannot run ray tracing, *Ray tracing* is greyed out with the reason.
+
+### Ray tracing performance
+
+- Teleporter lights are gathered once per light update instead of every frame: about twice the FPS on maps with many teleporters.
+- When the model cache is full, models that cannot be added are skipped before any GPU work.
+- Sky rays use blue noise with NRD: cleaner sky light at the same cost.
+- Item models (boost, armour, quad…) are prepared behind the loading screen, and new skins are added without waiting for the GPU: no more freeze when an item respawns.
+- Room for 128 different models in the ray-traced scene (was 64): items no longer go missing on big maps.
+- Lamps are sorted per screen tile, so each pixel only tests the lamps near it: in our tests, about +40 to +80 % FPS on the heaviest maps at 1600×900, less on lighter ones.
+- If ray tracing cannot run (no hardware RT, no Vulkan driver, driver too old, failed to start), *Ray tracing* is greyed out in Options → Graphics → *Lighting*, with the reason. The settings search and the assistant show it greyed out too.
+
+Commands:
+
+- `/hwrtraison`: why ray tracing cannot run (empty when it can).
+- `/hwrtstats`, `hwrttimes 1`: RT statistics and GPU time per stage.
+
 ### Anti-aliasing and upscaling: DLAA / DLSS
 
 **Menu:** Options → Graphics → *Anti-Aliasing*
@@ -161,6 +178,38 @@ Menu status lines tell you whether RT is really running.
 - Native HDR needs Windows HDR to be on. The game never changes Windows or driver settings.
 - If you turn Windows HDR on after starting the game, choose *Native HDR* again.
 - In native HDR, SSAO (Creases), Temporal AA and motion blur are not applied.
+
+### 3D sound (Steam Audio)
+
+- **Headphones (HRTF):** you hear whether a sound is ahead or behind, above or below.
+- **Speakers:** the usual left/right sound.
+- **Occlusion:** with Headphones or Speakers, walls between you and a sound muffle it (it is never muted).
+- Your own sounds, menus, announcements and music are never changed.
+- Off by default: nothing changes until you pick Headphones or Speakers.
+
+**Menu:** Options → Sound → *3D Sound*
+
+| Setting | Values | Default |
+|---|---|---|
+| `son3d` | `0` off, `1` headphones (HRTF), `2` speakers | `0` |
+| `son3docclusion` | walls muffle sounds (with headphones or speakers) | `1` |
+
+- Headphones set the sound frequency to 44100 Hz.
+- If Steam Audio (`phonon.dll`) cannot load, Headphones and Speakers are greyed out and the menu says why.
+
+### Low latency
+
+The game reads your mouse once the GPU has caught up, instead of queueing frames ahead. Your aim reaches the screen sooner, with the same image. It helps most with ray tracing, native HDR or V-Sync; with classic lighting and no V-Sync there is little to gain.
+
+**Menu:** Options → Display → *Low Latency*
+
+| Setting | Values | Default |
+|---|---|---|
+| `lowlatency` | `0` off, `1` on, `2` strict (lowest latency, fewer FPS) | `1` |
+
+- *On* keeps the GPU busy, so the frame rate is kept.
+- *Strict* waits for the GPU to finish each frame before starting the next: a bit less latency again, but fewer FPS.
+- Mouse handling itself (sensitivity, acceleration, raw input) is unchanged; only the moment it is read changes. No frame is generated or reordered.
 
 ### Look
 
@@ -246,6 +295,7 @@ Supported codes: `bg ca cs da de en es et fi fr hr hu id it nl no pl pt ro ru sk
 
 - Type a word, in English or French: the matching settings of every Options page appear as real checkboxes and sliders you can change right there, grouped by page, with a link to the page.
 - It also finds settings by keyword (`son`, `souris`, `viseur`, `lumière`…); accents and capitals do not matter.
+- It also finds colour pickers (my colour, friend colours, crosshair colour), text fields (sensitivity, DPI, HUD positions…) and options written on one line.
 
 ### Settings assistant (local AI)
 
@@ -255,6 +305,7 @@ Ask in plain words how to find or change a setting, and the translation model an
 - It can change game settings, put actions on keys, including up to 4 actions on one key (e.g. `bind LSHIFT "setweapon RI; attack"`), open a settings page, and open the HUD editor.
 - It can never run scripts, quit, connect, chat, record, touch files, servers or keys: every proposal is checked by the game before it is shown and again when you click, whatever the model writes.
 - It uses your installed translation model (no internet unless you set an API key).
+- It knows the real menu path of every setting (for example Options → Mouse → *crosshair:*) and can open the page for you.
 
 **Menu:** Options → *Settings assistant (AI)…*, or `/assistant`
 
@@ -381,11 +432,25 @@ Tints your body, name, HUD gun and chat/kill-feed name. Click the player preview
 
 - **Scoreboard columns** (Options → HUD → Scoreboard): `showfrags` (`1`), `showkd`, `showflags`, `showaccuracy`, `showstatus` (`0`), `showlang` (`1`), `showvs` (`1`: your kills-deaths against each player), and `scoreboardalpha` for the background opacity (`40`).
   - Admin, auth and master are shown as a tag after the name; names are dimmed while a player is dead.
-- **Crosshair** (Options → HUD): the hit crosshair takes the colour of the player you hit (friend colour, otherwise blue or red); `crosshairreloaddim` dims it while reloading (`0`).
+- **Crosshair** (Options → Mouse → *crosshair:*): resting colour in hex (`crosshaircolour`, or `crosshairhex FF8800`; default white), with white/green/cyan/yellow/pink presets. The hit crosshair takes the colour of the player you hit (friend colour, otherwise blue or red); `crosshairreloaddim` dims it while reloading (`0`).
 - **Sound mix** (Options → Sound → Mix): `mixweapons`, `mixhits`, `mixpain`, `mixitems`, `mixannounce`, `mixflags`, `mixmove`, `mixworld`.
   - All go from 0 to 200 (`100` = normal). `mixreset` puts them all back to 100.
 - **Mouse** (Options → Mouse): `mousedpi` (`800`), `setcm360 <cm>` and `getcm360`, for hipfire cm per 360°.
 - **Window** (Options → Display): `windowmode` `0` windowed, `1` exclusive fullscreen, `2` borderless (default).
+
+### Online rules
+
+**Client announce.** When you connect to a server, L4ZY sends it one line, once per connection: `__L4ZY <version>` (for example `__L4ZY 2026.9.28.1`), the same way WC-NG announces itself.
+
+- Only a released version number (`YEAR.MONTH.DAY.N`) is sent; any other build sends `__L4ZY dev`.
+- Nothing is sent in a local game or a local demo.
+- Vanilla servers ignore it. If an older server mod answers "unknown command", that one answer is hidden.
+
+**Diagnostic views are offline only.** On a server (or with other players on your own server), debug views that could show players through walls or without textures are switched back to normal before every frame, with the message `debug view disabled online`: `hwrtdebug` other than `0` and `7`, `rtaodebug`, `hwrtshade`, `hwrtveldebug`, `hwrtnrddbg`, `hwrtdiffvis`, `hwrtskyvisdbg`, `hdrlightdbg`, `hwrtdepthmask 0`, and the `hwrtvel…` test drives. Offline and in demos, nothing changes. Normal settings (lighting, anti-aliasing, HDR, NRD, shadows) are never blocked.
+
+| Command | What it does |
+|---|---|
+| `l4zyversion` | the version this client announces |
 
 ### Updater commands
 
@@ -394,6 +459,25 @@ Tints your body, name, HUD gun and chat/kill-feed name. Click the player preview
 ## Changelog
 
 Each release is listed on the [Releases](https://github.com/Lazy-Apathy/L4ZY/releases) page, newest first.
+
+### 2026.10.3.1 (test)
+
+- 3D sound (Steam Audio): Options → Sound → *3D Sound*. Headphones (HRTF) let you hear whether a sound is ahead or behind, above or below; walls muffle sounds (*Occlusion*). Off by default.
+- Low latency mode: the mouse is read once the GPU catches up, for a more direct aim with ray tracing, native HDR or V-Sync. On by default; *Strict* goes further at the cost of some FPS (Options → Display).
+- Ray tracing: about twice the FPS on maps with many teleporters; no more wasted work when the model cache is full.
+- Ray tracing: cleaner sky light with NRD (blue-noise sky rays).
+- Ray tracing is greyed out in Options → Graphics → *Lighting* when your graphics card or driver cannot run it, with the reason.
+- Online: L4ZY tells the server its version once when you connect (`__L4ZY <version>`, like WC-NG), so admins can see which client you use. `/l4zyversion` shows it.
+- Online: debug and diagnostic views (such as `hwrtdebug 4`) only work offline and in demos.
+- Crosshair colour in hex: Options → Mouse → *crosshair:*, or `crosshairhex FF8800`.
+- Settings search also finds colour pickers, text fields and one-line options.
+- Settings assistant: gives the real menu path of every setting.
+- Menu text fields (name, add friend…) now have an orange outline, visible without hovering them.
+- Ray tracing: no more freeze when an item (boost, armour, quad) respawns.
+- Ray tracing: items and models no longer go missing from the ray-traced scene on big maps.
+- Ray tracing: faster lighting on maps with many lamps (in our tests, about +40 to +80 % FPS on the heaviest maps, less on lighter ones) and a quicker switch to ray tracing.
+- CTF: no radar marker for a flag that the server keeps outside the map.
+- Fixes: friend names up to 15 characters in *Add friend*, Alt+Tab out of exclusive fullscreen gives the desktop its normal resolution back.
 
 ### 2026.9.28.1 (stable)
 
@@ -424,5 +508,7 @@ First public release:
 - **NVIDIA DLSS/NGX and NRD:** NVIDIA RTX SDK licence. Do not reverse engineer or redistribute them separately.
 - **Also included:** Python (PSF licence), llama.cpp (MIT) and the Microsoft Visual C++ runtime.
 - **Translation models:** Qwen3, Apache 2.0, downloaded from the official Qwen repositories.
+- **Steam Audio** (`phonon.dll`, for the optional 3D sound): Apache 2.0, (c) Valve Corporation; it contains third-party parts listed in `docs\licenses\steam-audio\THIRDPARTY.md`. Valve does not endorse L4ZY.
 - Full texts are in `docs\licenses` in the installed game.
-- L4ZY is not an official Sauerbraten release, and is not endorsed by NVIDIA.
+- Source code: https://github.com/Lazy-Apathy/L4ZY-source (one tag per release)
+- L4ZY is not an official Sauerbraten release, and is not endorsed by NVIDIA or Valve.

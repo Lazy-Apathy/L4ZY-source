@@ -623,7 +623,8 @@ struct ctfclientmode : clientmode
         {
             flag &f = flags[i];
             if(m_hold ? f.spawnindex < 0 : !ctfflagteam(f.team)) continue;
-            if(!m_hold) drawblip(d, x, y, s, i, false);
+            // a flag the server keeps dropped outside the world has no base either
+            if(!m_hold && !(!f.owner && f.droptime && f.droploc.x < 0)) drawblip(d, x, y, s, i, false);
             if(f.owner)
             {
                 if(!m_hold && lastmillis%1000 >= 500) continue;
