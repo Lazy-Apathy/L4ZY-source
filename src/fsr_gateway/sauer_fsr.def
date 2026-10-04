@@ -1,0 +1,12 @@
+LIBRARY sauer_fsr
+EXPORTS
+    sauer_fsr_abi_version
+    sauer_fsr_set_log
+    sauer_fsr_init
+    sauer_fsr_query_optimal
+    sauer_fsr_create
+    sauer_fsr_dispatch
+    sauer_fsr_get_stats
+    sauer_fsr_release
+    sauer_fsr_shutdown
+    sauer_fsr_last_error

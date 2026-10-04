@@ -43,6 +43,10 @@ static_assert(sizeof(hwrtshadevert) == 48, "shade vert stride");
 static_assert(sizeof(hwrtshadetri) == 16, "shade tri stride");
 
 enum { HWRT_MAX_DIFFUSE = 256, HWRT_MAX_LM = 256, HWRT_MAX_TEXDIM = 1024 };
+// Normal + spec maps of the spec / envmap world faces (hitlight binding 28):
+// 255 layers at most (255 = none in ShadeTri.x), 512 a side. They only shape
+// a highlight or a mirror, so they do not need the diffuse resolution.
+enum { HWRT_MAX_NORMALS = 255, HWRT_NORMAL_TEXDIM = 512 };
 
 struct hwrtworld
 {
@@ -52,8 +56,11 @@ struct hwrtworld
     VkCommandBuffer cmd;
 
     hwrtbuf shadevert, shadeidx, shadetri;
-    hwrttexarray lm, diff, glow;
+    hwrttexarray lm, diff, glow, norm;
     VkSampler lmsampler, diffsampler;
+    // Same addressing and mips as diffsampler, plus anisotropic filtering:
+    // only hitlight binding 29 (hwrtdiffmip 2) samples through it.
+    VkSampler diffanisosampler;
     bool shadeok;
 };
 
@@ -197,6 +204,7 @@ static void destroyshade()
     destroytex(world.lm);
     destroytex(world.diff);
     destroytex(world.glow);
+    destroytex(world.norm);
     world.shadeok = false;
     hwrtshadelm = hwrtshadediff = hwrtshadeglow = 0;
     hwrtglowomnicount = 0;
@@ -271,8 +279,29 @@ void hwrtdestroysampler(VkSampler &s)
     s = VK_NULL_HANDLE;
 }
 
+// Anisotropic twin of the diffuse sampler for hwrtdiffmip 2. Not fatal: no
+// device support (or a failure) leaves binding 29 on the plain sampler.
+static void ensureanisosampler()
+{
+    if(world.diffanisosampler || hwrtdev.maxaniso < 2.0f || !loadshadefuncs()) return;
+    VkSamplerCreateInfo info = { VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
+    info.magFilter = VK_FILTER_LINEAR;
+    info.minFilter = VK_FILTER_LINEAR;
+    info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    info.addressModeU = info.addressModeV = info.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    info.minLod = 0;
+    info.maxLod = 16.f;
+    info.anisotropyEnable = VK_TRUE;
+    info.maxAnisotropy = min(hwrtdev.maxaniso, 16.0f);
+    if(hwrtCreateSampler(hwrtdev.device, &info, NULL, &world.diffanisosampler) != VK_SUCCESS)
+        world.diffanisosampler = VK_NULL_HANDLE;
+}
+
+bool hwrtdiffanisoready() { return world.diffanisosampler != VK_NULL_HANDLE; }
+
 static bool ensuresamplers()
 {
+    ensureanisosampler();
     if(world.lmsampler && world.diffsampler) return true;
     if(!loadshadefuncs()) return false;
     if(!world.lmsampler && !hwrtcreatesampler(false, world.lmsampler))
@@ -324,6 +353,125 @@ static void boxmip4(const uchar *src, int sw, int sh, uchar *dst, int dw, int dh
         }
         uchar *o = dst + (size_t(i)*dw + j)*4;
         loopk(4) o[k] = uchar(acc[k] / max(n, 1));
+    }
+}
+
+// hwrtdiffupscale 1-3: separable resampling of one RGBA8 texture with wrap
+// (world textures tile), texel centres aligned like GL ((j+0.5)*sw/dw - 0.5),
+// so the enlarged layer sits exactly where the original texels were. On an
+// axis that shrinks (non power-of-two sizes) the kernel is widened.
+static float upkernel(int mode, float x)
+{
+    x = fabsf(x);
+    if(mode == 1) return x < 1 ? 1 - x : 0;
+    if(mode == 2)
+    {
+        // Catmull-Rom (B=0, C=0.5): sharp, interpolates the original texels.
+        if(x < 1) return 1.5f*x*x*x - 2.5f*x*x + 1;
+        if(x < 2) return -0.5f*x*x*x + 2.5f*x*x - 4*x + 2;
+        return 0;
+    }
+    if(x < 1e-6f) return 1;
+    if(x >= 3) return 0;
+    float px = float(M_PI)*x;
+    return 3*sinf(px)*sinf(px/3) / (px*px);
+}
+
+static void uptaps(int mode, int sw, int dw, int &ntap, vector<int> &idx, vector<float> &wt)
+{
+    float support = mode == 1 ? 1.0f : (mode == 2 ? 2.0f : 3.0f);
+    float scale = max(1.0f, float(sw)/float(dw));
+    ntap = int(ceilf(support*scale))*2 + 1;
+    idx.setsize(0);
+    wt.setsize(0);
+    loopj(dw)
+    {
+        float c = (j + 0.5f)*float(sw)/float(dw) - 0.5f;
+        int first = int(floorf(c - support*scale)) + 1;
+        float sum = 0;
+        int base = wt.length();
+        loop(t, ntap)
+        {
+            int k = first + t;
+            float w = upkernel(mode, (float(k) - c)/scale);
+            int kw = ((k % sw) + sw) % sw;
+            idx.add(kw);
+            wt.add(w);
+            sum += w;
+        }
+        if(fabsf(sum) > 1e-6f) loop(t, ntap) wt[base + t] /= sum;
+    }
+}
+
+static void resample(int mode, const uchar *src, int sw, int sh, uchar *dst, int dw, int dh)
+{
+    if(sw == dw && sh == dh) { memcpy(dst, src, size_t(dw)*size_t(dh)*4); return; }
+    int nx = 0, ny = 0;
+    vector<int> ix, iy;
+    vector<float> wx, wy;
+    uptaps(mode, sw, dw, nx, ix, wx);
+    uptaps(mode, sh, dh, ny, iy, wy);
+    float *tmp = new float[size_t(dw)*size_t(sh)*4];
+    loopi(sh)
+    {
+        const uchar *row = src + size_t(i)*sw*4;
+        float *o = tmp + size_t(i)*dw*4;
+        loopj(dw)
+        {
+            const int *ii = &ix[j*nx];
+            const float *ww = &wx[j*nx];
+            float a0 = 0, a1 = 0, a2 = 0, a3 = 0;
+            loopk(nx)
+            {
+                const uchar *p = row + ii[k]*4;
+                float w = ww[k];
+                a0 += w*p[0]; a1 += w*p[1]; a2 += w*p[2]; a3 += w*p[3];
+            }
+            o[j*4+0] = a0; o[j*4+1] = a1; o[j*4+2] = a2; o[j*4+3] = a3;
+        }
+    }
+    float *acc = new float[size_t(dw)*4];
+    loopi(dh)
+    {
+        const int *ii = &iy[i*ny];
+        const float *ww = &wy[i*ny];
+        memset(acc, 0, size_t(dw)*4*sizeof(float));
+        loopk(ny)
+        {
+            const float *r = tmp + size_t(ii[k])*dw*4;
+            float w = ww[k];
+            for(int x = 0; x < dw*4; x++) acc[x] += w*r[x];
+        }
+        uchar *o = dst + size_t(i)*dw*4;
+        for(int x = 0; x < dw*4; x++) o[x] = uchar(clamp(int(acc[x] + 0.5f), 0, 255));
+    }
+    delete[] acc;
+    delete[] tmp;
+}
+
+// Every mip level of one layer from its original texture: a level at least as
+// large as the original (on both axes) is the original resampled to it, the
+// first level that matches it is the original itself, smaller ones are box
+// mips of the level above (as before). With nearest the levels coarser than
+// the original were already exactly those box mips; the finer ones were 2x2,
+// 4x4... blocks.
+static void buildlayerchain(int mode, const uchar *orig, int ow, int oh, uchar *pixels, int layer,
+                            int maxw, int maxh, int layers, int miplevels)
+{
+    size_t base = 0;
+    int lw = maxw, lh = maxh, pw = 0, ph = 0;
+    uchar *prev = NULL;
+    loopk(miplevels)
+    {
+        size_t lbytes = size_t(lw)*size_t(lh)*4;
+        uchar *dst = pixels + base + lbytes*size_t(layer);
+        if(lw == ow && lh == oh) memcpy(dst, orig, lbytes);
+        else if(k > 0 && lw <= ow && lh <= oh && prev) boxmip4(prev, pw, ph, dst, lw, lh);
+        else resample(mode, orig, ow, oh, dst, lw, lh);
+        prev = dst; pw = lw; ph = lh;
+        base += lbytes*size_t(layers);
+        lw = max(1, lw/2);
+        lh = max(1, lh/2);
     }
 }
 
@@ -392,96 +540,14 @@ static bool createimg(hwrttexarray &t, int w, int h, int layers, int miplevels)
 // Pulls a set of GL textures back with glGetTexImage and stacks them into one
 // R8G8B8A8 2D array. The copy happens on the caller's command buffer and waits
 // for the device, so it belongs on a rebuild / first-use path, never in a frame.
-bool hwrtuploadtexarray(VkCommandBuffer cmd, const vector<GLuint> &ids, int maxdim, hwrttexarray &out, const char *what, bool mips)
+// Mips (box filter) and the Vulkan upload of a layer array already gathered on
+// the CPU: level 0 of every layer, then room for the other levels. Takes
+// ownership of pixels.
+static bool uploadarraypixels(VkCommandBuffer cmd, uchar *pixels, VkDeviceSize total, int maxw, int maxh,
+                              int layers, int miplevels, hwrttexarray &out, const char *what, bool mipsdone = false)
 {
-    if(ids.empty()) return texfail(what, "no textures to copy");
-    if(!loadshadefuncs() || !cmd) return texfail(what, "no command buffer to copy textures");
-
-    GLint prev = 0, packalign = 4, packrow = 0, packbuf = 0, activetex = 0;
-    glGetIntegerv(GL_TEXTURE_BINDING_2D, &prev);
-    glGetIntegerv(GL_PACK_ALIGNMENT, &packalign);
-    glGetIntegerv(GL_PACK_ROW_LENGTH, &packrow);
-    glGetIntegerv(GL_PIXEL_PACK_BUFFER_BINDING, &packbuf);
-    glGetIntegerv(GL_ACTIVE_TEXTURE, &activetex);
-    glActiveTexture_(GL_TEXTURE0);
-    if(glBindBuffer_) glBindBuffer_(GL_PIXEL_PACK_BUFFER, 0);
-    glPixelStorei(GL_PACK_ALIGNMENT, 1);
-    glPixelStorei(GL_PACK_ROW_LENGTH, 0);
-    glPixelStorei(GL_PACK_SKIP_PIXELS, 0);
-    glPixelStorei(GL_PACK_SKIP_ROWS, 0);
-    while(glGetError() != GL_NO_ERROR);
-
-    int maxw = 1, maxh = 1;
-    vector<int> ws, hs;
-    loopv(ids)
-    {
-        int w = 1, h = 1;
-        if(ids[i])
-        {
-            glBindTexture(GL_TEXTURE_2D, ids[i]);
-            GLint tw = 0, th = 0;
-            glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &tw);
-            glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &th);
-            if(tw > 0) w = tw;
-            if(th > 0) h = th;
-        }
-        ws.add(w);
-        hs.add(h);
-        if(w > maxw) maxw = w;
-        if(h > maxh) maxh = h;
-    }
-    if(maxdim < 1) maxdim = HWRT_MAX_TEXDIM;
-    maxw = min(maxw, maxdim);
-    maxh = min(maxh, maxdim);
-    int layers = ids.length();
-    int miplevels = mips ? countmips(maxw, maxh) : 1;
-    if(miplevels > 16) miplevels = 16;
-
-    const VkDeviceSize layerbytes = VkDeviceSize(maxw)*VkDeviceSize(maxh)*4;
-    VkDeviceSize total = 0;
     int mw = maxw, mh = maxh;
-    loopi(miplevels)
-    {
-        total += VkDeviceSize(mw)*VkDeviceSize(mh)*4*VkDeviceSize(layers);
-        mw = max(1, mw/2);
-        mh = max(1, mh/2);
-    }
-    uchar *pixels = new uchar[size_t(total)];
-    memset(pixels, 0, size_t(total));
-
-    loopv(ids)
-    {
-        uchar *dst = pixels + size_t(i)*size_t(layerbytes);
-        int w = ws[i], h = hs[i];
-        bool ok = false;
-        if(ids[i] && w > 0 && h > 0)
-        {
-            uchar *tmp = new uchar[size_t(w)*size_t(h)*4];
-            if(tmp)
-            {
-                memset(tmp, 0, size_t(w)*size_t(h)*4);
-                glBindTexture(GL_TEXTURE_2D, ids[i]);
-                while(glGetError() != GL_NO_ERROR);
-                glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, tmp);
-                ok = glGetError() == GL_NO_ERROR;
-                if(ok) blitstretch(tmp, w, h, dst, maxw, maxh);
-                delete[] tmp;
-            }
-        }
-        if(!ok)
-        {
-            // Magenta so a missing copy is obvious and does not crash.
-            for(VkDeviceSize p = 0; p < layerbytes; p += 4)
-            {
-                dst[p+0] = 255;
-                dst[p+1] = 0;
-                dst[p+2] = 255;
-                dst[p+3] = 255;
-            }
-        }
-    }
-
-    if(miplevels > 1)
+    if(miplevels > 1 && !mipsdone)
     {
         int sw = maxw, sh = maxh;
         VkDeviceSize srcoff = 0;
@@ -499,12 +565,6 @@ bool hwrtuploadtexarray(VkCommandBuffer cmd, const vector<GLuint> &ids, int maxd
             sh = dh;
         }
     }
-
-    glBindTexture(GL_TEXTURE_2D, prev);
-    glPixelStorei(GL_PACK_ALIGNMENT, packalign);
-    glPixelStorei(GL_PACK_ROW_LENGTH, packrow);
-    if(glBindBuffer_) glBindBuffer_(GL_PIXEL_PACK_BUFFER, packbuf);
-    glActiveTexture_(uint(activetex));
 
     if(!createimg(out, maxw, maxh, layers, miplevels))
     {
@@ -585,6 +645,159 @@ bool hwrtuploadtexarray(VkCommandBuffer cmd, const vector<GLuint> &ids, int maxd
     if(!hwrtwaitidle("vkDeviceWaitIdle (textures)")) { destroybuf(staging); destroytex(out); return false; }
     destroybuf(staging);
     return true;
+}
+
+
+// Last world diffuse upload (hwrtdiffupscale log / hwrtdiffupscalestatus).
+static double diffuploadms = 0, diffresamplems = 0;
+static double diffarraymb = 0, diffownsizemb = 0;
+
+bool hwrtuploadtexarray(VkCommandBuffer cmd, const vector<GLuint> &ids, int maxdim, hwrttexarray &out, const char *what, bool mips, int upscale)
+{
+    double tstart = hwrtnow(), tresample = 0;
+    if(ids.empty()) return texfail(what, "no textures to copy");
+    if(!loadshadefuncs() || !cmd) return texfail(what, "no command buffer to copy textures");
+
+    GLint prev = 0, packalign = 4, packrow = 0, packbuf = 0, activetex = 0;
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &prev);
+    glGetIntegerv(GL_PACK_ALIGNMENT, &packalign);
+    glGetIntegerv(GL_PACK_ROW_LENGTH, &packrow);
+    glGetIntegerv(GL_PIXEL_PACK_BUFFER_BINDING, &packbuf);
+    glGetIntegerv(GL_ACTIVE_TEXTURE, &activetex);
+    glActiveTexture_(GL_TEXTURE0);
+    if(glBindBuffer_) glBindBuffer_(GL_PIXEL_PACK_BUFFER, 0);
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glPixelStorei(GL_PACK_ROW_LENGTH, 0);
+    glPixelStorei(GL_PACK_SKIP_PIXELS, 0);
+    glPixelStorei(GL_PACK_SKIP_ROWS, 0);
+    while(glGetError() != GL_NO_ERROR);
+
+    int maxw = 1, maxh = 1;
+    vector<int> ws, hs;
+    loopv(ids)
+    {
+        int w = 1, h = 1;
+        if(ids[i])
+        {
+            glBindTexture(GL_TEXTURE_2D, ids[i]);
+            GLint tw = 0, th = 0;
+            glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &tw);
+            glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &th);
+            if(tw > 0) w = tw;
+            if(th > 0) h = th;
+        }
+        ws.add(w);
+        hs.add(h);
+        if(w > maxw) maxw = w;
+        if(h > maxh) maxh = h;
+    }
+    if(maxdim < 1) maxdim = HWRT_MAX_TEXDIM;
+    maxw = min(maxw, maxdim);
+    maxh = min(maxh, maxdim);
+    int layers = ids.length();
+    int miplevels = mips ? countmips(maxw, maxh) : 1;
+    if(miplevels > 16) miplevels = 16;
+    bool chain = upscale > 0 && miplevels > 1;
+
+    const VkDeviceSize layerbytes = VkDeviceSize(maxw)*VkDeviceSize(maxh)*4;
+    VkDeviceSize total = 0;
+    int mw = maxw, mh = maxh;
+    loopi(miplevels)
+    {
+        total += VkDeviceSize(mw)*VkDeviceSize(mh)*4*VkDeviceSize(layers);
+        mw = max(1, mw/2);
+        mh = max(1, mh/2);
+    }
+    uchar *pixels = new uchar[size_t(total)];
+    memset(pixels, 0, size_t(total));
+
+    loopv(ids)
+    {
+        uchar *dst = pixels + size_t(i)*size_t(layerbytes);
+        int w = ws[i], h = hs[i];
+        bool ok = false;
+        if(ids[i] && w > 0 && h > 0)
+        {
+            uchar *tmp = new uchar[size_t(w)*size_t(h)*4];
+            if(tmp)
+            {
+                memset(tmp, 0, size_t(w)*size_t(h)*4);
+                glBindTexture(GL_TEXTURE_2D, ids[i]);
+                while(glGetError() != GL_NO_ERROR);
+                glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, tmp);
+                ok = glGetError() == GL_NO_ERROR;
+                if(ok && chain)
+                {
+                    // A texture larger than the array (cap) is first shrunk
+                    // to it with the same filter, then treated as the original.
+                    double t0 = hwrtnow();
+                    int ow = min(w, maxw), oh = min(h, maxh);
+                    uchar *src = tmp;
+                    if(ow != w || oh != h)
+                    {
+                        src = new uchar[size_t(ow)*size_t(oh)*4];
+                        resample(upscale, tmp, w, h, src, ow, oh);
+                    }
+                    buildlayerchain(upscale, src, ow, oh, pixels, i, maxw, maxh, layers, miplevels);
+                    if(src != tmp) delete[] src;
+                    tresample += hwrtnow() - t0;
+                }
+                else if(ok) blitstretch(tmp, w, h, dst, maxw, maxh);
+                delete[] tmp;
+            }
+        }
+        if(!ok)
+        {
+            // Magenta so a missing copy is obvious and does not crash.
+            if(chain)
+            {
+                size_t base = 0;
+                int lw = maxw, lh = maxh;
+                loopk(miplevels)
+                {
+                    size_t lbytes = size_t(lw)*size_t(lh)*4;
+                    uchar *d = pixels + base + lbytes*size_t(i);
+                    for(size_t p = 0; p < lbytes; p += 4) { d[p+0] = 255; d[p+1] = 0; d[p+2] = 255; d[p+3] = 255; }
+                    base += lbytes*size_t(layers);
+                    lw = max(1, lw/2);
+                    lh = max(1, lh/2);
+                }
+            }
+            else for(VkDeviceSize p = 0; p < layerbytes; p += 4)
+            {
+                dst[p+0] = 255;
+                dst[p+1] = 0;
+                dst[p+2] = 255;
+                dst[p+3] = 255;
+            }
+        }
+    }
+
+    glBindTexture(GL_TEXTURE_2D, prev);
+    glPixelStorei(GL_PACK_ALIGNMENT, packalign);
+    glPixelStorei(GL_PACK_ROW_LENGTH, packrow);
+    if(glBindBuffer_) glBindBuffer_(GL_PIXEL_PACK_BUFFER, packbuf);
+    glActiveTexture_(uint(activetex));
+
+    bool done = uploadarraypixels(cmd, pixels, total, maxw, maxh, layers, miplevels, out, what, chain);
+    if(mips)
+    {
+        // The same textures each kept at its own size (capped), with mips:
+        // what a per-size array or an atlas would hold (for comparison only).
+        double own = 0;
+        loopv(ids)
+        {
+            int w = min(ws[i], maxw), h = min(hs[i], maxh);
+            loopk(16) { own += double(w)*double(h)*4; if(w == 1 && h == 1) break; w = max(1, w/2); h = max(1, h/2); }
+        }
+        diffuploadms = (hwrtnow() - tstart)*1000.0;
+        diffresamplems = tresample*1000.0;
+        diffarraymb = double(total)/(1024.0*1024.0);
+        diffownsizemb = own/(1024.0*1024.0);
+        conoutf("hwrt: diffuse array %dx%d x%d layers %d mips upscale %d: %.1f MB (each texture at its own size: %.1f MB), built in %.1f ms (resample %.1f ms)",
+                maxw, maxh, layers, miplevels, chain ? upscale : 0, diffarraymb, diffownsizemb, diffuploadms, diffresamplems);
+    }
+    return done;
 }
 
 // The same layers as hwrtuploadtexarray, byte for byte (same nearest
@@ -994,9 +1207,15 @@ static bool createcubeimg(hwrttexarray &t, int w)
 
 bool hwrtuploadcubemap(VkCommandBuffer cmd, GLuint gltex, hwrttexarray &out, const char *what)
 {
+    return hwrtuploadcubemapcap(cmd, gltex, out, what, 256);
+}
+
+// Traced reflections: the sky seen in a traced mirror wants more than the 256
+// faces the model envmap gets.
+bool hwrtuploadcubemapcap(VkCommandBuffer cmd, GLuint gltex, hwrttexarray &out, const char *what, int dimcap)
+{
     if(!loadshadefuncs() || !cmd) return texfail(what, "no command buffer to copy cubemap");
 
-    const int dimcap = 256;
     int w = 4;
     uchar *pixels = NULL;
     VkDeviceSize total = 0;
@@ -1136,11 +1355,37 @@ bool hwrtuploadcubemap(VkCommandBuffer cmd, GLuint gltex, hwrttexarray &out, con
     return true;
 }
 
-static bool uploadtexarray(const vector<GLuint> &ids, hwrttexarray &out, bool mips = false)
+static bool uploadtexarray(const vector<GLuint> &ids, hwrttexarray &out, bool mips = false, int upscale = 0)
 {
     if(!ensurecmd()) return false;
-    return hwrtuploadtexarray(world.cmd, ids, HWRT_MAX_TEXDIM, out, "hit-shade", mips);
+    return hwrtuploadtexarray(world.cmd, ids, HWRT_MAX_TEXDIM, out, "hit-shade", mips, upscale);
 }
+
+// How a world diffuse texture smaller than the array (the largest texture of
+// the map, 1024 at most) is enlarged into its layer: 0 nearest (2x2, 4x4...
+// blocks with hard edges that crawl under the jitter up close), 1 bilinear,
+// 2 bicubic Catmull-Rom, 3 Lanczos-3. 1-3 also build each mip level from the
+// original. Changing it re-uploads the diffuse array of the loaded map.
+// Saved (player choice in Options > Graphics > RT Textures).
+static vector<GLuint> worlddiffids;
+static void reuploaddiffuse();
+VARFP(hwrtdiffupscale, 0, 2, 3, reuploaddiffuse());
+static void reuploaddiffuse()
+{
+    if(!world.shadeok || worlddiffids.empty() || !hwrtdev.ok() || hwrtfailed) return;
+    if(!hwrtwaitidle("vkDeviceWaitIdle (diffuse re-upload)")) return;
+    if(!uploadtexarray(worlddiffids, world.diff, true, hwrtdiffupscale))
+    {
+        world.shadeok = false;
+        conoutf(CON_WARN, "hwrt: diffuse re-upload failed, RT shading off until the next map load");
+        return;
+    }
+    hwrtshadediff = world.diff.layers;
+    hwrtshadeepoch++;
+}
+ICOMMAND(hwrtdiffupscalestatus, "", (),
+    conoutf("hwrtdiffupscale %d: diffuse array %dx%d x%d, %.1f MB (own sizes %.1f MB), last upload %.1f ms (resample %.1f ms)",
+            hwrtdiffupscale, world.diff.w, world.diff.h, world.diff.layers, diffarraymb, diffownsizemb, diffuploadms, diffresamplems));
 
 static uint packcolorscale(const vec &c)
 {
@@ -1388,6 +1633,187 @@ static int slotdiffuselayer(Slot *slot, vector<GLuint> &diffids, int &diffoverfl
     return findoradddiffuse(diffids, id, diffoverflow);
 }
 
+// A slot shader parameter as GL will see it: the vslot's own value, else the
+// shader's default, else `fallback`. The largest of the three channels.
+static float slotshaderparam(Slot *slot, const VSlot &vs, const char *name, float fallback)
+{
+    loopv(vs.params) if(vs.params[i].name && !strcmp(vs.params[i].name, name)) return max(vs.params[i].val[0], max(vs.params[i].val[1], vs.params[i].val[2]));
+    if(slot && slot->shader) loopv(slot->shader->defaultparams)
+    {
+        const SlotShaderParamState &d = slot->shader->defaultparams[i];
+        if(d.name && !strcmp(d.name, name)) return max(d.val[0], max(d.val[1], d.val[2]));
+    }
+    return fallback;
+}
+
+// Traced reflections: how much of an envmapped face GL replaces with its
+// cubemap (glsl.cfg: mix(diffuse, reflect, envscale), times the spec map in
+// diffuse.a for the "R" shaders). Packed in the spare top byte of the
+// colorscale word: bits 0-6 the amount (/127), bit 7 "modulate by diffuse.a".
+// 0 for every face GL does not reflect, so nothing else starts to shine.
+static uint packenvrefl(Slot *slot, const VSlot &vs)
+{
+    if(!slot || !slot->shader || !(slot->shader->type&SHADER_ENVMAP)) return 0;
+    const char *sname = slot->shader->name;
+    if(!sname || !strstr(sname, "env")) return 0;
+    // "alt" variants reserve the slot but never reflect (no r option).
+    if(strstr(sname, "alt")) return 0;
+    bool specmod = strstr(sname, "envspecmap") != NULL;
+    float amount = slotshaderparam(slot, vs, "envscale", specmod ? 1.0f : 0.2f);
+    uint q = uint(clamp(amount, 0.0f, 1.0f)*127.0f + 0.5f);
+    if(!q) return 0;
+    return (q&0x7Fu) | (specmod ? 0x80u : 0u);
+}
+
+// World spec (hitlight, hwrtspecular): the bump shaders with the s option
+// (every name with "spec"; the "alt" fallbacks have none) add
+// specscale * pow(N.H, 32), times the spec map in diffuse.a for S
+// ("specmap"). Bits 9-16 of ShadeTri.x carry specscale x 16 (0 = no spec),
+// bit 17 the spec map.
+static uint packspec(Slot *slot, const VSlot &vs)
+{
+    if(!slot || !slot->shader) return 0;
+    const char *sname = slot->shader->name;
+    if(!sname || !strstr(sname, "spec") || strstr(sname, "alt")) return 0;
+    bool specmap = strstr(sname, "specmap") != NULL;
+    float scale = slotshaderparam(slot, vs, "specscale", specmap ? 6.0f : 1.0f);
+    uint q = uint(clamp(scale*16.0f + 0.5f, 0.0f, 255.0f));
+    if(!q) return 0;
+    return (q<<9) | (specmap ? 0x20000u : 0u);
+}
+
+// Normal + spec map layers of the spec / envmap world faces (hitlight binding
+// 28): rgb the face's normal map (flat when it has none), a the alpha of its
+// diffuse, which is the spec map of the S / R shaders. One layer per pair.
+// Both are resampled bilinearly to the layer size: the diffuse array stretches
+// a small texture by repeating texels, and a highlight or a mirror shows each
+// of those blocks as a hard square.
+struct hwrtnormspec { GLuint normal, diffuse; };
+static vector<hwrtnormspec> worldnormspecs;
+static int worldnormoverflow = 0;
+
+static GLuint slotdiffuseid(Slot *slot)
+{
+    Texture *tex = (!slot || slot->sts.empty()) ? notexture : slot->sts[0].t;
+    if(tex && (tex->type&Texture::TYPE)==Texture::CUBEMAP) tex = notexture;
+    return tex ? tex->id : 0;
+}
+
+// Normal + spec layer of a spec or envmap face, HWRT_MAX_NORMALS past the cap.
+static uint slotnormallayer(Slot *slot)
+{
+    GLuint nid = 0, did = slotdiffuseid(slot);
+    if(slot && (slot->texmask&(1<<TEX_NORMAL)))
+        loopvj(slot->sts) if(slot->sts[j].type==TEX_NORMAL && slot->sts[j].t) { nid = slot->sts[j].t->id; break; }
+    loopv(worldnormspecs) if(worldnormspecs[i].normal == nid && worldnormspecs[i].diffuse == did) return uint(i);
+    if(worldnormspecs.length() >= HWRT_MAX_NORMALS) { worldnormoverflow++; return HWRT_MAX_NORMALS; }
+    hwrtnormspec &ns = worldnormspecs.add();
+    ns.normal = nid;
+    ns.diffuse = did;
+    return uint(worldnormspecs.length()-1);
+}
+
+static uchar *readgltex(GLuint id, int &w, int &h)
+{
+    w = h = 0;
+    if(!id) return NULL;
+    glBindTexture(GL_TEXTURE_2D, id);
+    GLint tw = 0, th = 0;
+    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &tw);
+    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &th);
+    if(tw <= 0 || th <= 0) return NULL;
+    uchar *buf = new uchar[size_t(tw)*size_t(th)*4];
+    while(glGetError() != GL_NO_ERROR);
+    glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, buf);
+    if(glGetError() != GL_NO_ERROR) { delete[] buf; return NULL; }
+    w = tw;
+    h = th;
+    return buf;
+}
+
+// Bilinear, wrapping (world textures tile), one channel range [c0, c1).
+static void resamplewrap(const uchar *src, int sw, int sh, uchar *dst, int dw, int dh, int c0, int c1)
+{
+    loopi(dh) loopj(dw)
+    {
+        float fx = (j + 0.5f)*sw/dw - 0.5f, fy = (i + 0.5f)*sh/dh - 0.5f;
+        int x0 = int(floorf(fx)), y0 = int(floorf(fy));
+        float ax = fx - x0, ay = fy - y0;
+        int xa = ((x0%sw)+sw)%sw, xb = (xa+1)%sw, ya = ((y0%sh)+sh)%sh, yb = (ya+1)%sh;
+        const uchar *p00 = &src[(size_t(ya)*sw + xa)*4], *p10 = &src[(size_t(ya)*sw + xb)*4],
+                    *p01 = &src[(size_t(yb)*sw + xa)*4], *p11 = &src[(size_t(yb)*sw + xb)*4];
+        uchar *d = &dst[(size_t(i)*dw + j)*4];
+        for(int c = c0; c < c1; c++)
+        {
+            float v = (p00[c]*(1-ax) + p10[c]*ax)*(1-ay) + (p01[c]*(1-ax) + p11[c]*ax)*ay;
+            d[c] = uchar(clamp(int(v + 0.5f), 0, 255));
+        }
+    }
+}
+
+static bool uploadnormalspecs(hwrttexarray &out)
+{
+    if(worldnormspecs.empty() || !ensurecmd()) return false;
+    GLint prev = 0, packalign = 4, packrow = 0, packbuf = 0, activetex = 0;
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &prev);
+    glGetIntegerv(GL_PACK_ALIGNMENT, &packalign);
+    glGetIntegerv(GL_PACK_ROW_LENGTH, &packrow);
+    glGetIntegerv(GL_PIXEL_PACK_BUFFER_BINDING, &packbuf);
+    glGetIntegerv(GL_ACTIVE_TEXTURE, &activetex);
+    glActiveTexture_(GL_TEXTURE0);
+    if(glBindBuffer_) glBindBuffer_(GL_PIXEL_PACK_BUFFER, 0);
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glPixelStorei(GL_PACK_ROW_LENGTH, 0);
+    glPixelStorei(GL_PACK_SKIP_PIXELS, 0);
+    glPixelStorei(GL_PACK_SKIP_ROWS, 0);
+
+    int dimw = 1, dimh = 1;
+    loopv(worldnormspecs)
+    {
+        GLuint ids[2] = { worldnormspecs[i].normal, worldnormspecs[i].diffuse };
+        loopk(2) if(ids[k])
+        {
+            glBindTexture(GL_TEXTURE_2D, ids[k]);
+            GLint tw = 0, th = 0;
+            glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &tw);
+            glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &th);
+            dimw = max(dimw, int(tw));
+            dimh = max(dimh, int(th));
+        }
+    }
+    dimw = min(dimw, int(HWRT_NORMAL_TEXDIM));
+    dimh = min(dimh, int(HWRT_NORMAL_TEXDIM));
+    int layers = worldnormspecs.length();
+    int miplevels = min(countmips(dimw, dimh), 16);
+    VkDeviceSize total = 0;
+    int mw = dimw, mh = dimh;
+    loopi(miplevels)
+    {
+        total += VkDeviceSize(mw)*VkDeviceSize(mh)*4*VkDeviceSize(layers);
+        mw = max(1, mw/2);
+        mh = max(1, mh/2);
+    }
+    uchar *pixels = new uchar[size_t(total)];
+    memset(pixels, 0, size_t(total));
+    const size_t layerbytes = size_t(dimw)*size_t(dimh)*4;
+    loopv(worldnormspecs)
+    {
+        uchar *dst = pixels + size_t(i)*layerbytes;
+        for(size_t q = 0; q < layerbytes; q += 4) { dst[q] = 128; dst[q+1] = 128; dst[q+2] = 255; dst[q+3] = 255; }
+        int w = 0, h = 0;
+        uchar *n = readgltex(worldnormspecs[i].normal, w, h);
+        if(n) { resamplewrap(n, w, h, dst, dimw, dimh, 0, 3); delete[] n; }
+        uchar *d = readgltex(worldnormspecs[i].diffuse, w, h);
+        if(d) { resamplewrap(d, w, h, dst, dimw, dimh, 3, 4); delete[] d; }
+    }
+    glBindTexture(GL_TEXTURE_2D, prev);
+    glPixelStorei(GL_PACK_ALIGNMENT, packalign);
+    glPixelStorei(GL_PACK_ROW_LENGTH, packrow);
+    if(glBindBuffer_) glBindBuffer_(GL_PIXEL_PACK_BUFFER, packbuf);
+    glActiveTexture_(uint(activetex));
+    return uploadarraypixels(world.cmd, pixels, total, dimw, dimh, layers, miplevels, out, "normal + spec maps");
+}
+
 static hwrtshadetri makeshadestri(const elementset &e, vector<GLuint> &diffids, int &diffoverflow,
                                  vector<GLuint> &glowids, vector<vec> &glowavgs, int &glowoflow,
                                  int botlayer, int &glowlayer, vec &glowcol, vec &glowavg)
@@ -1410,9 +1836,17 @@ static hwrtshadetri makeshadestri(const elementset &e, vector<GLuint> &diffids, 
         if(glowlayer >= 0 && glowavgs.inrange(glowlayer)) glowavg = glowavgs[glowlayer];
     }
     hwrtshadetri st;
-    st.layer = layer < 0 ? 0xFFFFFFFFu : uint(layer);
+    // ShadeTri.x: bits 0-8 the diffuse layer, 9-17 the spec (packspec), 18-25
+    // the normal layer. All ones still means "no texture" (magenta).
+    if(layer < 0) st.layer = 0xFFFFFFFFu;
+    else
+    {
+        uint spec = packspec(slot, vs), env = packenvrefl(slot, vs);
+        uint nlayer = spec || env ? slotnormallayer(slot) : uint(HWRT_MAX_NORMALS);
+        st.layer = (uint(layer)&0x1FFu) | spec | (nlayer<<18);
+    }
     st.lmid = packlmidbot(lmid, botlayer);
-    st.color = packcolorscale(vs.colorscale);
+    st.color = packcolorscale(vs.colorscale) | (packenvrefl(slot, vs)<<24);
     st.pad = packglow(glowlayer, glowcol);
     return st;
 }
@@ -1473,14 +1907,77 @@ static void finalizeglowomnis()
     }
 }
 
+// hwrtdiffmip 2. Every world diffuse layer is stretched (nearest) to the
+// largest texture of the list (capped at HWRT_MAX_TEXDIM), exactly as
+// hwrtuploadtexarray does: a 512 texture in a 1024 array is 2x2 blocks at
+// level 0 and exactly itself at level 1 (box mips of identical blocks).
+// ShadeTri.x bits 26-28 carry that level for the face's layer, bits 29-31 for
+// its blend (bottom) layer, so the footprint path never samples finer than the
+// texture's own texels (GL's bilinear look up close). Modes 0 and 1 mask them off.
+static void packdifftexellevels(vector<hwrtshadetri> &tris, const vector<GLuint> &ids)
+{
+    vector<int> ws, hs;
+    int maxw = 1, maxh = 1;
+    GLint prev = 0;
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &prev);
+    loopv(ids)
+    {
+        int w = 1, h = 1;
+        if(ids[i])
+        {
+            glBindTexture(GL_TEXTURE_2D, ids[i]);
+            GLint tw = 0, th = 0;
+            glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &tw);
+            glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &th);
+            if(tw > 0) w = tw;
+            if(th > 0) h = th;
+        }
+        ws.add(w);
+        hs.add(h);
+        maxw = max(maxw, w);
+        maxh = max(maxh, h);
+    }
+    glBindTexture(GL_TEXTURE_2D, prev);
+    maxw = min(maxw, int(HWRT_MAX_TEXDIM));
+    maxh = min(maxh, int(HWRT_MAX_TEXDIM));
+    vector<uint> lv;
+    int perlevel[8] = { 0 };
+    loopv(ids)
+    {
+        uint l = 0;
+        while(l < 7 && (ws[i] << (l+1)) <= maxw && (hs[i] << (l+1)) <= maxh) l++;
+        lv.add(l);
+        perlevel[l]++;
+    }
+    conoutf("hwrt: world diffuse own-texel level in the %dx%d array: %d at 0, %d at 1, %d at 2, %d at 3+",
+            maxw, maxh, perlevel[0], perlevel[1], perlevel[2], perlevel[3]+perlevel[4]+perlevel[5]+perlevel[6]+perlevel[7]);
+    loopv(tris)
+    {
+        hwrtshadetri &t = tris[i];
+        if(t.layer == 0xFFFFFFFFu) continue;
+        uint top = t.layer & 0x1FFu, bot = t.lmid >> 16;
+        uint ltop = int(top) < lv.length() ? lv[top] : 0u;
+        uint lbot = bot != 0xFFFFu && int(bot) < lv.length() ? lv[bot] : 0u;
+        t.layer = (t.layer & 0x03FFFFFFu) | (ltop << 26) | (lbot << 29);
+    }
+}
+
 static bool buildshade(const vector<hwrtshadevert> &sverts, const vector<uint> &indices,
-                       const vector<hwrtshadetri> &stris, const vector<GLuint> &diffids,
+                       const vector<hwrtshadetri> &stristin, const vector<GLuint> &diffids,
                        const vector<GLuint> &glowids)
 {
     destroyshade();
     if(!loadshadefuncs() || !ensuresamplers()) return false;
-    if(sverts.empty() || indices.length() < 3 || stris.empty())
+    if(sverts.empty() || indices.length() < 3 || stristin.empty())
         return shadefail("no shade geometry");
+    vector<hwrtshadetri> stris;
+    stris.put(stristin.getbuf(), stristin.length());
+    {
+        vector<GLuint> texids;
+        loopv(diffids) texids.add(diffids[i]);
+        if(texids.empty() && notexture && notexture->id) texids.add(notexture->id);
+        packdifftexellevels(stris, texids);
+    }
 
     const VkDeviceSize vertbytes = VkDeviceSize(sverts.length())*sizeof(hwrtshadevert);
     const VkDeviceSize idxbytes = VkDeviceSize(indices.length())*sizeof(uint);
@@ -1522,7 +2019,9 @@ static bool buildshade(const vector<hwrtshadevert> &sverts, const vector<uint> &
     // Lightmaps stay lod0 (lumel grid). World diffuse gets a mip chain so
     // hitlight can textureGrad from the pixel footprint; skins already upload
     // with mips on their own path and must not share this call.
-    if(!uploadtexarray(lmids, world.lm) || !uploadtexarray(diffs, world.diff, true))
+    worlddiffids.setsize(0);
+    loopv(diffs) worlddiffids.add(diffs[i]);
+    if(!uploadtexarray(lmids, world.lm) || !uploadtexarray(diffs, world.diff, true, hwrtdiffupscale))
     {
         destroyshade();
         return false;
@@ -1539,14 +2038,22 @@ static bool buildshade(const vector<hwrtshadevert> &sverts, const vector<uint> &
         else hwrtshadeglow = world.glow.layers;
     }
     else hwrtshadeglow = 0;
+    if(worldnormspecs.length() && !uploadnormalspecs(world.norm))
+    {
+        // Spec and envmap faces then keep the flat face normal.
+        destroytex(world.norm);
+        conoutf(CON_WARN, "hwrt: world normal maps failed to copy, highlights stay flat");
+    }
+    if(worldnormoverflow) conoutf(CON_WARN, "hwrt: %d normal + spec maps over the %d cap, those faces stay flat", worldnormoverflow, int(HWRT_MAX_NORMALS));
 
     world.shadeok = true;
     hwrtshadelm = world.lm.layers;
     hwrtshadediff = world.diff.layers;
     hwrtshadeepoch++;
-    conoutf("hwrt: hit-shade %d tris, %d diffuse layers %dx%d mips %d, %d lightmaps %dx%d, %d glow layers, %d glow lights (%d lava)",
+    conoutf("hwrt: hit-shade %d tris, %d diffuse layers %dx%d mips %d, %d lightmaps %dx%d, %d glow layers, %d glow lights (%d lava), %d normal layers %dx%d",
             stris.length(), world.diff.layers, world.diff.w, world.diff.h, world.diff.mips,
-            world.lm.layers, world.lm.w, world.lm.h, hwrtshadeglow, hwrtglowomnicount, hwrtlavalights);
+            world.lm.layers, world.lm.w, world.lm.h, hwrtshadeglow, hwrtglowomnicount, hwrtlavalights,
+            world.norm.layers, world.norm.w, world.norm.h);
     return true;
 }
 
@@ -1588,6 +2095,8 @@ static bool gatherworld(vector<vec> &positions, vector<uint> &indices,
                         vector<GLuint> &diffids, int &diffoverflow,
                         vector<GLuint> &glowids, int &glowoflow, int &nblend)
 {
+    worldnormspecs.setsize(0);
+    worldnormoverflow = 0;
     glowclusters.setsize(0);
     hwrtglowomnicount = 0;
     gatherlavaomnis();
@@ -1816,10 +2325,12 @@ void hwrtdestroyworld()
     {
         if(world.lmsampler && hwrtDestroySampler) hwrtDestroySampler(hwrtdev.device, world.lmsampler, NULL);
         if(world.diffsampler && hwrtDestroySampler) hwrtDestroySampler(hwrtdev.device, world.diffsampler, NULL);
+        if(world.diffanisosampler && hwrtDestroySampler) hwrtDestroySampler(hwrtdev.device, world.diffanisosampler, NULL);
         if(world.cmdpool) vkDestroyCommandPool(hwrtdev.device, world.cmdpool, NULL);
     }
     world.lmsampler = VK_NULL_HANDLE;
     world.diffsampler = VK_NULL_HANDLE;
+    world.diffanisosampler = VK_NULL_HANDLE;
     world.cmdpool = VK_NULL_HANDLE;
     world.cmd = VK_NULL_HANDLE;
 }
@@ -2193,6 +2704,9 @@ VkImageView hwrtworlddiffuseview() { return world.diff.view; }
 VkSampler hwrtworlddiffusesampler() { return world.diffsampler; }
 VkImageView hwrtworldglowview() { return world.glow.view ? world.glow.view : world.diff.view; }
 VkSampler hwrtworldglowsampler() { return world.diffsampler; }
+// hitlight binding 28. The diffuse array stands in when no face has a normal
+// map: the shader only samples a layer a triangle names.
+static VkImageView hwrtworldnormalview() { return world.norm.view ? world.norm.view : world.diff.view; }
 
 void hwrtwritelightgeombindings(VkDescriptorSet set)
 {
@@ -2216,7 +2730,16 @@ void hwrtwritelightgeombindings(VkDescriptorSet set)
     lminfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     if(!lminfo.imageView || !lminfo.sampler) return;
 
-    VkWriteDescriptorSet writes[6];
+    VkDescriptorImageInfo norminfo = {};
+    norminfo.sampler = world.diffsampler;
+    norminfo.imageView = hwrtworldnormalview();
+    norminfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    if(!norminfo.imageView || !norminfo.sampler) return;
+    // 29: the world diffuse again, through the anisotropic sampler (hwrtdiffmip 2).
+    VkDescriptorImageInfo anisoinfo = diffinfo;
+    if(world.diffanisosampler) anisoinfo.sampler = world.diffanisosampler;
+
+    VkWriteDescriptorSet writes[8];
     memset(writes, 0, sizeof(writes));
     writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     writes[0].dstSet = set;
@@ -2254,5 +2777,17 @@ void hwrtwritelightgeombindings(VkDescriptorSet set)
     writes[5].descriptorCount = 1;
     writes[5].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     writes[5].pImageInfo = &lminfo;
-    vkUpdateDescriptorSets(hwrtdev.device, 6, writes, 0, NULL);
+    writes[6].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[6].dstSet = set;
+    writes[6].dstBinding = 28;
+    writes[6].descriptorCount = 1;
+    writes[6].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writes[6].pImageInfo = &norminfo;
+    writes[7].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[7].dstSet = set;
+    writes[7].dstBinding = 29;
+    writes[7].descriptorCount = 1;
+    writes[7].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writes[7].pImageInfo = &anisoinfo;
+    vkUpdateDescriptorSets(hwrtdev.device, 8, writes, 0, NULL);
 }

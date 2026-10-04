@@ -124,8 +124,11 @@ typedef struct SauerNgxCreateFeature
     uint32_t preset_k;          /* 1 = documented SR preset: K for DLAA/Quality/Balanced, M for Performance */
     uint32_t auto_exposure;
     /* ABI 5. 1 = NVSDK_NGX_DLSS_Feature_Flags_IsHDR. Legal only when colour
-     * in and out are VK_FORMAT_R16G16B16A16_SFLOAT. Refuses AutoExposure:
-     * normalisation is the exposure texture, not a content estimate. */
+     * in and out are VK_FORMAT_R16G16B16A16_SFLOAT. With preset K (DLAA,
+     * Quality, Balanced) HDR refuses AutoExposure: normalisation is the
+     * exposure texture. With preset M (Performance) the gateway sets
+     * AutoExposure itself (DLSS guide 3.9: exposure texture only for J/K);
+     * the caller sees it in SauerNgxCreateInfo.auto_exposure. */
     uint32_t hdr;
 } SauerNgxCreateFeature;
 
@@ -174,17 +177,17 @@ typedef struct SauerNgxEval
     int32_t reset;
     uint32_t render_w;
     uint32_t render_h;
-    /* ABI 3+: optional DLSS.Input.Bias.Current.Color.Mask (R = lerp(history, current, R)).
-     * image_view = 0 means unused. TransparencyMask is SDK-reserved; IsParticleMask is
-     * research-only and is not passed. */
+    /* ABI 3+ field, ignored since the DLSS guide 310.4 (3.15): BiasCurrentColor
+     * must not be used with the current presets (K, M). Leave it zero. */
     SauerNgxVkImage bias;
     /* ABI 5 HDR contract. Ignored unless hdr matches the created feature.
      * pre_exposure is the multiplier already baked into the colour buffer.
      * 0 is stored as 1 (the colour is not pre-exposed). exposure_scale is an
      * extra NGX scale, 0 stored as 1; it is not a second artistic exposure.
      * exposure is a 1x1 texture whose R channel is the normalisation scale
-     * DLSS applies and then inverts. image_view 0 is unused. HDR requires it
-     * and refuses AutoExposure, so the scale is not estimated from the picture. */
+     * DLSS applies and then inverts. image_view 0 is unused. Required by an
+     * HDR feature with preset K; ignored when the feature uses AutoExposure
+     * (preset M, Performance). */
     float pre_exposure;
     float exposure_scale;
     SauerNgxVkImage exposure;

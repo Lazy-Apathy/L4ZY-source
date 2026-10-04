@@ -13,6 +13,7 @@
 #include "shaders/rtao_comp.h"
 #include "shaders/hitshade_comp.h"
 #include "shaders/hitlight_comp.h"
+#include "shaders/hitlight_norefl_comp.h"
 #include "shaders/skycompose_comp.h"
 #include "shaders/bluenoise_tab.h"
 
@@ -27,12 +28,16 @@ struct hwrttracestate
     VkDescriptorSet rtset[HWRT_FRAMES_IN_FLIGHT], aoset[HWRT_FRAMES_IN_FLIGHT], shadeset[HWRT_FRAMES_IN_FLIGHT], lightset[HWRT_FRAMES_IN_FLIGHT], composeset[HWRT_FRAMES_IN_FLIGHT];
     VkPipelineLayout pipelayout, rtpipelayout, aopipelayout, shadepipelayout, lightpipelayout, composepipelayout;
     VkPipeline pipeline, rtpipeline, aopipeline, shadepipeline, lightpipeline, composepipeline;
+    // hitlight without the traced reflections and world spec, used while both
+    // options are off (optional: the full pipeline stands in if it fails).
+    VkShaderModule lightmodulenorefl;
+    VkPipeline lightpipelinenorefl;
     VkCommandPool cmdpool;
     VkCommandBuffer cmd[HWRT_FRAMES_IN_FLIGHT];
     VkFence fence[HWRT_FRAMES_IN_FLIGHT];
     VkQueryPool stamps;
     bool pending[HWRT_FRAMES_IN_FLIGHT];
-    VkImageView boundview, bounddepth;
+    VkImageView boundview, bounddepth, boundrefl;
     VkAccelerationStructureKHR boundtlas[HWRT_FRAMES_IN_FLIGHT];
     int boundshadeepoch[HWRT_FRAMES_IN_FLIGHT];
     int boundlightepoch[HWRT_FRAMES_IN_FLIGHT];
@@ -542,7 +547,7 @@ static bool initlightpipeline()
 
     if(!initskybluenoise()) return false;
 
-    VkDescriptorSetLayoutBinding bindings[26];
+    VkDescriptorSetLayoutBinding bindings[30];
     memset(bindings, 0, sizeof(bindings));
     bindings[0].binding = 0;
     bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
@@ -627,8 +632,28 @@ static bool initlightpipeline()
     bindings[25].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     bindings[25].descriptorCount = 1;
     bindings[25].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    // Traced reflections: 26 is the water reflection image (shared with GL),
+    // 27 the sky cubemap a reflected ray sees when it escapes, 28 the normal
+    // maps of the world's spec / envmap faces.
+    bindings[26].binding = 26;
+    bindings[26].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    bindings[26].descriptorCount = 1;
+    bindings[26].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    bindings[27].binding = 27;
+    bindings[27].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[27].descriptorCount = 1;
+    bindings[27].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    bindings[28].binding = 28;
+    bindings[28].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[28].descriptorCount = 1;
+    bindings[28].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    // 29: the world diffuse through the anisotropic sampler (hwrtdiffmip 2).
+    bindings[29].binding = 29;
+    bindings[29].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[29].descriptorCount = 1;
+    bindings[29].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
     VkDescriptorSetLayoutCreateInfo setinfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-    setinfo.bindingCount = 26;
+    setinfo.bindingCount = 30;
     setinfo.pBindings = bindings;
     r = vkCreateDescriptorSetLayout(hwrtdev.device, &setinfo, NULL, &tr.lightsetlayout);
     if(r != VK_SUCCESS) { conoutf(CON_WARN, "hwrt: hit-light descriptor layout failed (%s)", hwrtresultstr(r)); return false; }
@@ -652,7 +677,31 @@ static bool initlightpipeline()
     pipeinfo.layout = tr.lightpipelayout;
     r = vkCreateComputePipelines(hwrtdev.device, VK_NULL_HANDLE, 1, &pipeinfo, NULL, &tr.lightpipeline);
     if(r != VK_SUCCESS) { conoutf(CON_WARN, "hwrt: hit-light pipeline failed (%s)", hwrtresultstr(r)); return false; }
+
+    // Same layout, same bindings, the shader built without the reflection and
+    // world spec code: with RT Reflections and RT Specular off the lighting
+    // pass then costs what it did before they existed (a bigger shader is
+    // slower even when its extra branches are never taken).
+    modinfo.codeSize = sizeof(hwrthitlightnoreflspv);
+    modinfo.pCode = hwrthitlightnoreflspv;
+    r = vkCreateShaderModule(hwrtdev.device, &modinfo, NULL, &tr.lightmodulenorefl);
+    if(r == VK_SUCCESS)
+    {
+        pipeinfo.stage.module = tr.lightmodulenorefl;
+        r = vkCreateComputePipelines(hwrtdev.device, VK_NULL_HANDLE, 1, &pipeinfo, NULL, &tr.lightpipelinenorefl);
+    }
+    if(r != VK_SUCCESS)
+    {
+        conoutf(CON_WARN, "hwrt: hit-light pipeline without reflections failed (%s), the full one is used", hwrtresultstr(r));
+        tr.lightpipelinenorefl = VK_NULL_HANDLE;
+    }
     return true;
+}
+
+static void destroylightnorefl()
+{
+    if(tr.lightpipelinenorefl) { vkDestroyPipeline(hwrtdev.device, tr.lightpipelinenorefl, NULL); tr.lightpipelinenorefl = VK_NULL_HANDLE; }
+    if(tr.lightmodulenorefl) { vkDestroyShaderModule(hwrtdev.device, tr.lightmodulenorefl, NULL); tr.lightmodulenorefl = VK_NULL_HANDLE; }
 }
 
 static bool initcomposepipeline()
@@ -757,6 +806,7 @@ bool hwrtinittrace()
     {
         conoutf(CON_WARN, "hwrt: hit-light pipeline unavailable");
         if(tr.lightpipeline) { vkDestroyPipeline(hwrtdev.device, tr.lightpipeline, NULL); tr.lightpipeline = VK_NULL_HANDLE; }
+        destroylightnorefl();
         if(tr.lightpipelayout) { vkDestroyPipelineLayout(hwrtdev.device, tr.lightpipelayout, NULL); tr.lightpipelayout = VK_NULL_HANDLE; }
         if(tr.lightsetlayout) { vkDestroyDescriptorSetLayout(hwrtdev.device, tr.lightsetlayout, NULL); tr.lightsetlayout = VK_NULL_HANDLE; }
         if(tr.lightmodule) { vkDestroyShaderModule(hwrtdev.device, tr.lightmodule, NULL); tr.lightmodule = VK_NULL_HANDLE; }
@@ -784,7 +834,9 @@ bool hwrtinittrace()
     // count. Miss the pool and vkAllocateDescriptorSets fails silently.
     // Light set: colour, depth, skyvis pair, age pair, plus 8 NRD/payload images.
     // Six SSBOs: verts, indices, tris, lights, model geometry, sky blue noise.
-    if(tr.lightpipeline) { nstorage += 14*copies; nas += copies; nssbo += 6*copies; ncombined += 5*copies; maxsets += copies; }
+    // Plus the reflection image, the sky cubemap and the world normal maps
+    // (traced reflections and world spec), and the anisotropic diffuse (29).
+    if(tr.lightpipeline) { nstorage += 15*copies; nas += copies; nssbo += 6*copies; ncombined += 8*copies; maxsets += copies; }
     if(tr.composepipeline) { nstorage += 7*copies; nssbo += copies; maxsets += copies; }
     poolsizes[0].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
     poolsizes[0].descriptorCount = uint32_t(nstorage);
@@ -846,6 +898,7 @@ bool hwrtinittrace()
                 conoutf(CON_WARN, "hwrt: hit-light descriptors failed (%s), point lights disabled", hwrtresultstr(lr));
                 loopj(HWRT_FRAMES_IN_FLIGHT) tr.lightset[j] = VK_NULL_HANDLE;
                 if(tr.lightpipeline) { vkDestroyPipeline(hwrtdev.device, tr.lightpipeline, NULL); tr.lightpipeline = VK_NULL_HANDLE; }
+                destroylightnorefl();
                 break;
             }
         }
@@ -940,6 +993,7 @@ void hwrtdestroytrace()
     if(tr.cmdpool) vkDestroyCommandPool(hwrtdev.device, tr.cmdpool, NULL);
     if(tr.composepipeline) vkDestroyPipeline(hwrtdev.device, tr.composepipeline, NULL);
     if(tr.lightpipeline) vkDestroyPipeline(hwrtdev.device, tr.lightpipeline, NULL);
+    destroylightnorefl();
     if(tr.shadepipeline) vkDestroyPipeline(hwrtdev.device, tr.shadepipeline, NULL);
     if(tr.aopipeline) vkDestroyPipeline(hwrtdev.device, tr.aopipeline, NULL);
     if(tr.rtpipeline) vkDestroyPipeline(hwrtdev.device, tr.rtpipeline, NULL);
@@ -971,6 +1025,7 @@ void hwrtunbindshared()
 {
     tr.boundview = VK_NULL_HANDLE;
     tr.bounddepth = VK_NULL_HANDLE;
+    tr.boundrefl = VK_NULL_HANDLE;
 }
 
 static void writeimagebinding(VkDescriptorSet set)
@@ -1008,6 +1063,25 @@ static void writedepthbinding(VkDescriptorSet set, uint32_t binding)
 // hwrtdestroyshared() waits for the device first, so nothing can be reading it.
 // boundview is cleared when the view is destroyed: Vulkan can recycle the same
 // handle after a resize, and skipping the write then leaves a black overlay.
+// Traced reflections. Binding 25 must always name a valid rgba16f storage
+// image because the shader uses it statically; the result image stands in
+// when the reflection image could not be created (the shader then never
+// writes it: the mode bit stays off).
+static void writereflbinding(VkDescriptorSet set, VkImageView view)
+{
+    if(!set || !view) return;
+    VkDescriptorImageInfo iminfo = {};
+    iminfo.imageView = view;
+    iminfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    VkWriteDescriptorSet write = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+    write.dstSet = set;
+    write.dstBinding = 26;
+    write.descriptorCount = 1;
+    write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    write.pImageInfo = &iminfo;
+    vkUpdateDescriptorSets(hwrtdev.device, 1, &write, 0, NULL);
+}
+
 static void bindsharedimage()
 {
     if(tr.boundview != hwrtio.view)
@@ -1030,6 +1104,12 @@ static void bindsharedimage()
             writedepthbinding(tr.lightset[i], 9);
         }
         tr.bounddepth = hwrtio.depthview;
+    }
+    VkImageView reflview = hwrtreflview() ? hwrtreflview() : hwrtio.view;
+    if(tr.boundrefl != reflview)
+    {
+        loopi(HWRT_FRAMES_IN_FLIGHT) writereflbinding(tr.lightset[i], reflview);
+        tr.boundrefl = reflview;
     }
 }
 
@@ -1320,6 +1400,7 @@ static void bindlight(int slot)
     hwrtwritelightgeombindings(tr.lightset[slot]);
     hwrtwritelightbuffer(tr.lightset[slot]);
     hwrtwritemodelbindings(tr.lightset[slot], slot);
+    hwrtwriteskyenvbinding(tr.lightset[slot]);
     tr.skyflip ^= 1;
     writeskyhistory(tr.lightset[slot], tr.skyflip);
     writenrdimages(tr.lightset[slot]);
@@ -1396,8 +1477,20 @@ static void recordlight(VkCommandBuffer cmd, int mode, int slot)
     if(hwrthdractive()) params.mode |= HWRT_MODE_HDR;
     if(hwrthdractive() && hwrthdrprobe) params.mode |= HWRT_MODE_HDRPROBE;
     hwrthdrpushmode = params.mode;
+    // Traced reflections. The plane count rides above the flags; the planes
+    // themselves were packed behind the lights by hwrtupdatelights().
+    if(hwrtreflections && hwrtreflview() && hwrtwaterplanecount > 0)
+    {
+        params.mode |= HWRT_MODE_REFL_WATER | (min(hwrtwaterplanecount, int(HWRT_MAX_WATERPLANES)) << HWRT_MODE_REFL_PLANESHIFT);
+        hwrtsetreflwritten(true);
+    }
+    if(hwrtreflections) params.mode |= HWRT_MODE_REFL_WORLD;
+    if(hwrtspecular) params.mode |= HWRT_MODE_SPEC;
 
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, tr.lightpipeline);
+    // Both options off: the variant without their code (same image as before
+    // they existed); either one on: the full shader.
+    bool norefl = !hwrtreflections && !hwrtspecular && tr.lightpipelinenorefl;
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, norefl ? tr.lightpipelinenorefl : tr.lightpipeline);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, tr.lightpipelayout, 0, 1, &tr.lightset[slot], 0, NULL);
     vkCmdPushConstants(cmd, tr.lightpipelayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(params), &params);
     // hitlight.comp is 16x16 so the skyvis filter has a usable radius. An
@@ -1559,6 +1652,16 @@ bool hwrtdispatch(int mode)
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                          VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT|VK_PIPELINE_STAGE_TRANSFER_BIT,
                          0, 0, NULL, 0, NULL, 1, &barrier);
+    // Traced reflections: same treatment for the reflection image. Every
+    // pixel is rewritten whenever GL is told to read it. Reflections off: the
+    // image is left alone (hwrtsignalgl / hwrtwaitgl do not hand it over).
+    VkImageMemoryBarrier reflbarrier = barrier;
+    reflbarrier.image = hwrtreflections ? hwrtreflimage() : VK_NULL_HANDLE;
+    reflbarrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    if(reflbarrier.image)
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                             0, 0, NULL, 0, NULL, 1, &reflbarrier);
 
     if(mode == HWRT_TRACE_CLEAR)
     {
@@ -1632,6 +1735,16 @@ bool hwrtdispatch(int mode)
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT|VK_PIPELINE_STAGE_TRANSFER_BIT,
                          VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
                          0, 0, NULL, 0, NULL, 1, &barrier);
+    if(reflbarrier.image)
+    {
+        reflbarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+        reflbarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+        reflbarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        reflbarrier.dstAccessMask = 0;
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                             VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                             0, 0, NULL, 0, NULL, 1, &reflbarrier);
+    }
 
     hwrtwritestamp(cmd, slot, HWRT_TS_DISPATCH);
     HWRTCHECK(vkEndCommandBuffer(cmd), "vkEndCommandBuffer");

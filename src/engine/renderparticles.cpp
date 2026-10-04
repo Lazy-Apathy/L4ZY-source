@@ -1325,6 +1325,13 @@ void renderparticles(bool mainpass)
     }
 }
 
+// Anything a reflection pass would draw (traced water reflections).
+bool hasparticlework()
+{
+    loopi(sizeof(parts)/sizeof(parts[0])) if(parts[i]->haswork()) return true;
+    return false;
+}
+
 static int addedparticles = 0;
 
 static inline particle *newparticle(const vec &o, const vec &d, int fade, int type, int color, float size, int gravity = 0)

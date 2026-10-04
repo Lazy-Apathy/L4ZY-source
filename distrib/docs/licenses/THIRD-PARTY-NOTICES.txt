@@ -2,9 +2,9 @@ L4ZY - third-party components and licences
 ==============================================
 
 L4ZY is a modified client of Cube 2: Sauerbraten (2020 edition), with
-ray-traced lighting, NVIDIA DLSS/DLAA, NVIDIA NRD denoising, HDR output,
-optional 3D sound (Steam Audio) and a local chat translation service. This
-is not an official Sauerbraten release.
+ray-traced lighting, NVIDIA DLSS/DLAA and AMD FSR 3.1 upscaling, NVIDIA NRD
+denoising, HDR output, optional 3D sound (Steam Audio) and a local chat
+translation service. This is not an official Sauerbraten release.
 
 Engine source code (modified)
   Cube 2: Sauerbraten engine, zlib licence (c) 2001-2020 Wouter van
@@ -30,6 +30,35 @@ NVIDIA NRD (bin64/nrd/sauer_nrd.dll)
   redistribute them separately from L4ZY. NVIDIA does not sponsor or
   endorse L4ZY.
 
+AMD FidelityFX Super Resolution 3.1 upscaler (bin64/fsr/sauer_fsr.dll)
+  Built from the AMD FidelityFX SDK v1.1.4 (upscaler and Vulkan backend only,
+  no frame generation), with AMD's FSR 3.1.5 RCAS fix back-ported. MIT licence,
+  full text in bin64/fsr/LICENSE-FidelityFX.txt and below. AMD does not sponsor
+  or endorse L4ZY. AMD, FidelityFX and FSR are trademarks of Advanced Micro
+  Devices, Inc.
+
+  This file is part of the FidelityFX SDK.
+
+  Copyright (C) 2024 Advanced Micro Devices, Inc.
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files(the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and /or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions :
+
+  The above copyright notice and this permission notice shall be included in
+  all copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+  THE SOFTWARE.
+
 Steam Audio 4.8.1 (bin64/phonon.dll), used for the optional 3D sound
   Copyright (c) Valve Corporation. Apache License 2.0, see
   licenses/steam-audio/LICENSE.txt. Unmodified binary from the official
@@ -46,6 +75,14 @@ Steam Audio 4.8.1 (bin64/phonon.dll), used for the optional 3D sound
   AMD TrueAudio Next (MIT), CIPIC HRTF Database (Copyright (c) 2001 The
   Regents of the University of California, All Rights Reserved) and Google
   Spherical Harmonics Library (Apache 2.0).
+
+XeGTAO 1.02 (shader code ported to GLSL in data/glsl.cfg, used by the
+Ambient Occlusion of the classic lighting)
+  Copyright (C) 2016-2021, Intel Corporation. MIT License, see
+  licenses/xegtao/LICENSE.txt. Source: https://github.com/GameTechDev/XeGTAO
+  (XeGTAO.h / XeGTAO.hlsli, version 1.02 of 2021-09-03). The horizon-search
+  main pass and the depth MIP filter were translated and adapted; the noise,
+  denoiser and the way the result is applied are L4ZY's own.
 
 Python 3.14.7 embeddable package (runtime/python)
   Python Software Foundation licence, see runtime/python/LICENSE.txt

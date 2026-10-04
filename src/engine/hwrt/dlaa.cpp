@@ -1,16 +1,13 @@
-// dlaa.cpp: NVIDIA DLAA (native 1:1) and DLSS Super Resolution Quality/Balanced/Performance.
+// dlaa.cpp: NVIDIA DLAA (native 1:1) and DLSS Super Resolution Quality/Balanced/Performance,
+// and the shared pipeline AMD FSR 3.1 also uses (modes 5-8, see fsr.cpp).
 //
-// Default daily client (sauerbraten.exe, HWRT_NGX_GATEWAY):
-//   bin64/ngx-sr  ABI 4  — Off / DLAA / Quality / Balanced / Performance
-// Isolated NGX play client:
-//   sauerbraten-ngx.exe     + bin64/ngx     ABI 1  — frozen DLAA play client
-//   sauerbraten-dlssq.exe   + bin64/ngx-sr  ABI 4  — same public gateway as daily
-//   sauerbraten-dlssq.exe   + bin64/ngx-sr  ABI 3  — archived Quality pair (bin64/ref-quality-abi3)
-// LoadLibrary of sauer_ngx.dll (public NVIDIA NGX Vulkan SDK, nvsdk_ngx_s.lib).
-// Streamline is not loaded. Present remains SDL_GL_SwapWindow.
-//
-// Frozen Streamline build (sauerbraten-dlaa7.exe, no HWRT_NGX_GATEWAY) stays
-// on sl.interposer and is not the daily path.
+// Client (sauerbraten.exe): bin64/ngx-hdr/sauer_ngx.dll, gateway ABI 5
+// (SAUER_NGX_ABI_VERSION), with nvngx_dlss.dll in the same folder; SAUER_NGX_DIR
+// overrides that folder for laboratory runs. No other folder is searched.
+// The gateway is an MSVC DLL around the public NVIDIA NGX Vulkan SDK
+// (nvsdk_ngx_s.lib, src/ngx_gateway); this file only sees its C ABI.
+// Older gateways kept for reference clients: bin64/ngx-sr (ABI 4), bin64/ngx (ABI 1).
+// Present remains SDL_GL_SwapWindow. Integration notes: src/ngx_gateway/VERSIONS.txt.
 
 #ifdef WIN32
 #include <new>
@@ -24,16 +21,7 @@
 #endif
 #define VK_USE_PLATFORM_WIN32_KHR
 #include <vulkan/vulkan.h>
-#ifdef HWRT_NGX_GATEWAY
 #include "ngx_gateway/sauer_ngx.h"
-#else
-#include "ngx/nvsdk_ngx_vk.h"
-#include "streamline/sl.h"
-#include "streamline/sl_consts.h"
-#include "streamline/sl_dlss.h"
-#include "streamline/sl_helpers_vk.h"
-#include "streamline/sl_result.h"
-#endif
 #endif
 
 extern int hwrtngx;
@@ -44,6 +32,7 @@ extern vec camdir, camright, camup;
 extern void saveimage(const char *filename, int format, ImageData &image, bool flip);
 extern int looktaa;
 extern int hwrtdlaafixedcurtime, hwrtpartlabclock;
+extern int hwrtfsrsharpness;
 
 #ifndef WIN32
 
@@ -144,18 +133,11 @@ static const VkExternalMemoryHandleTypeFlagBits DLAA_MEM_HANDLE = VK_EXTERNAL_ME
 static const VkExternalSemaphoreHandleTypeFlagBits DLAA_SEM_HANDLE = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_BIT;
 
 static const char *NGX_PROJECT_ID = "c3a7e9d1-4b52-4f08-9e6a-7d1c2b8f4a90";
-#ifdef HWRT_NGX_GATEWAY
 static const char *NGX_ENGINE_VER = "cube2-hwrt-ngx-sr";
 #define DLAA_SHOTDIR "shots/dlss-q"
-#else
-static const unsigned long long NGX_TEMP_APP_ID = 100721531ull; // Streamline kTemporaryAppId when applicationId is 0
-static const char *NGX_ENGINE_VER = "cube2-hwrt-lot7bis";
-#define DLAA_SHOTDIR "shots/dlaa-lot7bis"
-#endif
 
 enum { DLAA_FIF = 3, DLAA_MAX_EXT = 24, DLAA_GPUSAMPLES = 32, DLAA_SEQMAX = 90, DLAA_BENCHMAX = 24000, DLAA_BENCHWARMSEC = 4 };
 
-#ifdef HWRT_NGX_GATEWAY
 static HMODULE gwmod = NULL;
 static uint64_t gwhandle = 0;
 static PFN_sauer_ngx_abi_version p_gwVer = NULL;
@@ -178,252 +160,13 @@ static bool slinited = false; /* true once sauer_ngx.dll is loaded (not Streamli
 static uint32_t slextragfx = 0, slextracompute = 0;
 static uint32_t slnfeat12 = 0, slnfeat13 = 0;
 static int lastevalcode = 0;
-#else
-typedef NVSDK_NGX_Result (NVSDK_CONV *PFN_NGX_VkInstExt)(const NVSDK_NGX_FeatureDiscoveryInfo *, uint32_t *, VkExtensionProperties **);
-typedef NVSDK_NGX_Result (NVSDK_CONV *PFN_NGX_VkDevExt)(VkInstance, VkPhysicalDevice, const NVSDK_NGX_FeatureDiscoveryInfo *, uint32_t *, VkExtensionProperties **);
-typedef NVSDK_NGX_Result (NVSDK_CONV *PFN_NGX_VkFeatReq)(VkInstance, VkPhysicalDevice, const NVSDK_NGX_FeatureDiscoveryInfo *, NVSDK_NGX_FeatureRequirement *);
-typedef NVSDK_NGX_Result (NVSDK_CONV *PFN_NGX_VkReqExt)(unsigned int *, const char ***, unsigned int *, const char ***);
-typedef NVSDK_NGX_Result (NVSDK_CONV *PFN_NGX_VkInit)(unsigned long long, const wchar_t *, VkInstance, VkPhysicalDevice, VkDevice, NVSDK_NGX_Version);
-typedef NVSDK_NGX_Result (NVSDK_CONV *PFN_NGX_VkInitExt)(unsigned long long, const wchar_t *, VkInstance, VkPhysicalDevice, VkDevice, NVSDK_NGX_Version, const NVSDK_NGX_Parameter *);
-typedef NVSDK_NGX_Result (NVSDK_CONV *PFN_NGX_VkScratch)(NVSDK_NGX_Feature, const NVSDK_NGX_Parameter *, size_t *);
-typedef NVSDK_NGX_Result (NVSDK_CONV *PFN_NGX_VkShutdown1)(VkDevice);
-typedef NVSDK_NGX_Result (NVSDK_CONV *PFN_NGX_VkGetCaps)(NVSDK_NGX_Parameter **);
-typedef NVSDK_NGX_Result (NVSDK_CONV *PFN_NGX_VkAlloc)(NVSDK_NGX_Parameter **);
-typedef NVSDK_NGX_Result (NVSDK_CONV *PFN_NGX_VkDestroyParams)(NVSDK_NGX_Parameter *);
-typedef NVSDK_NGX_Result (NVSDK_CONV *PFN_NGX_VkCreate1)(VkDevice, VkCommandBuffer, NVSDK_NGX_Feature, NVSDK_NGX_Parameter *, NVSDK_NGX_Handle **);
-typedef NVSDK_NGX_Result (NVSDK_CONV *PFN_NGX_VkEval)(VkCommandBuffer, const NVSDK_NGX_Handle *, const NVSDK_NGX_Parameter *, void *);
-typedef NVSDK_NGX_Result (NVSDK_CONV *PFN_NGX_VkRelease)(NVSDK_NGX_Handle *);
 
-#ifdef __GNUC__
-#define NGX_VT_ABI __attribute__((ms_abi))
-#else
-#define NGX_VT_ABI
-#endif
-
-static HMODULE ngxmod = NULL;
-static PFN_NGX_VkInstExt p_InstExt = NULL;
-static PFN_NGX_VkDevExt p_DevExt = NULL;
-static PFN_NGX_VkFeatReq p_FeatReq = NULL;
-static PFN_NGX_VkReqExt p_ReqExt = NULL;
-static PFN_NGX_VkInit p_Init = NULL;
-static PFN_NGX_VkInitExt p_InitExt = NULL;
-static PFN_NGX_VkScratch p_Scratch = NULL;
-static PFN_NGX_VkShutdown1 p_Shutdown1 = NULL;
-static PFN_NGX_VkGetCaps p_GetCaps = NULL;
-static PFN_NGX_VkAlloc p_Alloc = NULL;
-static PFN_NGX_VkGetCaps p_GetParams = NULL;
-static PFN_NGX_VkDestroyParams p_DestroyParams = NULL;
-static PFN_NGX_VkCreate1 p_Create1 = NULL;
-static PFN_NGX_VkEval p_Eval = NULL;
-static PFN_NGX_VkRelease p_Release = NULL;
-
-static HMODULE slmod = NULL;
-static sl::Feature slfeatures[1] = { sl::kFeatureDLSS };
-static wchar_t slpluginw[MAX_PATH] = L"";
-static wchar_t sllogw[MAX_PATH] = L"";
-static const wchar_t *slpluginlist[1] = { slpluginw };
-static PFun_slInit *p_slInit = NULL;
-static PFun_slShutdown *p_slShutdown = NULL;
-static PFun_slSetVulkanInfo *p_slSetVulkanInfo = NULL;
-static PFun_slEvaluateFeature *p_slEvaluateFeature = NULL;
-static PFun_slSetTagForFrame *p_slSetTagForFrame = NULL;
-static PFun_slSetConstants *p_slSetConstants = NULL;
-static PFun_slGetNewFrameToken *p_slGetNewFrameToken = NULL;
-static PFun_slFreeResources *p_slFreeResources = NULL;
-static PFun_slGetFeatureRequirements *p_slGetFeatureRequirements = NULL;
-static PFun_slGetFeatureFunction *p_slGetFeatureFunction = NULL;
-static PFun_slIsFeatureSupported *p_slIsFeatureSupported = NULL;
-static PFun_slDLSSGetOptimalSettings *p_slDLSSGetOptimalSettings = NULL;
-static PFun_slDLSSSetOptions *p_slDLSSSetOptions = NULL;
-static PFun_slDLSSGetState *p_slDLSSGetState = NULL;
-static bool slinited = false;
-static sl::ViewportHandle slviewport{ uint32_t(0) };
-static uint32_t slextragfx = 0, slextracompute = 0;
-static uint32_t slnfeat12 = 0, slnfeat13 = 0;
-static char slfeat12store[DLAA_MAX_EXT][128];
-static const char *slfeat12ptrs[DLAA_MAX_EXT];
-static char slfeat13store[DLAA_MAX_EXT][128];
-static const char *slfeat13ptrs[DLAA_MAX_EXT];
-static sl::Result lastevalsl = sl::Result::eErrorNotInitialized;
-#endif
-
-#ifndef HWRT_NGX_GATEWAY
-// Abandoned CORE nvngx.dll vtable helpers. Kept on the Streamline prototype
-// only. The NGX client (HWRT_NGX_GATEWAY) uses sauer_ngx.dll instead.
-enum
-{
-    NGXVT_SetULL = 0, NGXVT_SetF, NGXVT_SetD, NGXVT_SetUI, NGXVT_SetI,
-    NGXVT_SetD3D11, NGXVT_SetD3D12, NGXVT_SetVoid,
-    NGXVT_GetULL, NGXVT_GetF, NGXVT_GetD, NGXVT_GetUI, NGXVT_GetI,
-    NGXVT_GetD3D11, NGXVT_GetD3D12, NGXVT_GetVoid,
-    NGXVT_Reset
-};
-
-static void **ngxvtbl(NVSDK_NGX_Parameter *p)
-{
-    return p ? *reinterpret_cast<void ***>(p) : NULL;
-}
-
-static void ngxsetui(NVSDK_NGX_Parameter *p, const char *n, unsigned int v)
-{
-    void **vt = ngxvtbl(p);
-    if(!vt) return;
-    typedef void (NGX_VT_ABI *Fn)(NVSDK_NGX_Parameter *, const char *, unsigned int);
-    ((Fn)vt[NGXVT_SetUI])(p, n, v);
-}
-static void ngxseti(NVSDK_NGX_Parameter *p, const char *n, int v)
-{
-    void **vt = ngxvtbl(p);
-    if(!vt) return;
-    typedef void (NGX_VT_ABI *Fn)(NVSDK_NGX_Parameter *, const char *, int);
-    ((Fn)vt[NGXVT_SetI])(p, n, v);
-}
-static void ngxsetf(NVSDK_NGX_Parameter *p, const char *n, float v)
-{
-    void **vt = ngxvtbl(p);
-    if(!vt || !p) return;
-    typedef void (NGX_VT_ABI *FnF)(NVSDK_NGX_Parameter *, const char *, float);
-    typedef void (NGX_VT_ABI *FnD)(NVSDK_NGX_Parameter *, const char *, double);
-    ((FnF)vt[NGXVT_SetF])(p, n, v);
-    ((FnD)vt[NGXVT_SetD])(p, n, double(v));
-    p->Set(n, v);
-}
-static void ngxsetvoid(NVSDK_NGX_Parameter *p, const char *n, void *v)
-{
-    void **vt = ngxvtbl(p);
-    if(!vt || !p) return;
-    typedef void (NGX_VT_ABI *Fn)(NVSDK_NGX_Parameter *, const char *, void *);
-    ((Fn)vt[NGXVT_SetVoid])(p, n, v);
-    p->Set(n, v);
-}
-static NVSDK_NGX_Result ngxgetui(NVSDK_NGX_Parameter *p, const char *n, unsigned int *v)
-{
-    void **vt = ngxvtbl(p);
-    if(!vt) return NVSDK_NGX_Result_FAIL_InvalidParameter;
-    typedef NVSDK_NGX_Result (NGX_VT_ABI *Fn)(NVSDK_NGX_Parameter *, const char *, unsigned int *);
-    return ((Fn)vt[NGXVT_GetUI])(p, n, v);
-}
-static NVSDK_NGX_Result ngxgeti(NVSDK_NGX_Parameter *p, const char *n, int *v)
-{
-    void **vt = ngxvtbl(p);
-    if(!vt) return NVSDK_NGX_Result_FAIL_InvalidParameter;
-    typedef NVSDK_NGX_Result (NGX_VT_ABI *Fn)(NVSDK_NGX_Parameter *, const char *, int *);
-    return ((Fn)vt[NGXVT_GetI])(p, n, v);
-}
-static NVSDK_NGX_Result ngxgetull(NVSDK_NGX_Parameter *p, const char *n, unsigned long long *v)
-{
-    void **vt = ngxvtbl(p);
-    if(!vt) return NVSDK_NGX_Result_FAIL_InvalidParameter;
-    typedef NVSDK_NGX_Result (NGX_VT_ABI *Fn)(NVSDK_NGX_Parameter *, const char *, unsigned long long *);
-    return ((Fn)vt[NGXVT_GetULL])(p, n, v);
-}
-static NVSDK_NGX_Result ngxgetvoid(NVSDK_NGX_Parameter *p, const char *n, void **v)
-{
-    void **vt = ngxvtbl(p);
-    if(!vt) return NVSDK_NGX_Result_FAIL_InvalidParameter;
-    typedef NVSDK_NGX_Result (NGX_VT_ABI *Fn)(NVSDK_NGX_Parameter *, const char *, void **);
-    return ((Fn)vt[NGXVT_GetVoid])(p, n, v);
-}
-static NVSDK_NGX_Result ngxgetf(NVSDK_NGX_Parameter *p, const char *n, float *v)
-{
-    void **vt = ngxvtbl(p);
-    if(!vt) return NVSDK_NGX_Result_FAIL_InvalidParameter;
-    typedef NVSDK_NGX_Result (NGX_VT_ABI *Fn)(NVSDK_NGX_Parameter *, const char *, float *);
-    return ((Fn)vt[NGXVT_GetF])(p, n, v);
-}
-
-// The snippet looks up the encoded EParameter names ("#\x1e" = Color). The
-// public "Color" string roundtrips through GetVoid but NGXDLAA::EvaluateFeature
-// still logs "could not find Color parameter". Write both documented names.
-static void ngxsetui2(NVSDK_NGX_Parameter *p, const char *n, const char *e, unsigned int v)
-{
-    ngxsetui(p, n, v);
-    if(e) ngxsetui(p, e, v);
-}
-static void ngxseti2(NVSDK_NGX_Parameter *p, const char *n, const char *e, int v)
-{
-    ngxseti(p, n, v);
-    if(e) ngxseti(p, e, v);
-}
-static void ngxsetf2(NVSDK_NGX_Parameter *p, const char *n, const char *e, float v)
-{
-    ngxsetf(p, n, v);
-    if(e) ngxsetf(p, e, v);
-}
-static void ngxsetvoid2(NVSDK_NGX_Parameter *p, const char *n, const char *e, void *v)
-{
-    ngxsetvoid(p, n, v);
-    if(e) ngxsetvoid(p, e, v);
-}
-
-static void ngxlogcb(const char *message, NVSDK_NGX_Logging_Level, NVSDK_NGX_Feature)
-{
-    if(message && message[0]) conoutf(CON_INIT, "ngx: %s", message);
-}
-
-static const char *slresultstr(sl::Result r)
-{
-    if(r == sl::Result::eOk) return "eOk";
-    if(r == sl::Result::eErrorInvalidParameter) return "eErrorInvalidParameter";
-    if(r == sl::Result::eErrorNGXFailed) return "eErrorNGXFailed";
-    if(r == sl::Result::eErrorFeatureNotSupported) return "eErrorFeatureNotSupported";
-    if(r == sl::Result::eErrorNotInitialized) return "eErrorNotInitialized";
-    if(r == sl::Result::eErrorMissingInputParameter) return "eErrorMissingInputParameter";
-    if(r == sl::Result::eErrorInvalidIntegration) return "eErrorInvalidIntegration";
-    if(r == sl::Result::eErrorNoPlugins) return "eErrorNoPlugins";
-    if(r == sl::Result::eErrorVulkanAPI) return "eErrorVulkanAPI";
-    if(r == sl::Result::eErrorMissingConstants) return "eErrorMissingConstants";
-    return "error";
-}
-
-static const char *lastevalstr()
-{
-    return slresultstr(lastevalsl);
-}
-
-static bool fileexists_a(const char *p);
-
-static bool resolvedir_sl(char *out, int outlen)
-{
-    const char *env = getenv("SAUER_STREAMLINE_DIR");
-    if(env && env[0])
-    {
-        copystring(out, env, outlen);
-        return true;
-    }
-    char exe[MAX_PATH];
-    DWORD n = GetModuleFileNameA(NULL, exe, MAX_PATH);
-    if(n && n < MAX_PATH)
-    {
-        char *slash = strrchr(exe, '\\');
-        if(!slash) slash = strrchr(exe, '/');
-        if(slash) *slash = 0;
-        string probe;
-        nformatstring(out, outlen, "%s\\streamline", exe);
-        nformatstring(probe, sizeof(probe), "%s\\sl.interposer.dll", out);
-        if(fileexists_a(probe)) return true;
-        copystring(out, exe, outlen);
-        nformatstring(probe, sizeof(probe), "%s\\sl.interposer.dll", out);
-        if(fileexists_a(probe)) return true;
-    }
-    copystring(out, "bin64\\streamline", outlen);
-    return true;
-}
-
-static wchar_t ngxpluginw[MAX_PATH] = L"";
-static wchar_t ngxlogw[MAX_PATH] = L"";
-static const wchar_t *ngxpathlist[1] = { ngxpluginw };
-static NVSDK_NGX_FeatureCommonInfo ngxcommon{};
-static NVSDK_NGX_Parameter *ngxparams = NULL;
-static NVSDK_NGX_Parameter *ngxlegacy = NULL;
-static bool ngxparamsowned = false;
-static NVSDK_NGX_Handle *ngxhandle = NULL;
-#endif
 
 static bool ngxloaded = false;
 static bool ngxinited = false;
 static bool ngxsupported = false;
 static bool ngxfatal = false;
+static bool ngxnotnvidia = false; // Vulkan device is not an NVIDIA GPU (or SAUER_UPSCALE_SIMULATE=amd)
 static char ngxreason[256] = "not initialised";
 static char ngxsdkpath[MAX_PATH] = "";
 
@@ -441,11 +184,7 @@ static bool dlaaoptok = false;
 static uint32_t dlaainw = 0, dlaainh = 0, dlaaoutw = 0, dlaaouth = 0;
 static uint lasttframeid = 0;
 static int evalokn = 0, evalfailn = 0;
-#ifdef HWRT_NGX_GATEWAY
 static int lasteval = 0;
-#else
-static NVSDK_NGX_Result lasteval = NVSDK_NGX_Result_Fail;
-#endif
 static bool lastblit = false;
 static bool lastroundtrip = false;
 static float lastcostms = 0;
@@ -526,7 +265,7 @@ static void destroybiasgl();
 static int resw = 0, resh = 0;
 static int resinw = 0, resinh = 0, resoutw = 0, resouth = 0;
 static int reshdr = -1;
-static int ngxcfghdr = -1;
+static int ngxcfghdr = -1, ngxcfgautoexp = -1;
 static int ngxmodereq = 0, ngxmodeapp = 0, ngxmodehave = 0;
 static bool ngxblocked = false;
 static uint32_t ngxoptw = 0, ngxopth = 0, ngxoptminw = 0, ngxoptminh = 0, ngxoptmaxw = 0, ngxoptmaxh = 0;
@@ -543,14 +282,18 @@ static int lastfbw = 0, lastfbh = 0;
 static char ngxshotsub[64] = "";
 
 static void hwrtngxmodechanged();
+static const char *dlssreason();
 static void destroyscenefb();
 static void applyngxmode(int m);
+static bool ngxautoapply = false;
 static void refreshlookaa()
 {
     if(initing) return;
     if(identexists("LOOK_apply")) execute("LOOK_apply");
 }
-VARFP(hwrtngxmode, 0, 0, 4, hwrtngxmodechanged());
+// 0 Native, 1 DLAA, 2-4 DLSS Quality/Balanced/Performance,
+// 5 FSR Native, 6-8 FSR Quality/Balanced/Performance (fsr.cpp).
+VARFP(hwrtngxmode, 0, 0, 8, hwrtngxmodechanged());
 // hwrthdr is the effective internal HDR state, set every frame by hdrout.cpp
 // from the saved hdroutpref; never saved. hwrthdrexp is the saved exposure (EV).
 // The other switches are laboratory only and never saved.
@@ -563,10 +306,13 @@ VAR(hwrthdrfaillab, 0, 0, 1);
 static int hdrreadpending = 0;
 VAR(hwrtdlaacapturefallback, 0, 0, 1);
 VAR(hwrtdlaacapturepresent, 0, 0, 1);
-// 0 = no bias mask (current NGX behaviour). 1 = explosion+smoke coverage that
-// follows the visible texture and fade, plus a short persist only while the
-// camera is still. 2 = all-ones lab test that NGX consumes BiasCurrentColorMask.
-// TransparencyMask is SDK-reserved; IsParticleMask is not used.
+// Explosion/smoke coverage mask, used only as the FSR 3.1 reactive mask (modes 5-8).
+// It is not given to DLSS: the NVIDIA DLSS Programming Guide (310.6.0, 3.15) says
+// BiasCurrentColor "should not be used" with the current models (only the
+// deprecated preset F supported it), and we use presets K and M. With DLAA/DLSS
+// the mask is neither drawn nor packed. 0 = no mask. 1 = coverage that follows the
+// visible texture and fade, plus a short persist only while the camera is still.
+// 2 = all-ones lab test.
 static void hwrtdlaabiaschanged();
 VARF(hwrtdlaabias, 0, 1, 2, hwrtdlaabiaschanged());
 VAR(hwrtdlaabiaspersist, 0, 50, 100);
@@ -604,52 +350,12 @@ static seqioshot seqios[DLAA_IOMAX];
 static int seqion = 0;
 static FILE *seqlog = NULL;
 
-#ifndef HWRT_NGX_GATEWAY
-static const char *ngxresultstr(NVSDK_NGX_Result r)
-{
-    if(r == NVSDK_NGX_Result_Success) return "Success";
-    if(r == NVSDK_NGX_Result_FAIL_FeatureNotSupported) return "FeatureNotSupported";
-    if(r == NVSDK_NGX_Result_FAIL_PlatformError) return "PlatformError";
-    if(r == NVSDK_NGX_Result_FAIL_FeatureAlreadyExists) return "FeatureAlreadyExists";
-    if(r == NVSDK_NGX_Result_FAIL_FeatureNotFound) return "FeatureNotFound";
-    if(r == NVSDK_NGX_Result_FAIL_InvalidParameter) return "InvalidParameter";
-    if(r == NVSDK_NGX_Result_FAIL_ScratchBufferTooSmall) return "ScratchBufferTooSmall";
-    if(r == NVSDK_NGX_Result_FAIL_NotInitialized) return "NotInitialized";
-    if(r == NVSDK_NGX_Result_FAIL_UnsupportedInputFormat) return "UnsupportedInputFormat";
-    if(r == NVSDK_NGX_Result_FAIL_OutOfDate) return "OutOfDate";
-    if(r == NVSDK_NGX_Result_FAIL_UnableToInitializeFeature) return "UnableToInitializeFeature";
-    if(r == NVSDK_NGX_Result_FAIL_UnsupportedFormat) return "UnsupportedFormat";
-    if(NVSDK_NGX_FAILED(r)) return "FAIL";
-    return "unknown";
-}
-#endif
 
 static void setreason(const char *s)
 {
     copystring(ngxreason, s ? s : "", sizeof(ngxreason));
 }
 
-#ifndef HWRT_NGX_GATEWAY
-static void fillcommon()
-{
-    memset(&ngxcommon, 0, sizeof(ngxcommon));
-    ngxcommon.PathListInfo.Path = ngxpathlist;
-    ngxcommon.PathListInfo.Length = 1;
-    ngxcommon.InternalData = NULL;
-    ngxcommon.LoggingInfo.LoggingCallback = ngxlogcb;
-    ngxcommon.LoggingInfo.MinimumLoggingLevel = NVSDK_NGX_LOGGING_LEVEL_VERBOSE;
-    ngxcommon.LoggingInfo.DisableOtherLoggingSinks = false;
-}
-#endif
-
-static void utf8tow(const char *src, wchar_t *dst, int dstw)
-{
-    if(!dst || dstw < 1) return;
-    dst[0] = 0;
-    if(!src) return;
-    MultiByteToWideChar(CP_UTF8, 0, src, -1, dst, dstw);
-    dst[dstw-1] = 0;
-}
 
 static bool fileexists_a(const char *p)
 {
@@ -675,73 +381,13 @@ static bool resolvedir(char *out, int outlen)
     if(!slash) slash = strrchr(exe, '/');
     if(slash) *slash = 0;
     string probe;
-    // ABI 5 (HDR colour contract) has its own folder: bin64\ngx-sr stays ABI 4
-    // for the older clients kept as references.
+    // Only the ABI 5 folder. bin64\ngx-sr (ABI 4) and bin64\ngx (ABI 1) belong
+    // to older reference clients; no other folder is a fallback.
     nformatstring(out, outlen, "%s\\ngx-hdr", exe);
-    nformatstring(probe, sizeof(probe), "%s\\nvngx_dlss.dll", out);
-    if(fileexists_a(probe)) return true;
-    nformatstring(out, outlen, "%s\\ngx", exe);
-    nformatstring(probe, sizeof(probe), "%s\\nvngx_dlss.dll", out);
-    if(fileexists_a(probe)) return true;
-    nformatstring(out, outlen, "%s\\streamline", exe);
-    nformatstring(probe, sizeof(probe), "%s\\nvngx_dlss.dll", out);
-    if(fileexists_a(probe)) return true;
-    copystring(out, exe, outlen);
     nformatstring(probe, sizeof(probe), "%s\\nvngx_dlss.dll", out);
     return fileexists_a(probe);
 }
 
-#ifndef HWRT_NGX_GATEWAY
-static bool finddrivernvngx(char *out, int outlen)
-{
-    wchar_t root[MAX_PATH];
-    wcsncpy(root, L"C:\\Windows\\System32\\DriverStore\\FileRepository\\*", MAX_PATH-1);
-    WIN32_FIND_DATAW fd;
-    HANDLE h = FindFirstFileW(root, &fd);
-    if(h == INVALID_HANDLE_VALUE) return false;
-    FILETIME best{};
-    wchar_t bestpath[MAX_PATH] = L"";
-    do
-    {
-        if(!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
-        if(fd.cFileName[0] == L'.') continue;
-        wchar_t probe[MAX_PATH];
-        _snwprintf(probe, MAX_PATH, L"C:\\Windows\\System32\\DriverStore\\FileRepository\\%s\\nvngx.dll", fd.cFileName);
-        probe[MAX_PATH-1] = 0;
-        WIN32_FIND_DATAW f2;
-        HANDLE h2 = FindFirstFileW(probe, &f2);
-        if(h2 == INVALID_HANDLE_VALUE) continue;
-        FindClose(h2);
-        if(!bestpath[0] || CompareFileTime(&f2.ftLastWriteTime, &best) > 0)
-        {
-            best = f2.ftLastWriteTime;
-            wcsncpy(bestpath, probe, MAX_PATH-1);
-            bestpath[MAX_PATH-1] = 0;
-        }
-    } while(FindNextFileW(h, &fd));
-    FindClose(h);
-    if(!bestpath[0]) return false;
-    WideCharToMultiByte(CP_UTF8, 0, bestpath, -1, out, outlen, NULL, NULL);
-    out[outlen-1] = 0;
-    return fileexists_a(out);
-}
-
-static bool findnvngx(char *out, int outlen)
-{
-    string probe;
-    if(ngxsdkpath[0])
-    {
-        nformatstring(probe, sizeof(probe), "%s\\nvngx.dll", ngxsdkpath);
-        if(fileexists_a(probe)) { copystring(out, probe, outlen); return true; }
-    }
-    if(GetSystemDirectoryA(probe, sizeof(probe)))
-    {
-        defformatstring(sys, "%s\\nvngx.dll", probe);
-        if(fileexists_a(sys)) { copystring(out, sys, outlen); return true; }
-    }
-    return finddrivernvngx(out, outlen);
-}
-#endif
 
 static bool loadglinterop()
 {
@@ -761,21 +407,6 @@ static bool loadglinterop()
            dlaaImportMem && dlaaImportSem;
 }
 
-static bool copyextlist(const VkExtensionProperties *src, uint32_t nsrc, char store[][128], const char **ptrs, int &ndst, int maxn)
-{
-    ndst = 0;
-    if(!src) return true;
-    loopi(int(nsrc))
-    {
-        if(ndst >= maxn) break;
-        if(!src[i].extensionName[0]) continue;
-        copystring(store[ndst], src[i].extensionName, 128);
-        ptrs[ndst] = store[ndst];
-        ndst++;
-    }
-    return true;
-}
-
 static int collectnamed(const char **dst, int maxn, const char **src, int nsrc)
 {
     int n = 0;
@@ -787,94 +418,7 @@ static int collectnamed(const char **dst, int maxn, const char **src, int nsrc)
     return n;
 }
 
-#ifndef HWRT_NGX_GATEWAY
-static void filldiscovery(NVSDK_NGX_FeatureDiscoveryInfo &d)
-{
-    memset(&d, 0, sizeof(d));
-    d.SDKVersion = NVSDK_NGX_Version_API;
-    d.FeatureID = NVSDK_NGX_Feature_SuperSampling;
-    d.Identifier.IdentifierType = NVSDK_NGX_Application_Identifier_Type_Project_Id;
-    d.Identifier.v.ProjectDesc.ProjectId = NGX_PROJECT_ID;
-    d.Identifier.v.ProjectDesc.EngineType = NVSDK_NGX_ENGINE_TYPE_CUSTOM;
-    d.Identifier.v.ProjectDesc.EngineVersion = NGX_ENGINE_VER;
-    d.ApplicationDataPath = ngxlogw;
-    d.FeatureInfo = &ngxcommon;
-}
 
-static void copycstrlist(const char **src, unsigned nsrc, char store[][128], const char **ptrs, int &ndst, int maxn)
-{
-    ndst = 0;
-    if(!src) return;
-    loopi(int(nsrc))
-    {
-        if(ndst >= maxn) break;
-        if(!src[i] || !src[i][0]) continue;
-        copystring(store[ndst], src[i], 128);
-        ptrs[ndst] = store[ndst];
-        ndst++;
-    }
-}
-
-static bool resolvefuns()
-{
-    // Driver nvngx.dll exports Init_ProjectID / EvaluateFeature / RequiredExtensions.
-    // SDK headers name the loader wrappers Init_with_ProjectID / EvaluateFeature_C.
-    p_InstExt = (PFN_NGX_VkInstExt)GetProcAddress(ngxmod, "NVSDK_NGX_VULKAN_GetFeatureInstanceExtensionRequirements");
-    p_DevExt = (PFN_NGX_VkDevExt)GetProcAddress(ngxmod, "NVSDK_NGX_VULKAN_GetFeatureDeviceExtensionRequirements");
-    p_FeatReq = (PFN_NGX_VkFeatReq)GetProcAddress(ngxmod, "NVSDK_NGX_VULKAN_GetFeatureRequirements");
-    p_ReqExt = (PFN_NGX_VkReqExt)GetProcAddress(ngxmod, "NVSDK_NGX_VULKAN_RequiredExtensions");
-    p_Init = (PFN_NGX_VkInit)GetProcAddress(ngxmod, "NVSDK_NGX_VULKAN_Init");
-    p_InitExt = (PFN_NGX_VkInitExt)GetProcAddress(ngxmod, "NVSDK_NGX_VULKAN_Init_Ext");
-    p_Scratch = (PFN_NGX_VkScratch)GetProcAddress(ngxmod, "NVSDK_NGX_VULKAN_GetScratchBufferSize");
-    p_Shutdown1 = (PFN_NGX_VkShutdown1)GetProcAddress(ngxmod, "NVSDK_NGX_VULKAN_Shutdown1");
-    p_GetCaps = (PFN_NGX_VkGetCaps)GetProcAddress(ngxmod, "NVSDK_NGX_VULKAN_GetCapabilityParameters");
-    p_Alloc = (PFN_NGX_VkAlloc)GetProcAddress(ngxmod, "NVSDK_NGX_VULKAN_AllocateParameters");
-    p_GetParams = (PFN_NGX_VkGetCaps)GetProcAddress(ngxmod, "NVSDK_NGX_VULKAN_GetParameters");
-    p_DestroyParams = (PFN_NGX_VkDestroyParams)GetProcAddress(ngxmod, "NVSDK_NGX_VULKAN_DestroyParameters");
-    p_Create1 = (PFN_NGX_VkCreate1)GetProcAddress(ngxmod, "NVSDK_NGX_VULKAN_CreateFeature1");
-    p_Eval = (PFN_NGX_VkEval)GetProcAddress(ngxmod, "NVSDK_NGX_VULKAN_EvaluateFeature_C");
-    if(!p_Eval) p_Eval = (PFN_NGX_VkEval)GetProcAddress(ngxmod, "NVSDK_NGX_VULKAN_EvaluateFeature");
-    p_Release = (PFN_NGX_VkRelease)GetProcAddress(ngxmod, "NVSDK_NGX_VULKAN_ReleaseFeature");
-    return p_Init && p_Shutdown1 && p_GetCaps && p_Create1 && p_Eval && p_Release;
-}
-
-static bool capturereqs()
-{
-    ninstexts = 0;
-    ndevexts = 0;
-    if(p_InstExt)
-    {
-        NVSDK_NGX_FeatureDiscoveryInfo disc;
-        filldiscovery(disc);
-        uint32_t n = 0;
-        VkExtensionProperties *props = NULL;
-        NVSDK_NGX_Result r = p_InstExt(&disc, &n, &props);
-        if(r == NVSDK_NGX_Result_Success && n && props)
-            copyextlist(props, n, instextstore, instextptrs, ninstexts, DLAA_MAX_EXT);
-        else if(r != NVSDK_NGX_Result_Success)
-            conoutf(CON_INIT, "hwrt dlaa: instance extension query %s", ngxresultstr(r));
-    }
-    if((!ninstexts || !ndevexts) && p_ReqExt)
-    {
-        unsigned in = 0, dn = 0;
-        const char **ie = NULL, **de = NULL;
-        NVSDK_NGX_Result r = p_ReqExt(&in, &ie, &dn, &de);
-        if(r == NVSDK_NGX_Result_Success)
-        {
-            if(!ninstexts) copycstrlist(ie, in, instextstore, instextptrs, ninstexts, DLAA_MAX_EXT);
-            if(!ndevexts) copycstrlist(de, dn, devextstore, devextptrs, ndevexts, DLAA_MAX_EXT);
-        }
-        else
-            conoutf(CON_INIT, "hwrt dlaa: RequiredExtensions %s (continuing with interop-only device)", ngxresultstr(r));
-    }
-    conoutf(CON_INIT, "hwrt dlaa: NGX Vulkan instance extensions: %d  device extensions: %d", ninstexts, ndevexts);
-    loopi(ninstexts) conoutf(CON_INIT, "hwrt dlaa: instance ext %s", instextptrs[i]);
-    loopi(ndevexts) conoutf(CON_INIT, "hwrt dlaa: device ext %s", devextptrs[i]);
-    return true;
-}
-#endif /* abandoned CORE nvngx.dll discovery */
-
-#ifdef HWRT_NGX_GATEWAY
 static void gwlog(const char *message)
 {
     if(message && message[0]) conoutf(CON_INIT, "ngx: %s", message);
@@ -930,24 +474,9 @@ static bool gwloaddll(char *dir, int dirlen)
     copystring(ngxsdkpath, dir, sizeof(ngxsdkpath));
     string dll;
     nformatstring(dll, sizeof(dll), "%s\\sauer_ngx.dll", dir);
-    const char *envdir = getenv("SAUER_NGX_DIR");
-    if(!fileexists_a(dll) && !(envdir && envdir[0]))
-    {
-        char exe[MAX_PATH];
-        DWORD n = GetModuleFileNameA(NULL, exe, MAX_PATH);
-        if(n && n < MAX_PATH)
-        {
-            char *slash = strrchr(exe, '\\');
-            if(!slash) slash = strrchr(exe, '/');
-            if(slash) *slash = 0;
-            nformatstring(dll, sizeof(dll), "%s\\ngx-hdr\\sauer_ngx.dll", exe);
-            if(!fileexists_a(dll)) nformatstring(dll, sizeof(dll), "%s\\ngx\\sauer_ngx.dll", exe);
-            if(!fileexists_a(dll)) nformatstring(dll, sizeof(dll), "%s\\sauer_ngx.dll", exe);
-        }
-    }
     if(!fileexists_a(dll))
     {
-        setreason("sauer_ngx.dll missing (MSVC gateway: src\\ngx_gateway\\build-dll.bat)");
+        setreason("sauer_ngx.dll missing (MSVC gateway: src\\ngx_gateway\\build-dll-hdr.bat)");
         conoutf(CON_WARN, "hwrt dlaa: %s", ngxreason);
         return false;
     }
@@ -1044,132 +573,6 @@ bool hwrtdlaainitbeforeinstance()
     conoutf(CON_INIT, "hwrt dlaa: public NGX Vulkan SDK via sauer_ngx.dll from %s. Streamline is not loaded. Present remains SDL_GL_SwapWindow.", ngxdir);
     return true;
 }
-#else
-bool hwrtdlaainitbeforeinstance()
-{
-    if(slinited) return true;
-    if(ngxfatal) return false;
-    char sldir[MAX_PATH];
-    resolvedir_sl(sldir, sizeof(sldir));
-    defformatstring(interposer, "%s\\sl.interposer.dll", sldir);
-    defformatstring(sldlss, "%s\\sl.dlss.dll", sldir);
-    defformatstring(slcommon, "%s\\sl.common.dll", sldir);
-    if(!fileexists_a(interposer) || !fileexists_a(sldlss) || !fileexists_a(slcommon))
-    {
-        setreason("Streamline DLLs missing (run src\\setup-streamline.bat; bin64\\streamline)");
-        conoutf(CON_WARN, "hwrt dlaa: %s (%s)", ngxreason, sldir);
-        return false;
-    }
-    utf8tow(sldir, slpluginw, MAX_PATH);
-    {
-        string logdir;
-        nformatstring(logdir, sizeof(logdir), "%s\\logs", sldir);
-        CreateDirectoryA(logdir, NULL);
-        utf8tow(logdir, sllogw, MAX_PATH);
-    }
-    slmod = LoadLibraryA(interposer);
-    if(!slmod)
-    {
-        defformatstring(msg, "LoadLibrary sl.interposer.dll failed (%u)", (unsigned)GetLastError());
-        setreason(msg);
-        return false;
-    }
-    p_slInit = (PFun_slInit *)GetProcAddress(slmod, "slInit");
-    p_slShutdown = (PFun_slShutdown *)GetProcAddress(slmod, "slShutdown");
-    p_slSetVulkanInfo = (PFun_slSetVulkanInfo *)GetProcAddress(slmod, "slSetVulkanInfo");
-    p_slEvaluateFeature = (PFun_slEvaluateFeature *)GetProcAddress(slmod, "slEvaluateFeature");
-    p_slSetTagForFrame = (PFun_slSetTagForFrame *)GetProcAddress(slmod, "slSetTagForFrame");
-    p_slSetConstants = (PFun_slSetConstants *)GetProcAddress(slmod, "slSetConstants");
-    p_slGetNewFrameToken = (PFun_slGetNewFrameToken *)GetProcAddress(slmod, "slGetNewFrameToken");
-    p_slFreeResources = (PFun_slFreeResources *)GetProcAddress(slmod, "slFreeResources");
-    p_slGetFeatureRequirements = (PFun_slGetFeatureRequirements *)GetProcAddress(slmod, "slGetFeatureRequirements");
-    p_slGetFeatureFunction = (PFun_slGetFeatureFunction *)GetProcAddress(slmod, "slGetFeatureFunction");
-    p_slIsFeatureSupported = (PFun_slIsFeatureSupported *)GetProcAddress(slmod, "slIsFeatureSupported");
-    if(!p_slInit || !p_slShutdown || !p_slSetVulkanInfo || !p_slEvaluateFeature || !p_slSetTagForFrame ||
-       !p_slSetConstants || !p_slGetNewFrameToken || !p_slGetFeatureFunction)
-    {
-        setreason("sl.interposer.dll missing required exports");
-        FreeLibrary(slmod);
-        slmod = NULL;
-        return false;
-    }
-    sl::Preferences pref{};
-    pref.showConsole = false;
-    pref.logLevel = sl::LogLevel::eDefault;
-    pref.pathsToPlugins = slpluginlist;
-    pref.numPathsToPlugins = 1;
-    pref.pathToLogsAndData = sllogw;
-    pref.flags = sl::PreferenceFlags::eDisableCLStateTracking | sl::PreferenceFlags::eUseManualHooking |
-                 sl::PreferenceFlags::eUseFrameBasedResourceTagging;
-    pref.featuresToLoad = slfeatures;
-    pref.numFeaturesToLoad = 1;
-    pref.applicationId = 0;
-    pref.engine = sl::EngineType::eCustom;
-    pref.engineVersion = NGX_ENGINE_VER;
-    pref.projectId = NGX_PROJECT_ID;
-    pref.renderAPI = sl::RenderAPI::eVulkan;
-    sl::Result sr = p_slInit(pref, sl::kSDKVersion);
-    if(sr != sl::Result::eOk)
-    {
-        defformatstring(msg, "slInit failed (%s)", slresultstr(sr));
-        setreason(msg);
-        conoutf(CON_WARN, "hwrt dlaa: %s", ngxreason);
-        return false;
-    }
-    slinited = true;
-    ngxloaded = true; // reuse the loaded flag so vkdevice still queries extensions
-    if(p_slGetFeatureRequirements)
-    {
-        sl::FeatureRequirements reqs{};
-        if(p_slGetFeatureRequirements(sl::kFeatureDLSS, reqs) == sl::Result::eOk)
-        {
-            ninstexts = 0;
-            ndevexts = 0;
-            slextragfx = reqs.vkNumGraphicsQueuesRequired;
-            slextracompute = reqs.vkNumComputeQueuesRequired;
-            slnfeat12 = 0;
-            slnfeat13 = 0;
-            loopi(int(reqs.vkNumInstanceExtensions))
-            {
-                if(ninstexts >= DLAA_MAX_EXT) break;
-                if(!reqs.vkInstanceExtensions || !reqs.vkInstanceExtensions[i]) continue;
-                copystring(instextstore[ninstexts], reqs.vkInstanceExtensions[i], 128);
-                instextptrs[ninstexts] = instextstore[ninstexts];
-                ninstexts++;
-            }
-            loopi(int(reqs.vkNumDeviceExtensions))
-            {
-                if(ndevexts >= DLAA_MAX_EXT) break;
-                if(!reqs.vkDeviceExtensions || !reqs.vkDeviceExtensions[i]) continue;
-                copystring(devextstore[ndevexts], reqs.vkDeviceExtensions[i], 128);
-                devextptrs[ndevexts] = devextstore[ndevexts];
-                ndevexts++;
-            }
-            loopi(int(reqs.vkNumFeatures12))
-            {
-                if(slnfeat12 >= DLAA_MAX_EXT) break;
-                if(!reqs.vkFeatures12 || !reqs.vkFeatures12[i]) continue;
-                copystring(slfeat12store[slnfeat12], reqs.vkFeatures12[i], 128);
-                slfeat12ptrs[slnfeat12] = slfeat12store[slnfeat12];
-                slnfeat12++;
-            }
-            loopi(int(reqs.vkNumFeatures13))
-            {
-                if(slnfeat13 >= DLAA_MAX_EXT) break;
-                if(!reqs.vkFeatures13 || !reqs.vkFeatures13[i]) continue;
-                copystring(slfeat13store[slnfeat13], reqs.vkFeatures13[i], 128);
-                slfeat13ptrs[slnfeat13] = slfeat13store[slnfeat13];
-                slnfeat13++;
-            }
-            conoutf(CON_INIT, "hwrt dlaa: Streamline DLSS instance ext %d device ext %d extraGfxQ %u extraComputeQ %u feat12 %u feat13 %u",
-                    ninstexts, ndevexts, slextragfx, slextracompute, slnfeat12, slnfeat13);
-        }
-    }
-    setreason("Streamline loaded, waiting for Vulkan device");
-    conoutf(CON_INIT, "hwrt dlaa: Streamline 2.12 manual hooking from %s. NVIDIA evaluate is slEvaluateFeature (SDK wrapper). Present remains SDL_GL_SwapWindow.", sldir);
-    return true;
-}
-#endif
 
 int hwrtdlaacollectinstanceexts(const char **names, int maxnames)
 {
@@ -1199,7 +602,6 @@ int hwrtdlaacollectinstanceexts(const char **names, int maxnames)
 
 int hwrtdlaacollectdeviceexts(const char **names, int maxnames)
 {
-#ifdef HWRT_NGX_GATEWAY
     if(!ndevexts && ngxloaded && p_gwDevExt && hwrtdev.instance && hwrtdev.phys)
     {
         SauerNgxExtList exts;
@@ -1224,7 +626,6 @@ int hwrtdlaacollectdeviceexts(const char **names, int maxnames)
             conoutf(CON_WARN, "hwrt dlaa: device ext query %s", ngxreason);
         }
     }
-#endif
     if(!ngxloaded || !names || maxnames <= 0 || !ndevexts) return 0;
     return collectnamed(names, maxnames, devextptrs, ndevexts);
 }
@@ -1233,109 +634,24 @@ uint32_t hwrtdlaaextraqueues() { return slextragfx + slextracompute; }
 bool hwrtdlaawantsfeatures12() { return slnfeat12 > 0; }
 bool hwrtdlaawantsfeatures13() { return slnfeat13 > 0; }
 
-static void orvkbools(VkBool32 *dst, const VkBool32 *src, int n)
-{
-    loopi(n) if(src[i]) dst[i] = VK_TRUE;
-}
-
-#ifndef HWRT_NGX_GATEWAY
-void hwrtdlaamergefeatures12(void *v)
-{
-    if(!v || !slnfeat12) return;
-    VkPhysicalDeviceVulkan12Features extra = sl::getVkPhysicalDeviceVulkan12Features(slnfeat12, slfeat12ptrs);
-    VkPhysicalDeviceVulkan12Features *dst = (VkPhysicalDeviceVulkan12Features *)v;
-    orvkbools(&dst->samplerMirrorClampToEdge, &extra.samplerMirrorClampToEdge,
-              int((sizeof(VkPhysicalDeviceVulkan12Features) - offsetof(VkPhysicalDeviceVulkan12Features, samplerMirrorClampToEdge)) / sizeof(VkBool32)));
-}
-
-void hwrtdlaamergefeatures13(void *v)
-{
-    if(!v || !slnfeat13) return;
-    VkPhysicalDeviceVulkan13Features extra = sl::getVkPhysicalDeviceVulkan13Features(slnfeat13, slfeat13ptrs);
-    VkPhysicalDeviceVulkan13Features *dst = (VkPhysicalDeviceVulkan13Features *)v;
-    orvkbools(&dst->robustImageAccess, &extra.robustImageAccess,
-              int((sizeof(VkPhysicalDeviceVulkan13Features) - offsetof(VkPhysicalDeviceVulkan13Features, robustImageAccess)) / sizeof(VkBool32)));
-}
-
-static void ngxclearevaloptionals(NVSDK_NGX_Parameter *p)
-{
-    static const char *optionalres[] = {
-        NVSDK_NGX_Parameter_TransparencyMask,
-        NVSDK_NGX_Parameter_ExposureTexture,
-        NVSDK_NGX_Parameter_DLSS_Input_Bias_Current_Color_Mask,
-        NVSDK_NGX_Parameter_GBuffer_Albedo,
-        NVSDK_NGX_Parameter_GBuffer_Roughness,
-        NVSDK_NGX_Parameter_GBuffer_Metallic,
-        NVSDK_NGX_Parameter_GBuffer_Specular,
-        NVSDK_NGX_Parameter_GBuffer_Subsurface,
-        NVSDK_NGX_Parameter_GBuffer_Normals,
-        NVSDK_NGX_Parameter_GBuffer_ShadingModelId,
-        NVSDK_NGX_Parameter_GBuffer_MaterialId,
-        NVSDK_NGX_Parameter_GBuffer_Atrrib_8,
-        NVSDK_NGX_Parameter_GBuffer_Atrrib_9,
-        NVSDK_NGX_Parameter_GBuffer_Atrrib_10,
-        NVSDK_NGX_Parameter_GBuffer_Atrrib_11,
-        NVSDK_NGX_Parameter_GBuffer_Atrrib_12,
-        NVSDK_NGX_Parameter_GBuffer_Atrrib_13,
-        NVSDK_NGX_Parameter_GBuffer_Atrrib_14,
-        NVSDK_NGX_Parameter_GBuffer_Atrrib_15,
-        NVSDK_NGX_Parameter_MotionVectors3D,
-        NVSDK_NGX_Parameter_IsParticleMask,
-        NVSDK_NGX_Parameter_AnimatedTextureMask,
-        NVSDK_NGX_Parameter_DepthHighRes,
-        NVSDK_NGX_Parameter_Position_ViewSpace,
-        NVSDK_NGX_Parameter_RayTracingHitDistance,
-        NVSDK_NGX_Parameter_MotionVectorsReflection,
-        NVSDK_NGX_Parameter_DLSS_TransparencyLayer,
-        NVSDK_NGX_Parameter_DLSS_TransparencyLayerOpacity,
-        NVSDK_NGX_Parameter_DLSS_TransparencyLayerMvecs,
-        NVSDK_NGX_Parameter_DLSS_DisocclusionMask,
-        NULL
-    };
-    for(const char **n = optionalres; *n; n++) ngxsetvoid(p, *n, NULL);
-}
-
-static NVSDK_NGX_Resource_VK ngxrescolor{}, ngxresdepth{}, ngxresmotion{}, ngxresout{};
-
-static NVSDK_NGX_Resource_VK *fillres(dlaatex &t, NVSDK_NGX_Resource_VK &r, int w, int h, bool rw)
-{
-    memset(&r, 0, sizeof(r));
-    r.Type = NVSDK_NGX_RESOURCE_VK_TYPE_VK_IMAGEVIEW;
-    r.ReadWrite = rw;
-    r.Resource.ImageViewInfo.ImageView = t.view;
-    r.Resource.ImageViewInfo.Image = t.image;
-    r.Resource.ImageViewInfo.Format = t.format;
-    r.Resource.ImageViewInfo.Width = unsigned(w);
-    r.Resource.ImageViewInfo.Height = unsigned(h);
-    r.Resource.ImageViewInfo.SubresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    r.Resource.ImageViewInfo.SubresourceRange.baseMipLevel = 0;
-    r.Resource.ImageViewInfo.SubresourceRange.levelCount = 1;
-    r.Resource.ImageViewInfo.SubresourceRange.baseArrayLayer = 0;
-    r.Resource.ImageViewInfo.SubresourceRange.layerCount = 1;
-    return &r;
-}
-
-static void ngxbindres(NVSDK_NGX_Parameter *p, const char *name, const char *ename, NVSDK_NGX_Resource_VK *res)
-{
-    if(!p) return;
-    ngxsetvoid2(p, name, ename, res);
-}
-
-static void ngxbindevalres(const char *name, const char *ename, NVSDK_NGX_Resource_VK *res)
-{
-    ngxbindres(ngxparams, name, ename, res);
-    if(ngxlegacy && ngxlegacy != ngxparams) ngxbindres(ngxlegacy, name, ename, res);
-}
-
-#else
 void hwrtdlaamergefeatures12(void *) {}
 void hwrtdlaamergefeatures13(void *) {}
-#endif
 
 bool hwrtdlaaondevice()
 {
-#ifdef HWRT_NGX_GATEWAY
     if(!ngxloaded || !hwrtdev.device || !p_gwInit) return false;
+    // NGX only runs on NVIDIA: do not even start it elsewhere. The menu then
+    // greys DLAA/DLSS with this reason; FSR stays offered.
+    VkPhysicalDeviceProperties devprops;
+    memset(&devprops, 0, sizeof(devprops));
+    vkGetPhysicalDeviceProperties(hwrtdev.phys, &devprops);
+    ngxnotnvidia = devprops.vendorID != 0x10DE || hwrtfsrsimulating("amd");
+    if(ngxnotnvidia)
+    {
+        setreason(devprops.vendorID != 0x10DE ? "not an NVIDIA GPU: NGX not started" : "not an NVIDIA GPU (simulated: SAUER_UPSCALE_SIMULATE=amd): NGX not started");
+        conoutf(CON_INIT, "hwrt dlaa: %s (%s, vendor 0x%04X)", ngxreason, hwrtdev.name, devprops.vendorID);
+        return false;
+    }
     SauerNgxInit in;
     memset(&in, 0, sizeof(in));
     in.struct_bytes = sizeof(in);
@@ -1368,65 +684,6 @@ bool hwrtdlaaondevice()
     conoutf(CON_INIT, "hwrt dlaa: NGX Vulkan Init_with_ProjectID ok on %s. Evaluate is NGX_VULKAN_EVALUATE_DLSS_EXT via sauer_ngx.dll. Streamline is not loaded. Present remains SDL_GL_SwapWindow.",
             hwrtdev.name);
     return true;
-#else
-    if(!slinited || !hwrtdev.device || !p_slSetVulkanInfo) return false;
-    sl::VulkanInfo info{};
-    info.device = hwrtdev.device;
-    info.instance = hwrtdev.instance;
-    info.physicalDevice = hwrtdev.phys;
-    info.graphicsQueueFamily = hwrtdev.queuefamily;
-    info.graphicsQueueIndex = slextragfx ? 1u : 0u;
-    info.computeQueueFamily = hwrtdev.queuefamily;
-    info.computeQueueIndex = hwrtdev.slcomputeqindex;
-    sl::Result r = p_slSetVulkanInfo(info);
-    if(r != sl::Result::eOk)
-    {
-        defformatstring(msg, "slSetVulkanInfo failed (%s)", slresultstr(r));
-        setreason(msg);
-        conoutf(CON_WARN, "hwrt dlaa: %s", ngxreason);
-        return false;
-    }
-    ngxinited = true;
-    if(p_slIsFeatureSupported)
-    {
-        sl::AdapterInfo adapter{};
-        adapter.vkPhysicalDevice = hwrtdev.phys;
-        r = p_slIsFeatureSupported(sl::kFeatureDLSS, adapter);
-        if(r != sl::Result::eOk)
-        {
-            defformatstring(msg, "slIsFeatureSupported(DLSS) failed (%s)", slresultstr(r));
-            setreason(msg);
-            conoutf(CON_WARN, "hwrt dlaa: %s", ngxreason);
-            return false;
-        }
-    }
-    if(p_slGetFeatureFunction)
-    {
-        void *fn = NULL;
-        if(p_slGetFeatureFunction(sl::kFeatureDLSS, "slDLSSGetOptimalSettings", fn) == sl::Result::eOk)
-            p_slDLSSGetOptimalSettings = (PFun_slDLSSGetOptimalSettings *)fn;
-        fn = NULL;
-        if(p_slGetFeatureFunction(sl::kFeatureDLSS, "slDLSSSetOptions", fn) == sl::Result::eOk)
-            p_slDLSSSetOptions = (PFun_slDLSSSetOptions *)fn;
-        fn = NULL;
-        if(p_slGetFeatureFunction(sl::kFeatureDLSS, "slDLSSGetState", fn) == sl::Result::eOk)
-            p_slDLSSGetState = (PFun_slDLSSGetState *)fn;
-    }
-    if(!p_slDLSSSetOptions)
-    {
-        setreason("slDLSSSetOptions missing after slSetVulkanInfo");
-        conoutf(CON_WARN, "hwrt dlaa: %s", ngxreason);
-        return false;
-    }
-    ngxsupported = true;
-    dlaaavailable = 1;
-    hwrtdlaaavailable = 1;
-    hwrtngx = 1;
-    setreason("available (inactive until hwrtdlaa 1)");
-    conoutf(CON_INIT, "hwrt dlaa: Streamline DLSS/DLAA available on %s. Evaluate is slEvaluateFeature. Present remains SDL_GL_SwapWindow. Tags eValidUntilEvaluate. slFreeResources on resize/off. slShutdown before vkDestroyDevice.",
-            hwrtdev.name);
-    return true;
-#endif
 }
 
 static void destroytex(dlaatex &t)
@@ -1680,30 +937,14 @@ static void transitionall(VkImageLayout dst)
 
 static void releasefeature()
 {
-#ifdef HWRT_NGX_GATEWAY
-    if(!dlaaconfigured && !gwhandle) return;
+    if(!dlaaconfigured && !gwhandle && !hwrtfsrconfigured()) return;
     if(hwrtdev.device) vkDeviceWaitIdle(hwrtdev.device);
     if(gwhandle && p_gwRelease)
     {
         if(p_gwRelease(gwhandle) != SAUER_NGX_OK) gwcopyerr();
         gwhandle = 0;
     }
-#else
-    if(!dlaaconfigured) return;
-    if(hwrtdev.device) vkDeviceWaitIdle(hwrtdev.device);
-    if(p_slDLSSSetOptions)
-    {
-        sl::DLSSOptions off{};
-        off.mode = sl::DLSSMode::eOff;
-        p_slDLSSSetOptions(slviewport, off);
-    }
-    if(p_slFreeResources)
-    {
-        sl::Result r = p_slFreeResources(sl::kFeatureDLSS, slviewport);
-        if(r != sl::Result::eOk && r != sl::Result::eErrorNotInitialized)
-            conoutf(CON_INIT, "hwrt dlaa: slFreeResources %s", slresultstr(r));
-    }
-#endif
+    hwrtfsrrelease();
     dlaaconfigured = false;
     if(dlaainw || dlaainh || dlaaoutw || dlaaouth)
     {
@@ -1777,6 +1018,10 @@ static VkImageUsageFlags texusage()
 
 static const char *ngxmodename(int m)
 {
+    if(m == 8) return "FSR Performance";
+    if(m == 7) return "FSR Equilibre";
+    if(m == 6) return "FSR Qualite";
+    if(m == 5) return "FSR Native";
     if(m == 4) return "DLSS Performance";
     if(m == 3) return "DLSS Equilibre";
     if(m == 2) return "DLSS Qualite";
@@ -1784,10 +1029,19 @@ static const char *ngxmodename(int m)
     return "OFF";
 }
 
-static bool ngxissrmode(int m) { return m >= 2 && m <= 4; }
-static bool ngxneedsfeature(int m) { return m >= 1 && m <= 4; }
+// "SR" = the scene is rendered below the output size (DLSS or FSR upscaling).
+static bool ngxissrmode(int m) { return (m >= 2 && m <= 4) || (m >= 6 && m <= 8); }
+static bool ngxneedsfeature(int m) { return m >= 1 && m <= 8; }
+static bool fsrmode(int m) { return m >= 5 && m <= 8; }
+// The upscaler behind mode m can run on this machine.
+static bool modeready(int m)
+{
+    // Never on a device a timed-out start-up worker may still be creating.
+    if(!hwrtvkready()) return false;
+    if(fsrmode(m)) return hwrtfsravailable();
+    return dlaaavailable && ngxsupported && !ngxfatal;
+}
 
-#ifdef HWRT_NGX_GATEWAY
 static uint32_t gwmodefromengine(int m)
 {
     if(m == 2) return SAUER_NGX_MODE_QUALITY;
@@ -1809,7 +1063,6 @@ static const char *ngxpresetname(int enginemode)
     if(enginemode == 4) return "M";
     return "K";
 }
-#endif
 
 int hwrtfbw() { return (scenebound && scenew > 0) ? scenew : screenw; }
 int hwrtfbh() { return (scenebound && sceneh > 0) ? sceneh : screenh; }
@@ -2026,12 +1279,29 @@ static bool querysrsize(int mode, int outw, int outh, int &inw, int &inh)
 {
     inw = outw;
     inh = outh;
-#ifdef HWRT_NGX_GATEWAY
     if(qcacheok && qcacheoutw == outw && qcacheouth == outh && qcachemode == mode && qcacheinw >= 8 && qcacheinh >= 8)
     {
         inw = qcacheinw;
         inh = qcacheinh;
         return inw < outw || inh < outh;
+    }
+    if(fsrmode(mode))
+    {
+        if(!hwrtfsrquerysize(mode, outw, outh, inw, inh))
+        {
+            qcacheok = false;
+            return false;
+        }
+        ngxoptw = ngxoptminw = ngxoptmaxw = uint32_t(inw);
+        ngxopth = ngxoptminh = ngxoptmaxh = uint32_t(inh);
+        ngxoptok = 1;
+        qcacheoutw = outw;
+        qcacheouth = outh;
+        qcacheinw = inw;
+        qcacheinh = inh;
+        qcachemode = mode;
+        qcacheok = inw >= 8 && inh >= 8 && (inw < outw || inh < outh);
+        return qcacheok;
     }
     if(!p_gwOptimal || !ngxsupported) return false;
     SauerNgxOptimal q;
@@ -2062,10 +1332,6 @@ static bool querysrsize(int mode, int outw, int outh, int &inw, int &inh)
     qcachemode = mode;
     qcacheok = inw >= 8 && inh >= 8 && (inw < outw || inh < outh);
     return qcacheok;
-#else
-    (void)mode; (void)outw; (void)outh;
-    return false;
-#endif
 }
 
 extern int hwrt;
@@ -2659,6 +1925,26 @@ static void hwrthdrpresent()
     hwrthdrpresentedone();
 }
 
+// NVIDIA DLSS Programming Guide 3.5: while DLAA/DLSS renders the scene, scene
+// textures get the mip-map bias log2(render width / display width) - 1 (DLAA -1,
+// Quality about -1.58, Performance -2). FSR and Native keep 0. Off by default
+// since 2026-10-04 (tester report: DLSS less stable, aliasing even in DLAA with it):
+// 0 leaves every texture at bias 0 (no GL call), as before the guide pass.
+// Not saved; 1 stays available to compare.
+VAR(hwrtdlssmipbias, 0, 0, 1);
+static void updatescenelodbias()
+{
+    float bias = 0;
+    int m = hwrtngxmode;
+    if(hwrtdlssmipbias && m >= 1 && m <= 4 && !ngxblocked && modeready(m) && screenw >= 8 && screenh >= 8)
+    {
+        int inw = screenw, inh = screenh;
+        if(ngxissrmode(m) && !querysrsize(m, screenw, screenh, inw, inh)) inw = 0;
+        if(inw > 0) bias = log2f(float(inw) / float(screenw)) - 1.0f;
+    }
+    setscenelodbias(bias);
+}
+
 void hwrtscenebegin()
 {
     hdrframe = false;
@@ -2669,14 +1955,18 @@ void hwrtscenebegin()
     scenefail = false;
     hwrthdrsetlin(false);
     if(!initing && !inchanged && !ngxblocked && ngxmodehave != hwrtngxmode)
+    {
+        ngxautoapply = true;   // saved choice applied on the first frame, not a new request
         applyngxmode(hwrtngxmode);
+        ngxautoapply = false;
+    }
     ngxmodereq = hwrtngxmode;
+    updatescenelodbias();
     int wantw = screenw, wanth = screenh;
     if(hwrthdreligible() && screenw >= 8 && screenh >= 8)
     {
         int fw = screenw, fh = screenh;
-#ifdef HWRT_NGX_GATEWAY
-        if(!ngxblocked && ngxissrmode(hwrtngxmode) && dlaaavailable && ngxsupported && !ngxfatal)
+        if(!ngxblocked && ngxissrmode(hwrtngxmode) && modeready(hwrtngxmode))
         {
             int inw = 0, inh = 0;
             if(querysrsize(hwrtngxmode, screenw, screenh, inw, inh))
@@ -2685,7 +1975,6 @@ void hwrtscenebegin()
                 fh = inh;
             }
         }
-#endif
         int cause = 0;
         if(hwrthdrfaillab) cause = 1;
         else if(!hdrpresentready()) cause = 2;
@@ -2716,8 +2005,7 @@ void hwrtscenebegin()
             return;
         }
     }
-#ifdef HWRT_NGX_GATEWAY
-    if(ngxissrmode(hwrtngxmode) && !ngxblocked && dlaaavailable && ngxsupported && !ngxfatal && screenw >= 8 && screenh >= 8)
+    if(ngxissrmode(hwrtngxmode) && !ngxblocked && modeready(hwrtngxmode) && screenw >= 8 && screenh >= 8)
     {
         int inw = 0, inh = 0;
         if(!querysrsize(hwrtngxmode, screenw, screenh, inw, inh))
@@ -2739,7 +2027,6 @@ void hwrtscenebegin()
             return;
         }
     }
-#endif
     destroyscenefb();
     scenew = wantw;
     sceneh = wanth;
@@ -2980,7 +2267,7 @@ void hwrtdlaabiascapture()
     lastbiassrcfb = 0;
     lastbiasw = 0;
     lastbiash = 0;
-    if(hwrtdlaabias <= 0 || !hwrtdlaaneedsdata())
+    if(hwrtdlaabias <= 0 || !hwrtdlaaneedsdata() || !fsrmode(hwrtngxmode))
     {
         lastbiasgpums = 0;
         return;
@@ -3104,7 +2391,8 @@ void hwrtdlaabiascapture()
 
 static bool biaswanted()
 {
-    return hwrtdlaabias > 0 && lastbiasbound && lastbiasgl && texbias.gltex;
+    // FSR reactive mask only (see hwrtdlaabias): never for DLAA/DLSS.
+    return fsrmode(ngxmodeapp) && hwrtdlaabias > 0 && lastbiasbound && lastbiasgl && texbias.gltex;
 }
 
 bool hwrtsceneblitwindow()
@@ -3183,9 +2471,59 @@ static bool ensureres(int inw, int inh, int outw, int outh)
     return true;
 }
 
+// FSR context for the same shared images. No command buffer: the FidelityFX
+// backend uploads its own initial data at the first dispatch.
+static bool configurefsr(int inw, int inh, int outw, int outh, int mode)
+{
+    if(hwrtdlaainject == 2)
+    {
+        setreason("injected: configure/prep failure");
+        return false;
+    }
+    int wantHdr = (scenehdr && scenecolorfmt == GL_RGBA16F && texcolorin.format == VK_FORMAT_R16G16B16A16_SFLOAT && texcolorout.format == VK_FORMAT_R16G16B16A16_SFLOAT) ? 1 : 0;
+    if(dlaaconfigured && int(dlaainw) == inw && int(dlaainh) == inh && int(dlaaoutw) == outw && int(dlaaouth) == outh && ngxmodeapp == mode && ngxcfghdr == wantHdr)
+        return dlaaoptok;
+    if(hwrtdev.device) vkDeviceWaitIdle(hwrtdev.device);
+    releasefeature();
+    ngxmodeapp = 0;
+    ngxusedoptimal = 0;
+    bool sr = ngxissrmode(mode);
+    if(sr ? (inw >= outw && inh >= outh) : (inw != outw || inh != outh))
+    {
+        setreason(sr ? "FSR upscale scene is not below the output" : "FSR Native is not 1:1");
+        return false;
+    }
+    char err[256];
+    if(!hwrtfsrcreate(mode, inw, inh, outw, outh, wantHdr != 0, err, sizeof(err)))
+    {
+        setreason(err[0] ? err : "FSR create failed");
+        return false;
+    }
+    dlaainw = uint32_t(inw);
+    dlaainh = uint32_t(inh);
+    dlaaoutw = uint32_t(outw);
+    dlaaouth = uint32_t(outh);
+    ngxusedoptimal = sr && uint32_t(inw) == ngxoptw && uint32_t(inh) == ngxopth ? 1u : 0u;
+    ngxmodeapp = mode;
+    ngxcfghdr = wantHdr;
+    ngxfeatfresh = 1;
+    dlaaoptok = true;
+    dlaaconfigured = true;
+    lastngxinw = dlaainw;
+    lastngxinh = dlaainh;
+    lastngxoutw = dlaaoutw;
+    lastngxouth = dlaaouth;
+    lastngxoptw = ngxoptw;
+    lastngxopth = ngxopth;
+    conoutf(CON_INIT, "hwrt fsr: %s  in %ux%u  out %ux%u  HDR %d  sharpness %d",
+            ngxmodename(ngxmodeapp), dlaainw, dlaainh, dlaaoutw, dlaaouth, wantHdr, hwrtfsrsharpness);
+    refreshlookaa();
+    return true;
+}
+
 static bool configure(int inw, int inh, int outw, int outh, int mode)
 {
-#ifdef HWRT_NGX_GATEWAY
+    if(fsrmode(mode)) return configurefsr(inw, inh, outw, outh, mode);
     if(!ngxsupported || !p_gwCreateFeat) return false;
     if(hwrtdlaainject == 2)
     {
@@ -3196,7 +2534,7 @@ static bool configure(int inw, int inh, int outw, int outh, int mode)
     if(dlaaconfigured && int(dlaainw) == inw && int(dlaainh) == inh && int(dlaaoutw) == outw && int(dlaaouth) == outh && ngxmodeapp == mode && ngxcfghdr == wantHdr)
         return dlaaoptok;
     if((ngxcfghdr == 0 || ngxcfghdr == 1) && ngxcfghdr != wantHdr)
-        conoutf("comparateur ngx historique recree IsHDR %d -> %d, carte non rechargee", ngxcfghdr, wantHdr);
+        logoutf("comparateur ngx historique recree IsHDR %d -> %d, carte non rechargee", ngxcfghdr, wantHdr);
     if(hwrtdev.device) vkDeviceWaitIdle(hwrtdev.device);
     releasefeature();
     ngxmodeapp = 0;
@@ -3259,6 +2597,7 @@ static bool configure(int inw, int inh, int outw, int outh, int mode)
     ngxusedoptimal = info.used_optimal;
     ngxmodeapp = enginefromgwmode(info.mode_applied);
     ngxcfghdr = int(info.hdr);
+    ngxcfgautoexp = int(info.auto_exposure);
     ngxfeatfresh = 1;
     conoutf(CON_INIT, "hdr lot2 ngx contrat IsHDR=%u AutoExposure=%u MVLowRes=1 DepthInverted=0 MVJittered=0 flags=0x%x in %ux%u out %ux%u couleur %s",
             (unsigned)info.hdr, (unsigned)info.auto_exposure, (unsigned)info.flags,
@@ -3281,76 +2620,11 @@ static bool configure(int inw, int inh, int outw, int outh, int mode)
     lastngxouth = dlaaouth;
     lastngxoptw = ngxoptw;
     lastngxopth = ngxopth;
-    conoutf(CON_INIT, "hwrt ngx: CREATE_DLSS_EXT1 %s preset %s  in %ux%u  out %ux%u  optimal %ux%u used_optimal=%u  HDR=false  autoExposure  MVLowRes",
-            ngxmodename(ngxmodeapp), ngxpresetname(ngxmodeapp), dlaainw, dlaainh, dlaaoutw, dlaaouth, ngxoptw, ngxopth, (unsigned)ngxusedoptimal);
+    conoutf(CON_INIT, "hwrt ngx: CREATE_DLSS_EXT1 %s preset %s  in %ux%u  out %ux%u  optimal %ux%u used_optimal=%u  IsHDR=%d  AutoExposure=%d  MVLowRes  mip bias %.3f",
+            ngxmodename(ngxmodeapp), ngxpresetname(ngxmodeapp), dlaainw, dlaainh, dlaaoutw, dlaaouth, ngxoptw, ngxopth, (unsigned)ngxusedoptimal,
+            ngxcfghdr, ngxcfgautoexp, getscenelodbias());
     refreshlookaa();
     return true;
-#else
-    (void)inw; (void)inh; (void)mode;
-    int w = outw, h = outh;
-    if(!ngxsupported || !p_slDLSSSetOptions) return false;
-    if(hwrtdlaainject == 2)
-    {
-        setreason("injected: configure/prep failure");
-        return false;
-    }
-    if(dlaaconfigured && int(dlaaoutw) == w && int(dlaaouth) == h) return dlaaoptok;
-    if(hwrtdev.device) vkDeviceWaitIdle(hwrtdev.device);
-    releasefeature();
-
-    sl::DLSSOptions opt{};
-    opt.mode = sl::DLSSMode::eDLAA;
-    opt.outputWidth = uint32_t(w);
-    opt.outputHeight = uint32_t(h);
-    opt.preExposure = 1.0f;
-    opt.exposureScale = 1.0f;
-    opt.colorBuffersHDR = sl::Boolean::eFalse;
-    opt.useAutoExposure = sl::Boolean::eTrue;
-    opt.dlaaPreset = sl::DLSSPreset::ePresetK;
-    opt.alphaUpscalingEnabled = sl::Boolean::eFalse;
-
-    dlaainw = uint32_t(w);
-    dlaainh = uint32_t(h);
-    dlaaoutw = uint32_t(w);
-    dlaaouth = uint32_t(h);
-    dlaaoptok = true;
-    if(p_slDLSSGetOptimalSettings)
-    {
-        sl::DLSSOptimalSettings set{};
-        sl::Result orr = p_slDLSSGetOptimalSettings(opt, set);
-        if(orr == sl::Result::eOk)
-        {
-            if(set.optimalRenderWidth && set.optimalRenderHeight)
-            {
-                dlaainw = set.optimalRenderWidth;
-                dlaainh = set.optimalRenderHeight;
-            }
-            if(dlaainw != uint32_t(w) || dlaainh != uint32_t(h))
-            {
-                conoutf(CON_WARN, "hwrt dlaa: slDLSSGetOptimalSettings suggested input %ux%u for output %dx%d; DLAA stays 1:1",
-                        dlaainw, dlaainh, w, h);
-                dlaainw = uint32_t(w);
-                dlaainh = uint32_t(h);
-            }
-            else
-                conoutf(CON_INIT, "hwrt dlaa: slDLSSGetOptimalSettings eDLAA input=output %ux%u", dlaainw, dlaainh);
-        }
-        else
-            conoutf(CON_INIT, "hwrt dlaa: slDLSSGetOptimalSettings %s; keeping native 1:1", slresultstr(orr));
-    }
-
-    sl::Result r = p_slDLSSSetOptions(slviewport, opt);
-    if(r != sl::Result::eOk)
-    {
-        defformatstring(msg, "slDLSSSetOptions(eDLAA) failed (%s)", slresultstr(r));
-        setreason(msg);
-        return false;
-    }
-    dlaaconfigured = true;
-    conoutf(CON_INIT, "hwrt dlaa: slDLSSSetOptions eDLAA preset K  input %ux%u  output %ux%u  HDR=false  autoExposure  native=%s",
-            dlaainw, dlaainh, dlaaoutw, dlaaouth, dlaaoptok ? "yes" : "NO");
-    return true;
-#endif
 }
 
 // Row-major multiply copied from Streamline 2.12 sl_matrix_helpers.h::matrixMul
@@ -3418,100 +2692,6 @@ static void flipclipy(matrix4 &m)
     m.d.y = -m.d.y;
 }
 
-#ifndef HWRT_NGX_GATEWAY
-static void setslmat(sl::float4x4 &o, const float m[16])
-{
-    o.row[0] = sl::float4(m[0], m[1], m[2], m[3]);
-    o.row[1] = sl::float4(m[4], m[5], m[6], m[7]);
-    o.row[2] = sl::float4(m[8], m[9], m[10], m[11]);
-    o.row[3] = sl::float4(m[12], m[13], m[14], m[15]);
-}
-
-static void identitysl(sl::float4x4 &o)
-{
-    o.row[0] = sl::float4(1, 0, 0, 0);
-    o.row[1] = sl::float4(0, 1, 0, 0);
-    o.row[2] = sl::float4(0, 0, 1, 0);
-    o.row[3] = sl::float4(0, 0, 0, 1);
-}
-
-static void fillslres(sl::Resource &r, const dlaatex &t, int w, int h)
-{
-    r = sl::Resource(sl::ResourceType::eTex2d, (void *)(uintptr_t)t.image, (void *)(uintptr_t)t.memory,
-                    (void *)(uintptr_t)t.view, uint32_t(VK_IMAGE_LAYOUT_GENERAL));
-    r.width = uint32_t(w);
-    r.height = uint32_t(h);
-    r.nativeFormat = uint32_t(t.format);
-    r.mipLevels = 1;
-    r.arrayLayers = 1;
-    r.usage = uint32_t(t.usage);
-    r.flags = 0;
-}
-
-static bool fillconstants(sl::Constants &c, const hwrttemporalinput *tin, bool reset)
-{
-    matrix4 viewtoclip = tin->proj_unjit;
-    flipclipy(viewtoclip);
-    matrix4 cliptoview;
-    if(!cliptoview.invert(viewtoclip))
-    {
-        setreason("clipToCameraView invert failed");
-        return false;
-    }
-    matrix4 curr = tin->camproj_unjit;
-    flipclipy(curr);
-    matrix4 prev = hasprevunjit ? prevunjit : tin->camproj_unjit;
-    if(!hasprevunjit) flipclipy(prev);
-    else
-    {
-        // prevunjit stored as engine camproj (GL Y-up). Flip for D3D clip.
-        matrix4 prevflip = prevunjit;
-        flipclipy(prevflip);
-        prev = prevflip;
-    }
-    matrix4 invcurr;
-    if(!invcurr.invert(curr))
-    {
-        setreason("clipToPrevClip invert failed");
-        return false;
-    }
-    matrix4 clip2prev;
-    clip2prev.mul(prev, invcurr);
-    matrix4 prev2clip;
-    if(!prev2clip.invert(clip2prev))
-    {
-        setreason("prevClipToClip invert failed");
-        return false;
-    }
-
-    float m[16];
-    tomat(viewtoclip, m); setslmat(c.cameraViewToClip, m);
-    tomat(cliptoview, m); setslmat(c.clipToCameraView, m);
-    identitysl(c.clipToLensClip);
-    tomat(clip2prev, m); setslmat(c.clipToPrevClip, m);
-    tomat(prev2clip, m); setslmat(c.prevClipToClip, m);
-
-    c.jitterOffset = sl::float2(tin->jitter_px, -tin->jitter_py);
-    c.mvecScale = sl::float2(1.0f / float(tin->width), 1.0f / float(tin->height));
-    c.cameraPinholeOffset = sl::float2(0, 0);
-    c.cameraPos = sl::float3(camera1->o.x, camera1->o.y, camera1->o.z);
-    c.cameraUp = sl::float3(camup.x, camup.y, camup.z);
-    c.cameraRight = sl::float3(camright.x, camright.y, camright.z);
-    c.cameraFwd = sl::float3(camdir.x, camdir.y, camdir.z);
-    c.cameraNear = tin->nearz;
-    c.cameraFar = tin->farz;
-    c.cameraFOV = tin->world_fovy * RAD;
-    c.cameraAspectRatio = (tin->height > 0) ? float(tin->width) / float(tin->height) : aspect;
-    c.depthInverted = sl::Boolean::eFalse;
-    c.cameraMotionIncluded = sl::Boolean::eTrue;
-    c.motionVectors3D = sl::Boolean::eFalse;
-    c.reset = reset ? sl::Boolean::eTrue : sl::Boolean::eFalse;
-    c.orthographicProjection = sl::Boolean::eFalse;
-    c.motionVectorsDilated = sl::Boolean::eFalse;
-    c.motionVectorsJittered = sl::Boolean::eFalse;
-    return true;
-}
-#endif
 
 static float matmaxabsdiff(const float a[16], const float b[16])
 {
@@ -3628,14 +2808,9 @@ static void runcontract(FILE *f)
                 pgl[5], pd3d[5], clip_y_sign);
         fprintf(f, "yflip_applied %s\n", yflipped ? "yes" : "no");
         fprintf(f, "depth: window 0 near / 1 far packed as R32F. NGX DepthInverted is NOT set. GL clip used only in the pack reconstruction is z*2-1 with GL Y-up UVs. NGX sees the 0-1 window values, same convention as uninverted D3D depth.\n");
-#ifdef HWRT_NGX_GATEWAY
         fprintf(f, "jitter: engine +Y up pixels; NGX InJitterOffsetY = -engine.y (D3D +Y down). MVs packed with Y negated; InMVScale 1,1 (pixel space). motionVectorsJittered false.\n");
         fprintf(f, "NGX_VULKAN_EVALUATE_DLSS_EXT consumes Color, Depth, MotionVectors, Output via NVSDK_NGX_Create_ImageView_Resource_VK. Uncovered (B<0.5) pack reconstruction still uses inv(camproj_used) for camera-only MVs.\n");
         fprintf(f, "HDR exposure: colour is scene-linear and not pre-multiplied. pre_exposure=1 exposure_scale=1. The 1x1 R32F texture holds 2^hwrthdrexp; DLSS normalises with it and inverts it, so the output stays scene-linear. hdrpresent multiplies that same value once. AutoExposure is off in HDR. This is not camera auto-exposure.\n");
-#else
-        fprintf(f, "jitter: engine +Y up pixels; Streamline jitterOffset.y = -engine.y (D3D +Y down). MVs packed with Y negated; mvecScale 1/w,1/h (pixel MVs -> [-1,1]). motionVectorsJittered false.\n");
-        fprintf(f, "slEvaluateFeature consumes cameraViewToClip (unjittered, Y-flipped) plus clipToPrevClip. Uncovered (B<0.5) pack reconstruction still uses inv(camproj_used) for camera-only MVs.\n");
-#endif
         fprintf(f, "weapon: mixed window depth after renderavatar. B>=0.5 keeps avatar MVs. World unproject of gun pixels is not used. Mixed Z is the framebuffer occlusion value (0-1, not inverted), which is what DLAA is given for disocclusion along with those MVs.\n");
     }
 }
@@ -3816,20 +2991,6 @@ static bool draininterop()
     return true;
 }
 
-static void copy2d(VkCommandBuffer cmd, VkImage src, VkImage dst, int w, int h)
-{
-    VkImageCopy region;
-    memset(&region, 0, sizeof(region));
-    region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    region.srcSubresource.layerCount = 1;
-    region.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    region.dstSubresource.layerCount = 1;
-    region.extent.width = uint32_t(w);
-    region.extent.height = uint32_t(h);
-    region.extent.depth = 1;
-    vkCmdCopyImage(cmd, src, VK_IMAGE_LAYOUT_GENERAL, dst, VK_IMAGE_LAYOUT_GENERAL, 1, &region);
-}
-
 static bool submitvk(bool roundtrip, const hwrttemporalinput *tin, bool reset, bool &submitted)
 {
     submitted = false;
@@ -3893,13 +3054,8 @@ static bool submitvk(bool roundtrip, const hwrttemporalinput *tin, bool reset, b
         vkCmdCopyImage(cmdbuf[fifslot], texcolorin.image, VK_IMAGE_LAYOUT_GENERAL,
                        texcolorout.image, VK_IMAGE_LAYOUT_GENERAL, 1, &region);
         evalok = true;
-#ifdef HWRT_NGX_GATEWAY
         lasteval = 1;
         lastevalcode = 0;
-#else
-        lasteval = NVSDK_NGX_Result_Success;
-        lastevalsl = sl::Result::eOk;
-#endif
         lastroundtrip = true;
     }
     else
@@ -3908,118 +3064,85 @@ static bool submitvk(bool roundtrip, const hwrttemporalinput *tin, bool reset, b
         if(hwrtdlaainject == 3)
         {
             setreason("injected: evaluate failure");
-#ifdef HWRT_NGX_GATEWAY
             lasteval = 0;
             lastevalcode = SAUER_NGX_ERR_NGX;
-#else
-            lasteval = NVSDK_NGX_Result_FAIL_InvalidParameter;
-            lastevalsl = sl::Result::eErrorInvalidParameter;
-#endif
             vkEndCommandBuffer(cmdbuf[fifslot]);
             return false;
         }
-#ifdef HWRT_NGX_GATEWAY
-        if(!dlaaconfigured || !p_gwEval || !gwhandle)
+        if(fsrmode(ngxmodeapp))
         {
-            setreason("NGX evaluate path missing");
-            vkEndCommandBuffer(cmdbuf[fifslot]);
-            return false;
+            // AMD FSR 3.1: the same packed images, jitter and reset as NGX.
+            if(!dlaaconfigured || !hwrtfsrconfigured())
+            {
+                setreason("FSR dispatch path missing");
+                vkEndCommandBuffer(cmdbuf[fifslot]);
+                return false;
+            }
+            hwrtfsrdispatchargs fa;
+            memset(&fa, 0, sizeof(fa));
+            fa.cmd = cmdbuf[fifslot];
+            fa.color.image = texcolorin.image; fa.color.format = texcolorin.format; fa.color.w = tin->width; fa.color.h = tin->height;
+            fa.depth.image = texdepth.image; fa.depth.format = texdepth.format; fa.depth.w = tin->width; fa.depth.h = tin->height;
+            fa.motion.image = texmotion.image; fa.motion.format = texmotion.format; fa.motion.w = tin->width; fa.motion.h = tin->height;
+            fa.output.image = texcolorout.image; fa.output.format = texcolorout.format; fa.output.w = int(dlaaoutw); fa.output.h = int(dlaaouth);
+            // explosion/smoke coverage (the DLSS bias mask) drives FSR reactivity
+            if(biaswanted()) { fa.reactive.image = texbias.image; fa.reactive.format = texbias.format; fa.reactive.w = tin->width; fa.reactive.h = tin->height; }
+            if(ngxcfghdr == 1) { fa.exposure.image = texexposure.image; fa.exposure.format = texexposure.format; fa.exposure.w = 1; fa.exposure.h = 1; }
+            fa.jitterx = tin->jitter_px;
+            fa.jittery = -tin->jitter_py;
+            fa.renderw = tin->width;
+            fa.renderh = tin->height;
+            fa.reset = reset;
+            char err[256];
+            if(!hwrtfsrdispatch(fa, err, sizeof(err)))
+            {
+                setreason(err[0] ? err : "FSR dispatch failed");
+                lasteval = 0;
+                lastevalcode = SAUER_NGX_ERR_NGX;
+                vkEndCommandBuffer(cmdbuf[fifslot]);
+                return false;
+            }
+            lasteval = 1;
+            lastevalcode = 0;
+            evalok = true;
         }
-        SauerNgxEval ev;
-        memset(&ev, 0, sizeof(ev));
-        ev.struct_bytes = sizeof(ev);
-        ev.command_buffer = (uint64_t)(uintptr_t)cmdbuf[fifslot];
-        fillgwimg(ev.color, texcolorin, tin->width, tin->height, 0);
-        fillgwimg(ev.depth, texdepth, tin->width, tin->height, 0);
-        fillgwimg(ev.motion, texmotion, tin->width, tin->height, 0);
-        fillgwimg(ev.output, texcolorout, int(dlaaoutw ? dlaaoutw : uint32_t(screenw)), int(dlaaouth ? dlaaouth : uint32_t(screenh)), 1);
-        if(biaswanted()) fillgwimg(ev.bias, texbias, tin->width, tin->height, 0);
-        ev.pre_exposure = 1.0f;
-        ev.exposure_scale = 1.0f;
-        ev.hdr = ngxcfghdr == 1 ? 1u : 0u;
-        if(ev.hdr) fillgwimg(ev.exposure, texexposure, 1, 1, 0);
-        ev.jitter_x = tin->jitter_px;
-        ev.jitter_y = -tin->jitter_py;
-        ev.mv_scale_x = 1.0f;
-        ev.mv_scale_y = 1.0f;
-        ev.reset = reset ? 1 : 0;
-        ev.render_w = uint32_t(tin->width);
-        ev.render_h = uint32_t(tin->height);
-        int32_t rc = p_gwEval(gwhandle, &ev, sizeof(ev));
-        gwcopyerr();
-        if(rc != SAUER_NGX_OK)
+        else
         {
-            vkEndCommandBuffer(cmdbuf[fifslot]);
-            return false;
+            if(!dlaaconfigured || !p_gwEval || !gwhandle)
+            {
+                setreason("NGX evaluate path missing");
+                vkEndCommandBuffer(cmdbuf[fifslot]);
+                return false;
+            }
+            SauerNgxEval ev;
+            memset(&ev, 0, sizeof(ev));
+            ev.struct_bytes = sizeof(ev);
+            ev.command_buffer = (uint64_t)(uintptr_t)cmdbuf[fifslot];
+            fillgwimg(ev.color, texcolorin, tin->width, tin->height, 0);
+            fillgwimg(ev.depth, texdepth, tin->width, tin->height, 0);
+            fillgwimg(ev.motion, texmotion, tin->width, tin->height, 0);
+            fillgwimg(ev.output, texcolorout, int(dlaaoutw ? dlaaoutw : uint32_t(screenw)), int(dlaaouth ? dlaaouth : uint32_t(screenh)), 1);
+            // ev.bias stays empty: no BiasCurrentColorMask with presets K/M (guide 3.15).
+            ev.pre_exposure = 1.0f;
+            ev.exposure_scale = 1.0f;
+            ev.hdr = ngxcfghdr == 1 ? 1u : 0u;
+            if(ev.hdr) fillgwimg(ev.exposure, texexposure, 1, 1, 0);
+            ev.jitter_x = tin->jitter_px;
+            ev.jitter_y = -tin->jitter_py;
+            ev.mv_scale_x = 1.0f;
+            ev.mv_scale_y = 1.0f;
+            ev.reset = reset ? 1 : 0;
+            ev.render_w = uint32_t(tin->width);
+            ev.render_h = uint32_t(tin->height);
+            int32_t rc = p_gwEval(gwhandle, &ev, sizeof(ev));
+            gwcopyerr();
+            if(rc != SAUER_NGX_OK)
+            {
+                vkEndCommandBuffer(cmdbuf[fifslot]);
+                return false;
+            }
+            evalok = true;
         }
-        evalok = true;
-#else
-        if(!dlaaconfigured || !p_slEvaluateFeature || !p_slSetTagForFrame || !p_slSetConstants || !p_slGetNewFrameToken)
-        {
-            setreason("Streamline evaluate path missing");
-            vkEndCommandBuffer(cmdbuf[fifslot]);
-            return false;
-        }
-        sl::Constants consts{};
-        if(!fillconstants(consts, tin, reset))
-        {
-            vkEndCommandBuffer(cmdbuf[fifslot]);
-            return false;
-        }
-        uint32_t frameindex = tin->frameid;
-        sl::FrameToken *token = NULL;
-        sl::Result r = p_slGetNewFrameToken(token, &frameindex);
-        if(r != sl::Result::eOk || !token)
-        {
-            defformatstring(msg, "slGetNewFrameToken failed (%s)", slresultstr(r));
-            setreason(msg);
-            vkEndCommandBuffer(cmdbuf[fifslot]);
-            return false;
-        }
-        sl::Resource rcolor, rdepth, rmotion, rout;
-        fillslres(rcolor, texcolorin, tin->width, tin->height);
-        fillslres(rdepth, texdepth, tin->width, tin->height);
-        fillslres(rmotion, texmotion, tin->width, tin->height);
-        fillslres(rout, texcolorout, tin->width, tin->height);
-        sl::Extent full{};
-        full.width = uint32_t(tin->width);
-        full.height = uint32_t(tin->height);
-        sl::ResourceTag tags[5] = {
-            sl::ResourceTag(&rcolor, sl::kBufferTypeScalingInputColor, sl::ResourceLifecycle::eValidUntilEvaluate, &full),
-            sl::ResourceTag(&rcolor, sl::kBufferTypeHUDLessColor, sl::ResourceLifecycle::eValidUntilEvaluate, &full),
-            sl::ResourceTag(&rdepth, sl::kBufferTypeDepth, sl::ResourceLifecycle::eValidUntilEvaluate, &full),
-            sl::ResourceTag(&rmotion, sl::kBufferTypeMotionVectors, sl::ResourceLifecycle::eValidUntilEvaluate, &full),
-            sl::ResourceTag(&rout, sl::kBufferTypeScalingOutputColor, sl::ResourceLifecycle::eValidUntilEvaluate, &full)
-        };
-        r = p_slSetTagForFrame(*token, slviewport, tags, 5, cmdbuf[fifslot]);
-        if(r != sl::Result::eOk)
-        {
-            defformatstring(msg, "slSetTagForFrame failed (%s)", slresultstr(r));
-            setreason(msg);
-            vkEndCommandBuffer(cmdbuf[fifslot]);
-            return false;
-        }
-        r = p_slSetConstants(consts, *token, slviewport);
-        if(r != sl::Result::eOk)
-        {
-            defformatstring(msg, "slSetConstants failed (%s)", slresultstr(r));
-            setreason(msg);
-            vkEndCommandBuffer(cmdbuf[fifslot]);
-            return false;
-        }
-        const sl::BaseStructure *inputs[1] = { &slviewport };
-        r = p_slEvaluateFeature(sl::kFeatureDLSS, *token, inputs, 1, cmdbuf[fifslot]);
-        lastevalsl = r;
-        lasteval = (r == sl::Result::eOk) ? NVSDK_NGX_Result_Success : NVSDK_NGX_Result_FAIL_InvalidParameter;
-        if(r != sl::Result::eOk)
-        {
-            defformatstring(msg, "slEvaluateFeature(DLSS/DLAA) failed (%s)", slresultstr(r));
-            setreason(msg);
-            vkEndCommandBuffer(cmdbuf[fifslot]);
-            return false;
-        }
-        evalok = true;
-#endif
     }
 
     loopi(nimg)
@@ -4375,8 +3498,8 @@ static void requestoff(const char *why)
 {
     fallbackn++;
     deactivate(why);
-    conoutf(CON_WARN, "hwrt ngx: fallback (%s)  preference %s (%d) kept, applied OFF",
-            ngxreason, ngxmodename(hwrtngxmode), int(hwrtngxmode));
+    conoutf(CON_WARN, "hwrt %s: fallback (%s)  preference %s (%d) kept, applied OFF",
+            fsrmode(hwrtngxmode) ? "fsr" : "ngx", ngxreason, ngxmodename(hwrtngxmode), int(hwrtngxmode));
     capturefallbackframe();
     if(hwrtdlaacapturepresent)
     {
@@ -4397,23 +3520,38 @@ static void requestoff(const char *why)
     refreshlookaa();
 }
 
+// Why mode m runs as Native. Vulkan not started because it did not answer
+// during an earlier start: the menu keeps the mode selectable (choosing it again
+// retries), so the explanation is given here rather than as a lock reason.
+static const char *ngxfallbackreason(int m)
+{
+    extern int hwrtvkstall;
+    if(!hwrtvkready() && hwrtvkstall && hwrtvkcanstart() && !hwrtvkchecking())
+        return "Vulkan did not answer during an earlier start, so it was not started this time. Choose this mode again to retry.";
+    return fsrmode(m) ? hwrtfsrreason() : dlssreason();
+}
+
+// The player (menu, console, script) chose a Vulkan mode: start Vulkan now,
+// with the bounded wait, if it is not up yet. Never from the per-frame path.
+static void ngxensurevulkan(int m)
+{
+    if(m && ngxneedsfeature(m) && !hwrtvkready() && hwrtvkcanstart())
+        hwrtvkensure(fsrmode(m) ? "FSR chosen" : (m == 1 ? "DLAA chosen" : "DLSS chosen"));
+}
+
 static void applyngxmode(int m)
 {
     if(m < 0) m = 0;
-    if(m > 4) m = 4;
-#ifndef HWRT_NGX_GATEWAY
-    if(m >= 2)
-    {
-        conoutf(CON_WARN, "DLSS Super Resolution: seulement le client NGX experimental");
-        m = 0;
-    }
-#endif
+    if(m > 8) m = 8;
     bool wasblocked = ngxblocked;
     ngxblocked = false;
-    if(m && (!dlaaavailable || !ngxsupported))
+    if(m && !modeready(m))
     {
-        conoutf(CON_WARN, "NGX: pas disponible (%s)  preference %s kept, applied OFF",
-                ngxreason, ngxmodename(m));
+        setreason(ngxfallbackreason(m));
+        logoutf("%s: not available (%s)  preference %s kept, applied OFF",
+                fsrmode(m) ? "FSR" : "NGX", ngxreason, ngxmodename(m));
+        // A Vulkan give-up already told the player at start-up; say it again only when he asks.
+        if(ngxreason[0] && !(ngxautoapply && hwrtvkstate == HWRT_VK_TIMEOUT)) conoutf(CON_WARN, "%s", ngxreason);
         ngxmodereq = m;
         ngxmodeapp = 0;
         ngxblocked = true;
@@ -4451,28 +3589,29 @@ static void applyngxmode(int m)
     {
         if(!ngxreason[0] || !strncmp(ngxreason, "active ", 7) || strstr(ngxreason, "inactive until"))
             deactivate("disabled");
-        conoutf("NGX: OFF");
+        logoutf("NGX: OFF");
     }
-    else conoutf("NGX: %s", ngxmodename(m));
+    else logoutf("%s: %s", fsrmode(m) ? "FSR" : "NGX", ngxmodename(m));
     refreshlookaa();
 }
 
 static void hwrtdlaachanged()
 {
     if(initing || inchanged) return;
-    if(hwrtdlaa) applyngxmode(1);
+    if(hwrtdlaa) { ngxensurevulkan(1); applyngxmode(1); }
     else if(hwrtngxmode == 1) applyngxmode(0);
 }
 
 static void hwrtngxmodechanged()
 {
     if(initing || inchanged) return;
+    ngxensurevulkan(hwrtngxmode);
     applyngxmode(hwrtngxmode);
 }
 
 bool hwrtdlaaneedsdata()
 {
-    return !ngxblocked && ngxneedsfeature(hwrtngxmode) && dlaaavailable && ngxsupported && !ngxfatal && screenw > 0 && screenh > 0;
+    return !ngxblocked && ngxneedsfeature(hwrtngxmode) && modeready(hwrtngxmode) && screenw > 0 && screenh > 0;
 }
 
 bool hwrtdlaaactive()
@@ -4485,7 +3624,6 @@ void hwrtdlaashutdown()
     waitglcomplete();
     if(hwrtdev.device) vkDeviceWaitIdle(hwrtdev.device);
     releasefeature();
-#ifdef HWRT_NGX_GATEWAY
     if(p_gwShutdown) p_gwShutdown();
     p_gwVer = NULL; p_gwProbe = NULL; p_gwPaths = NULL; p_gwLog = NULL;
     p_gwInstExt = NULL; p_gwDevExt = NULL; p_gwCaps = NULL; p_gwInit = NULL;
@@ -4498,25 +3636,6 @@ void hwrtdlaashutdown()
         gwmod = NULL;
     }
     slinited = false;
-#else
-    if(slinited && p_slShutdown)
-    {
-        sl::Result r = p_slShutdown();
-        if(r != sl::Result::eOk)
-            conoutf(CON_WARN, "hwrt dlaa: slShutdown %s", slresultstr(r));
-        slinited = false;
-    }
-    p_slInit = NULL; p_slShutdown = NULL; p_slSetVulkanInfo = NULL;
-    p_slEvaluateFeature = NULL; p_slSetTagForFrame = NULL; p_slSetConstants = NULL;
-    p_slGetNewFrameToken = NULL; p_slFreeResources = NULL; p_slGetFeatureRequirements = NULL;
-    p_slGetFeatureFunction = NULL; p_slIsFeatureSupported = NULL;
-    p_slDLSSGetOptimalSettings = NULL; p_slDLSSSetOptions = NULL; p_slDLSSGetState = NULL;
-    if(slmod)
-    {
-        FreeLibrary(slmod);
-        slmod = NULL;
-    }
-#endif
     ngxinited = false;
     ngxloaded = false;
     ngxsupported = false;
@@ -4661,13 +3780,11 @@ void hwrtdlaaframe()
     hwrtdlaaok = 0;
     if(!hwrtdlaaneedsdata()) return;
     if(drawtex) return;
-#ifdef HWRT_NGX_GATEWAY
     if(ngxissrmode(hwrtngxmode) && (scenefail || !scenebound || scenew < 8 || sceneh < 8))
     {
         hwrthdrkeepwindow(ngxreason[0] ? ngxreason : "SR internal scene missing");
         return;
     }
-#endif
     const hwrttemporalinput *tin = hwrttemporalcurrent();
     int expectw = hwrtrenderw(), expecth = hwrtrenderh();
     if(!tin || !tin->valid || tin->width != expectw || tin->height != expecth)
@@ -4677,13 +3794,11 @@ void hwrtdlaaframe()
     }
     lasttframeid = tin->frameid;
     int outw = screenw, outh = screenh;
-#ifdef HWRT_NGX_GATEWAY
     if(ngxissrmode(hwrtngxmode) && tin->width >= outw && tin->height >= outh)
     {
         hwrthdrkeepwindow("SR internal size is not below the output");
         return;
     }
-#endif
     if(!ensureres(tin->width, tin->height, outw, outh))
     {
         hwrthdrkeepwindow("could not create shared NGX images");
@@ -4822,21 +3937,13 @@ void hwrtdlaaframe()
     else
     {
         if(evalokn == 0)
-#ifdef HWRT_NGX_GATEWAY
-            conoutf(CON_INIT, "hwrt ngx: NGX_VULKAN_EVALUATE_DLSS_EXT ok  %ux%u -> %ux%u  mode %s used_optimal=%u",
+            conoutf(CON_INIT, "hwrt %s ok  %ux%u -> %ux%u  mode %s used_optimal=%u",
+                    fsrmode(ngxmodeapp) ? "fsr: ffxFsr3UpscalerContextDispatch" : "ngx: NGX_VULKAN_EVALUATE_DLSS_EXT",
                     dlaainw, dlaainh, dlaaoutw, dlaaouth, ngxmodename(ngxmodeapp), (unsigned)ngxusedoptimal);
-#else
-            conoutf(CON_INIT, "hwrt dlaa: slEvaluateFeature(kFeatureDLSS eDLAA) eOk  %ux%u -> %ux%u  native=%s",
-                    dlaainw, dlaainh, dlaaoutw, dlaaouth, dlaaoptok ? "yes" : "NO");
-#endif
         evalokn++;
         dlaaok = 1;
         hwrtdlaaok = 1;
-#ifdef HWRT_NGX_GATEWAY
-        defformatstring(msg, "active NGX %s %ux%u -> %ux%u eval ok", ngxmodename(ngxmodeapp ? ngxmodeapp : hwrtngxmode), dlaainw, dlaainh, dlaaoutw, dlaaouth);
-#else
-        defformatstring(msg, "active Streamline DLAA %ux%u -> %ux%u eval eOk", dlaainw, dlaainh, dlaaoutw, dlaaouth);
-#endif
+        defformatstring(msg, "active %s %s %ux%u -> %ux%u eval ok", fsrmode(ngxmodeapp) ? "FSR" : "NGX", ngxmodename(ngxmodeapp ? ngxmodeapp : hwrtngxmode), dlaainw, dlaainh, dlaaoutw, dlaaouth);
         setreason(msg);
     }
 }
@@ -4894,7 +4001,6 @@ static void samplemem()
         FreeLibrary(dxgi);
     }
     lastngxbytes = 0;
-#ifdef HWRT_NGX_GATEWAY
     if(p_gwStats && dlaaconfigured && gwhandle)
     {
         SauerNgxStats st;
@@ -4903,14 +4009,6 @@ static void samplemem()
         if(p_gwStats(gwhandle, &st, sizeof(st)) == SAUER_NGX_OK)
             lastngxbytes = st.vram_bytes;
     }
-#else
-    if(p_slDLSSGetState && dlaaconfigured)
-    {
-        sl::DLSSState st{};
-        if(p_slDLSSGetState(slviewport, st) == sl::Result::eOk)
-            lastngxbytes = st.estimatedVRAMUsageInBytes;
-    }
-#endif
 }
 
 static void dlaashotsdir()
@@ -4919,37 +4017,26 @@ static void dlaashotsdir()
     copystring(d1, "shots");
     path(d1);
     createdir(d1);
-#ifdef HWRT_NGX_GATEWAY
     copystring(d2, "shots/dlss-q");
-#else
-    copystring(d2, "shots/dlaa-lot7bis");
-#endif
     path(d2);
     createdir(d2);
-#ifdef HWRT_NGX_GATEWAY
     if(ngxshotsub[0])
     {
         nformatstring(d3, sizeof(d3), "shots/dlss-q/%s", ngxshotsub);
         path(d3);
         createdir(d3);
     }
-#endif
 }
 
 static void dlaashotrel(char *dst, int len, const char *file)
 {
-#ifdef HWRT_NGX_GATEWAY
     if(ngxshotsub[0]) nformatstring(dst, len, "shots/dlss-q/%s/%s", ngxshotsub, file);
     else nformatstring(dst, len, "shots/dlss-q/%s", file);
-#else
-    nformatstring(dst, len, "shots/dlaa-lot7bis/%s", file);
-#endif
     path(dst);
 }
 
 static void hwrtdlaashotdir(char *name)
 {
-#ifdef HWRT_NGX_GATEWAY
     ngxshotsub[0] = 0;
     if(name && name[0])
     {
@@ -4964,9 +4051,6 @@ static void hwrtdlaashotdir(char *name)
     }
     dlaashotsdir();
     conoutf("hwrt ngx: proof dir shots/dlss-q/%s", ngxshotsub[0] ? ngxshotsub : "(root)");
-#else
-    (void)name;
-#endif
 }
 COMMAND(hwrtdlaashotdir, "s");
 
@@ -4975,14 +4059,9 @@ static void hwrtdlaastats()
     conoutf("hwrt ngx: preference %s (%d)  applied %s (%d)  blocked %s  available %d  active %d  reason: %s",
             ngxmodename(hwrtngxmode), int(hwrtngxmode), ngxmodename(ngxmodeapp), ngxmodeapp,
             ngxblocked ? "yes" : "no", int(hwrtdlaaavailable), int(hwrtdlaaok), ngxreason);
-#ifdef HWRT_NGX_GATEWAY
     conoutf("  SDK NGX Vulkan public (sauer_ngx.dll)  inited %s  supported %s  configured %s  Streamline loaded %s",
             slinited ? "yes" : "no", ngxsupported ? "yes" : "no", dlaaconfigured ? "yes" : "no",
             GetModuleHandleA("sl.interposer.dll") ? "YES-BUG" : "no");
-#else
-    conoutf("  SDK Streamline 2.12  inited %s  supported %s  configured %s",
-            slinited ? "yes" : "no", ngxsupported ? "yes" : "no", dlaaconfigured ? "yes" : "no");
-#endif
     conoutf("  current window %dx%d  current scene/RT %dx%d bound %s  (native when Off)",
             screenw, screenh, lastscenew, lastsceneh, hwrtsceneinternal() ? "yes" : "no");
     conoutf("  NGX active in %ux%u out %ux%u  (0x0 when feature released)  last NGX resources in %ux%u out %ux%u",
@@ -4993,17 +4072,10 @@ static void hwrtdlaastats()
             lastngxoptw, lastngxopth, (unsigned)ngxusedoptimal, hwrtdlaajitterseqlen());
     conoutf("  evaluate ok %d  fail %d  last %s  blit %s  fallbacks %d  inject %d",
             evalokn, evalfailn, lastevalstr(), lastblit ? "yes" : "no", fallbackn, int(hwrtdlaainject));
-#ifdef HWRT_NGX_GATEWAY
     conoutf("  CPU sandwich %.3f ms. GPU pack→blit %.3f ms last, %.3f ms mean of %d samples. Bias mask GPU %.3f ms last (before sandwich).",
             lastcostms, lastgpums, gpumean(), gpuringn, lastbiasgpums);
     conoutf("  present OpenGL SDL_GL_SwapWindow. NGX has no presentCommon. Create/ReleaseFeature/Shutdown1 through sauer_ngx.dll.");
     conoutf("  colour LDR UNORM RGBA8  depth R32F window 0-1 not inverted  MV prev-curr pixels Y-flipped for D3D  NGX InMVScale 1,1 (pixel space; not Streamline 1/w,1/h)");
-#else
-    conoutf("  CPU sandwich %.3f ms (pack+submit wait+blit). GPU GL_TIME_ELAPSED %.3f ms last, %.3f ms mean of %d samples (pack + GL wait on SL/VK + blit). Not a Vulkan timestamp around slEvaluateFeature alone.",
-            lastcostms, lastgpums, gpumean(), gpuringn);
-    conoutf("  present OpenGL SDL_GL_SwapWindow. Tags eValidUntilEvaluate. slFreeResources on resize/off. slShutdown before vkDestroyDevice.");
-    conoutf("  colour LDR UNORM RGBA8  depth R32F window 0-1 not inverted  MV prev-curr pixels Y-flipped for D3D  mvecScale 1/w,1/h");
-#endif
     conoutf("  autonomy drivers: hwrtvelocity %d hwrtveldebug %d hwrtdlaajitter %d hwrtdlaaneedsdata %s",
             int(hwrtvelocity), int(hwrtveldebug), int(hwrtdlaajitter), hwrtdlaaneedsdata() ? "yes" : "no");
     conoutf("  contract %s err %.6g  (%s)", lastcontractok ? "PASS" : "n/a-or-FAIL", lastcontracterr, lastcontractnote);
@@ -5040,8 +4112,43 @@ ICOMMAND(hwrtngxmodeblocked, "", (), intret(ngxblocked ? 1 : 0));
 ICOMMAND(hwrtngxmodename, "i", (int *m), result(ngxmodename(*m)));
 // Preference without a live feature is normal on the start screen.
 // Only report fallback when NGX is actually blocked or missing.
-ICOMMAND(hwrtngxfallback, "", (), intret((hwrtngxmode != 0 && ngxmodeapp == 0 && (ngxblocked || !dlaaavailable || !ngxsupported || ngxfatal)) ? 1 : 0));
+ICOMMAND(hwrtngxfallback, "", (), intret((hwrtngxmode != 0 && ngxmodeapp == 0 && (ngxblocked || !modeready(hwrtngxmode))) ? 1 : 0));
 ICOMMAND(hwrtngxreason, "", (), result(ngxreason));
+
+// Short English line for the menu, the settings search and the assistant:
+// why DLAA/DLSS cannot be chosen on this machine, "" when they can.
+static const char *dlssreason()
+{
+    if(hwrtvkready() && dlaaavailable && ngxsupported && !ngxfatal) return "";
+    if(!hwrtvkready())
+    {
+        static string msg;
+        if(hwrtvkchecking()) return "DLAA/DLSS: checking the graphics card and driver...";
+        if(hwrtvkstate == HWRT_VK_TIMEOUT)
+        {
+            formatstring(msg, "DLAA/DLSS are not available: %s", hwrtvkstallreason());
+            return msg;
+        }
+        // Probe answered, Vulkan not started in the game yet: offered on NVIDIA.
+        if(hwrtvkstate == HWRT_VK_PROBED && hwrtvkprobe.why == HWRT_WHY_NONE)
+        {
+            if(hwrtvkprobe.nvidia && !hwrtfsrsimulating("amd")) return "";
+            if(hwrtfsrsimulating("amd")) return "DLAA/DLSS are not available: they need an NVIDIA RTX graphics card (simulated non-NVIDIA card).";
+            formatstring(msg, "DLAA/DLSS are not available: they need an NVIDIA RTX graphics card (this one: %s).", hwrtvkprobe.name);
+            return msg;
+        }
+    }
+    if(!hwrtdev.device) return "DLAA/DLSS are not available: the graphics driver cannot share images between OpenGL and Vulkan.";
+    if(ngxnotnvidia)
+    {
+        static string msg;
+        if(hwrtfsrsimulating("amd")) copystring(msg, "DLAA/DLSS are not available: they need an NVIDIA RTX graphics card (simulated non-NVIDIA card).");
+        else formatstring(msg, "DLAA/DLSS are not available: they need an NVIDIA RTX graphics card (this one: %s).", hwrtdev.name);
+        return msg;
+    }
+    return "DLAA/DLSS are not available: they failed to start (NVIDIA driver or DLSS files, details in log.txt).";
+}
+ICOMMAND(hwrtdlssraison, "", (), result(dlssreason()));
 
 static void hwrtdlaadump(char *name)
 {
@@ -5070,20 +4177,13 @@ static void hwrtdlaadump(char *name)
             int(hwrtdlaabias), int(hwrtdlaabiaspersist), lastbiasbound,
             (unsigned)lastbiassrcfb, lastbiasw, lastbiash, lastbiasrecreate, lastbiaspersistused, lastbiasneeds, lastbiasgpums);
     fprintf(f, "reason %s\n", ngxreason);
-#ifdef HWRT_NGX_GATEWAY
     fprintf(f, "sdk NVIDIA NGX Vulkan public nvsdk_ngx_s.lib via sauer_ngx.dll ABI %u\n", SAUER_NGX_ABI_VERSION);
     fprintf(f, "projectId %s  engine %s  EngineType CUSTOM\n", NGX_PROJECT_ID, NGX_ENGINE_VER);
-    fprintf(f, "lifecycle Init_with_ProjectID / CREATE_DLSS_EXT1 / EVALUATE_DLSS_EXT Color+Depth+MV+Output[+optional BiasCurrentColorMask] / ReleaseFeature / Shutdown1\n");
+    fprintf(f, "lifecycle Init_with_ProjectID / CREATE_DLSS_EXT1 / EVALUATE_DLSS_EXT Color+Depth+MV+Output[+exposure 1x1 in HDR with preset K] / ReleaseFeature / Shutdown1\n");
     fprintf(f, "present OpenGL SDL_GL_SwapWindow. NGX does not use presentCommon. Streamline loaded=%s\n",
             GetModuleHandleA("sl.interposer.dll") ? "yes" : "no");
-    fprintf(f, "mode %s  preset %s  LDR  autoExposure  depthInverted false  InMVScale 1,1 (render-pixel space)  MVLowRes\n", ngxmodename(ngxmodeapp ? ngxmodeapp : hwrtngxmode), ngxpresetname(ngxmodeapp ? ngxmodeapp : hwrtngxmode));
-#else
-    fprintf(f, "sdk Streamline 2.12 manual hooking slEvaluateFeature kFeatureDLSS eDLAA\n");
-    fprintf(f, "projectId %s  engine %s  EngineType CUSTOM\n", NGX_PROJECT_ID, NGX_ENGINE_VER);
-    fprintf(f, "lifecycle slInit / slSetVulkanInfo / slDLSSSetOptions / slSetTagForFrame / slSetConstants / slEvaluateFeature / slFreeResources / slShutdown\n");
-    fprintf(f, "present OpenGL SDL_GL_SwapWindow. ResourceLifecycle eValidUntilEvaluate. No dummy swapchain present.\n");
-    fprintf(f, "mode DLAA  preset K  colorBuffersHDR false  useAutoExposure true  depthInverted false  mvecScale 1/w,1/h\n");
-#endif
+    fprintf(f, "mode %s  preset %s  IsHDR %d  AutoExposure %d  depthInverted false  InMVScale 1,1 (render-pixel space)  MVLowRes  mip bias %.3f\n", ngxmodename(ngxmodeapp ? ngxmodeapp : hwrtngxmode), ngxpresetname(ngxmodeapp ? ngxmodeapp : hwrtngxmode),
+            ngxcfghdr, ngxcfgautoexp, getscenelodbias());
     extern int windowmode, scr_w, scr_h, thirdperson, hwrtfreezeself;
     SDL_Rect bounds;
     bounds.w = bounds.h = 0;
@@ -5109,18 +4209,10 @@ static void hwrtdlaadump(char *name)
             evalokn, evalfailn, lastevalstr(), lastblit ? "yes" : "no", lastroundtrip ? "yes" : "no", fallbackn, int(hwrtdlaainject));
     fprintf(f, "cost_cpu_sandwich_ms %.4f  cost_gpu_gl_elapsed_ms_last %.4f  cost_gpu_gl_elapsed_ms_mean %.4f  samples %d  bias_gpu_ms %.4f (mask+depth blit, before sandwich)\n",
             lastcostms, lastgpums, gpumean(), gpuringn, lastbiasgpums);
-#ifdef HWRT_NGX_GATEWAY
     fprintf(f, "cost_scope GL_TIME_ELAPSED from pack through blit, including the GL wait on the Vulkan semaphore. Does not claim a dedicated NGX Evaluate GPU timestamp.\n");
-#else
-    fprintf(f, "cost_scope GL_TIME_ELAPSED from pack through blit, including the GL wait on the Vulkan/SL semaphore. Does not claim a dedicated slEvaluateFeature GPU timestamp.\n");
-#endif
     fprintf(f, "formats colorin/out VK_FORMAT_R8G8B8A8_UNORM GL_RGBA8  depth VK_FORMAT_R32_SFLOAT GL_R32F  motion VK_FORMAT_R16G16B16A16_SFLOAT\n");
     fprintf(f, "orientation pack flips V so memory row 0 is top of screen; blit flips back to GL window\n");
-#ifdef HWRT_NGX_GATEWAY
     fprintf(f, "motion engine prev-curr pixels +Y up; packed MV.y negated; NGX InMVScale 1,1 (already pixel space, not Streamline 1/w,1/h); motionVectorsJittered false\n");
-#else
-    fprintf(f, "motion engine prev-curr pixels +Y up; packed MV.y negated; sl mvecScale 1/w,1/h; motionVectorsJittered false\n");
-#endif
     fprintf(f, "jitterOffset pixel D3D (engine.y negated)\n");
     fprintf(f, "depth mixed world/avatar after gun, 0 near 1 far, depthInverted false. Gun pixels keep avatar MVs (B=1), not world unproject.\n");
     fprintf(f, "uncovered B<0.5: camera-only MVs from mixed depth via world inv(camproj_used)->unjit curr/prev. Sky rotation covered. Water/particles/unvalidated: limitation.\n");
@@ -5749,9 +4841,9 @@ static void hwrtdlaaplaycheck(char *name)
     {
         int hw = 0, hh = 0;
         hwrtskyhistsize(hw, hh);
-        fprintf(f, "sky packed_rays %.2f cvar_rays %d filter %d temporal %d hist %dx%d io %dx%d ready %d\n",
-                float(getvar("hwrtskyrays")) + (getvar("hwrtskyfilter") ? 0.25f : 0.0f),
-                getvar("hwrtskyrays"), getvar("hwrtskyfilter"), getvar("hwrtskytemporal"),
+        fprintf(f, "sky packed_rays %.2f cvar_rays %d eff_rays %d filter %d temporal %d hist %dx%d io %dx%d ready %d\n",
+                float(hwrtskyrayseffective()) + (getvar("hwrtskyfilter") ? 0.25f : 0.0f),
+                getvar("hwrtskyrays"), hwrtskyrayseffective(), getvar("hwrtskyfilter"), getvar("hwrtskytemporal"),
                 hw, hh, hwrtio.w, hwrtio.h, hwrtskyhistready() ? 1 : 0);
     }
     fprintf(f, "hwrtngxmode preference %d applied %d blocked %s hwrtdlaa %d available %d active %d needsdata %s reason %s\n",

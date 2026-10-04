@@ -1581,9 +1581,11 @@ template<class MDL, class MESH> struct modelcommands
     {
         loopskins(meshname, s,
             s.tex = textureload(makerelpath(MDL::dir, tex), 0, true, false);
+            markscenetexture(s.tex);
             if(*masks)
             {
                 s.masks = textureload(makerelpath(MDL::dir, masks), 0, true, false);
+                markscenetexture(s.masks);
                 s.envmapmax = *envmapmax;
                 s.envmapmin = *envmapmin;
             }
@@ -1644,6 +1646,7 @@ template<class MDL, class MESH> struct modelcommands
     static void setbumpmap(char *meshname, char *normalmapfile)
     {
         Texture *normalmaptex = textureload(makerelpath(MDL::dir, normalmapfile), 0, true, false);
+        markscenetexture(normalmaptex);
         loopskins(meshname, s, s.normalmap = normalmaptex);
     }
     

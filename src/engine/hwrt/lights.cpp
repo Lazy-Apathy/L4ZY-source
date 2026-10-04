@@ -16,6 +16,7 @@
 int hwrtlightcount = 0;
 int hwrtunlimcount = 0;
 int hwrtglowlightcount = 0;
+int hwrtwaterplanecount = 0;
 int hwrtsunon = 0;
 int hwrtskyon = 0;
 
@@ -29,12 +30,45 @@ extern int hwrtshadeglow;
 extern int hwrtteleportlight, hwrtjumppadlight, hwrtglowdlights;
 extern int farplane;
 
-// World.diff in hitlight.comp: 0 = lod 0 bilinear (old compute path), 1 =
-// textureGrad from the pixel's UV footprint on the hit triangle. Default off:
-// close surfaces (the user grain case) correctly stay at lod 0, so enabling
-// this does not remove the presented crawl and it softens minifying regions.
-// Diagnostic A/B keeps 1 available. Not a jitter kill and not a play look.
-VAR(hwrtdiffmip, 0, 0, 1);
+// World.diff in hitlight.comp: 0 = lod 0 bilinear (the compute path until
+// 2026-10-04: far and grazing surfaces alias and shimmer), 1 = textureGrad from
+// the pixel's UV footprint on the hit triangle, isotropic, no bias (old A/B:
+// stable but soft, grazing floors blur). Default 2 (aliasing-rt, 2026-10-04):
+// the same footprint (neighbour pixel rays on the face plane, render
+// resolution, jittered matrix), scaled by 2^hwrtdiffmipbias (+ log2(render/
+// display) with hwrtdiffmipauto when DLSS/FSR upscale), filtered
+// anisotropically (hwrtdiffaniso). A close (magnified) surface stays at level 0,
+// exactly as 0. hwrtdifftexel (off) can floor the level at the texture's own
+// texels: the array stretches every layer to the largest texture with nearest,
+// so a 512 texture is 2x2 blocks at level 0; 1 gives GL's bilinear look up
+// close but is much softer. Only the primary world diffuse (and its blend
+// layer) changes; reflections already pick their level from a ray cone, models
+// keep level 0. Not saved.
+VAR(hwrtdiffmip, 0, 2, 2);
+FVAR(hwrtdiffmipbias, -3, -0.5f, 2);
+VAR(hwrtdiffmipauto, 0, 1, 1);
+VAR(hwrtdiffaniso, 0, 1, 1);
+VAR(hwrtdifftexel, 0, 0, 2);
+extern bool hwrtdiffanisoready();
+// What hitlight.comp receives in env.diffFilter (see sampleWorldDiff).
+static float diffmipfilter()
+{
+    if(hwrtdiffmip < 2) return hwrtdiffmip ? 1.0f : 0.0f;
+    float bias = hwrtdiffmipbias;
+    if(hwrtdiffmipauto && hwrtio.w > 0 && screenw > 0 && hwrtio.w < screenw)
+        bias += log2f(float(hwrtio.w) / float(screenw));
+    bias = clamp(bias, -3.5f, 3.5f);
+    int m = 1 + (hwrtdiffaniso && hwrtdiffanisoready() ? 1 : 0) + 2 * hwrtdifftexel;
+    return 8.0f * m + bias;
+}
+// Console witness: the effective footprint settings.
+ICOMMAND(hwrtdiffmipstatus, "", (),
+{
+    float f = diffmipfilter();
+    conoutf("hwrtdiffmip %d bias %.2f auto %d (render %dx%d display %dx%d) aniso %d (ready %d, device max %.0f) texel %d -> env %.3f",
+            hwrtdiffmip, hwrtdiffmipbias, hwrtdiffmipauto, hwrtio.w, hwrtio.h, screenw, screenh,
+            hwrtdiffaniso, hwrtdiffanisoready() ? 1 : 0, hwrtdev.maxaniso, hwrtdifftexel, f);
+});
 // 0 play (albedo * lighting). 1 albedo only. 2 lighting only (white albedo).
 // 3 lod heatmap of the world-diffuse footprint (blue 0, green 1, red 2+).
 // Lab vis only: never a play look.
@@ -126,8 +160,15 @@ struct hwrtlightupload
     // index order like that loop counts them). bit 1: a finite lamp the
     // nearest-N loop may elect (radius > 0, flags < 1.5).
     uint kind[HWRT_MAX_LIGHTS];
+    // Traced reflections: water planes after the full light table (hitlight
+    // lights.water[k]) whatever the light count. pos = min x,
+    // min y, surface z; radius = max x; color = max y, group, first
+    // rectangle; flags = rectangle count. The rectangles (min x, min y,
+    // max x, max y) of the surfaces GL draws follow (lights.waterRect).
+    hwrtlight water[HWRT_MAX_WATERPLANES];
+    float waterrect[HWRT_MAX_WATERRECTS][4];
 };
-static_assert(sizeof(hwrtlightupload) == 432 + 256 * 32 + 256 * 4, "light ssbo");
+static_assert(sizeof(hwrtlightupload) == 432 + 256 * 32 + 256 * 4 + HWRT_MAX_WATERPLANES * 32 + HWRT_MAX_WATERRECTS * 16, "light ssbo");
 
 struct hwrtlightstate
 {
@@ -492,6 +533,16 @@ static int hwrtmergeglow(hwrtglowcand *c, int nc, float mergedist)
     return nout;
 }
 
+// Sky rays actually traced. hwrtskyrays (default 1) is tuned for NRD + blue
+// noise; whenever NRD is not the effective denoiser (off, unavailable or
+// failed: the Sauer filter / skyage path with the pcg hash), at least 4 rays,
+// the old default. The saved preference itself is never changed here.
+int hwrtskyrayseffective()
+{
+    int rays = clamp(int(hwrtskyrays), 1, 4);
+    return hwrtnrdsession() ? rays : max(rays, 4);
+}
+
 void hwrtupdatelights()
 {
     if(!hwrtdev.ok() || !hwrtdev.rayquery) return;
@@ -507,7 +558,7 @@ void hwrtupdatelights()
     packed.env.sunColor[0] = float(sunlightcolor.x) / 255.0f * sunlightscale;
     packed.env.sunColor[1] = float(sunlightcolor.y) / 255.0f * sunlightscale;
     packed.env.sunColor[2] = float(sunlightcolor.z) / 255.0f * sunlightscale;
-    packed.env.skyRays = float(hwrtskyrays) + (hwrtskyfilter ? 0.25f : 0.0f);
+    packed.env.skyRays = float(hwrtskyrayseffective()) + (hwrtskyfilter ? 0.25f : 0.0f);
     packed.env.skyColor[0] = float(skylightcolor.x) / 255.0f;
     packed.env.skyColor[1] = float(skylightcolor.y) / 255.0f;
     packed.env.skyColor[2] = float(skylightcolor.z) / 255.0f;
@@ -528,7 +579,7 @@ void hwrtupdatelights()
     packed.env.prevCam[2] = hwrtprevcam.z;
     if(!hwrtskyhistready() || hwrtskytemporal <= 1) packed.env.skyAlpha = 0.0f;
     else packed.env.skyAlpha = hwrtskyhistseeded ? 1.0f / float(hwrtskytemporal) : 1.0f;
-    packed.env.diffFilter = hwrtdiffmip ? 1.0f : 0.0f;
+    packed.env.diffFilter = diffmipfilter();
     packed.env.diffVis = float(hwrtdiffvis);
     packed.env.skyStable = hwrtskystable ? 1.0f : 0.0f;
         packed.env.diffPad1 = float(hwrtskyhold + (hwrtskyhistfilter ? 2 : 0) + ((hwrtskyvisdbg & 3) << 2) + (hwrtskyage ? 16 : 0) + (hwrtnrdsession() ? 32 : 0) + ((hwrtnrddbg & 15) << 6) + (hwrthiddenretry ? 4096 : 0) + (hwrtskybluenoise && hwrtskybluenoiseready() ? 8192 : 0));
@@ -741,6 +792,24 @@ void hwrtupdatelights()
             packed.kind[i] = k;
         }
     }
+    {
+        float planes[HWRT_MAX_WATERPLANES][8];
+        int np = hwrtreflections ? hwrtgatherwaterplanes(planes, HWRT_MAX_WATERPLANES, packed.waterrect, HWRT_MAX_WATERRECTS) : 0;
+        loopi(np)
+        {
+            hwrtlight &W = packed.water[i];
+            W.pos[0] = planes[i][0];
+            W.pos[1] = planes[i][1];
+            W.pos[2] = planes[i][4];
+            W.radius = planes[i][2];
+            W.color[0] = planes[i][3];
+            W.color[1] = planes[i][5];
+            W.color[2] = planes[i][6];
+            W.flags = planes[i][7];
+        }
+        hwrtwaterplanecount = np;
+    }
+
     void *mapped = NULL;
     VkResult r = vkMapMemory(hwrtdev.device, lights.memory, 0, sizeof(packed), 0, &mapped);
     if(r != VK_SUCCESS || !mapped)
@@ -796,7 +865,7 @@ static void hwrtskystatus_()
     int hw = 0;
     int hh = 0;
     hwrtskyhistsize(hw, hh);
-    float packed = float(hwrtskyrays) + (hwrtskyfilter ? 0.25f : 0.0f);
+    float packed = float(hwrtskyrayseffective()) + (hwrtskyfilter ? 0.25f : 0.0f);
     const char *alphawhy = "1/N";
     if(!hwrtskyhistready() || hwrtskytemporal <= 1) alphawhy = "0-off";
     else if(!hwrtskyhistseeded) alphawhy = "seed";
@@ -805,8 +874,8 @@ static void hwrtskystatus_()
     float px = 0;
     float py = 0;
     hwrttemporaljitterpixels(jx, jy, px, py);
-    conoutf("hwrt sky packed_rays %.2f cvar_rays %d filter %d temporal %d alpha %s hist %dx%d io %dx%d ready %d seeded %d hold %d histfilter %d age %d visdbg %d jitter_px %.3f %.3f render %dx%d",
-            packed, int(hwrtskyrays), int(hwrtskyfilter), int(hwrtskytemporal), alphawhy,
+    conoutf("hwrt sky packed_rays %.2f cvar_rays %d eff_rays %d denoiser %s filter %d temporal %d alpha %s hist %dx%d io %dx%d ready %d seeded %d hold %d histfilter %d age %d visdbg %d jitter_px %.3f %.3f render %dx%d",
+            packed, int(hwrtskyrays), hwrtskyrayseffective(), hwrtnrdsession() ? "nrd" : "sauer", int(hwrtskyfilter), int(hwrtskytemporal), alphawhy,
             hw, hh, hwrtio.w, hwrtio.h, hwrtskyhistready() ? 1 : 0, hwrtskyhistseeded ? 1 : 0,
             int(hwrtskyhold), int(hwrtskyhistfilter), int(hwrtskyage), int(hwrtskyvisdbg),
             jx, jy, hwrtrenderw(), hwrtrenderh());

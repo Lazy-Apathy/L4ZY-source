@@ -1547,6 +1547,54 @@ static void rendergeommultipass(renderstate &cur, int pass, bool fogpass)
     if(geombatches.length()) renderbatches(cur, pass);
 }
 
+// GTAO multiplier on the lightmapped world (rendergl.cpp): same VAs and
+// occlusion results as the main pass, base triangles only (blend layers lie
+// on the same surfaces), the lightmap of each element set on TMU 1.
+void rendergtaogeom()
+{
+    extern bool brightengeom;
+    extern int fullbright;
+    renderstate cur;
+    gle::enablevertex();
+    gle::enabletexcoord1();
+    GLuint curlm = 0;
+    for(vtxarray *va = visibleva; va; va = va->next)
+    {
+        if(!va->texs || va->occluded >= OCCLUDE_GEOM || va->curvfc == VFC_FOGGED) continue;
+        if(cur.vbuf != va->vbuf)
+        {
+            gle::bindvbo(va->vbuf);
+            gle::bindebo(va->ebuf);
+            cur.vbuf = va->vbuf;
+            vertex *vdata = (vertex *)0;
+            gle::vertexpointer(sizeof(vertex), vdata->pos.v);
+            gle::texcoord1pointer(sizeof(vertex), vdata->lm.v, GL_SHORT);
+        }
+        ushort *edata = va->edata;
+        loopi(va->texs)
+        {
+            const elementset &es = va->eslist[i];
+            int lmid = brightengeom && (es.lmid < LMID_RESERVED || (fullbright && editmode)) ? LMID_BRIGHT : es.lmid;
+            GLuint lmtex = lightmaptexs.inrange(lmid) ? lightmaptexs[lmid].id : 0;
+            if(lmtex && es.length[1])
+            {
+                if(lmtex != curlm)
+                {
+                    glActiveTexture_(GL_TEXTURE1);
+                    glBindTexture(GL_TEXTURE_2D, lmtex);
+                    glActiveTexture_(GL_TEXTURE0);
+                    curlm = lmtex;
+                }
+                drawtris(es.length[1], edata, min(es.minvert[0], es.minvert[1]), max(es.maxvert[0], es.maxvert[1]));
+            }
+            edata += es.length[1];
+        }
+    }
+    gle::disablevertex();
+    gle::disabletexcoord1();
+    if(cur.vbuf) disablevbuf(cur);
+}
+
 VAR(oqgeom, 0, 1, 1);
 
 void rendergeom(float causticspass, bool fogpass)

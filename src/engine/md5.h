@@ -111,6 +111,7 @@ struct md5 : skelloader<md5>
                         p->initskins(notexture, notexture, group->meshes.length());
                         skin &s = p->skins.last();
                         s.tex = textureload(makerelpath(dir, texname), 0, true, false);
+                        markscenetexture(s.tex);
                         delete[] texname;
                     }
                 }

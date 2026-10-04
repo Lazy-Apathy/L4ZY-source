@@ -1,8 +1,8 @@
-NGX gateway versions (recorded 2026-09-16)
+NGX gateway versions (recorded 2026-09-16, updated 2026-10-04)
 ==========================================
 
 NVIDIA DLSS SDK
-  third_party/NVIDIA-DLSS  git tag v310.9.1
+  third_party/NVIDIA-DLSS  git tag v310.9.1 (DLSS Programming Guide 310.6.0 in doc/)
   NVSDK_NGX_Version_API    0x15
   lib  nvsdk_ngx_s.lib     Windows_x86_64/x64   /MT   3782558 bytes
   runtime nvngx_dlss.dll   Windows_x86_64/rel           58956912 bytes
@@ -13,14 +13,40 @@ MSVC portable (third_party/msvc, not a system VS install)
   MSVC 14.44.17.14  Hostx64/x64  cl/link  dumpbin 14.44.35229.0
   Windows SDK 10.0.26100
   DLL flags: /LD /O2 /MT /EHsc /std:c++17 /D_CRT_SECURE_NO_WARNINGS
+  Client gateway: src/ngx_gateway/build-dll-hdr.bat -> bin64/ngx-hdr/sauer_ngx.dll (+ nvngx_dlss.dll)
 
 MinGW (engine + ngx-probe)
   w64devkit g++ 16.2.0
-  sauerbraten-ngx.exe  -DHWRT_NGX_GATEWAY
+  every Windows client links engine/hwrt/dlaa-ngx.o (-DHWRT_NGX_GATEWAY); dlaa.cpp has no other path
   ngx-probe.exe        gcc -std=c11  LoadLibrary of sauer_ngx C ABI
 
+Loading (dlaa.cpp)
+  bin64/ngx-hdr only (sauer_ngx.dll + nvngx_dlss.dll), or the folder in SAUER_NGX_DIR (laboratory).
+  No fallback to bin64/ngx, bin64/ngx-sr, bin64 or any other folder. No Streamline.
+
 ABI
-  SAUER_NGX_ABI_VERSION 4  (bin64/ngx-sr/sauer_ngx.dll — DLSS SR experimental: DLAA/Quality/Balanced/Performance, BiasCurrentColorMask, MVLowRes)
+  SAUER_NGX_ABI_VERSION 5  (bin64/ngx-hdr/sauer_ngx.dll — the client: DLAA/Quality/Balanced/Performance, SDR RGBA8 or
+                            HDR RGBA16F with IsHDR and the 1x1 exposure texture, MVLowRes)
+  SAUER_NGX_ABI_VERSION 4  (bin64/ngx-sr/sauer_ngx.dll — reference clients only; do not build into bin64/ngx-sr)
   SAUER_NGX_ABI_VERSION 3  (kept as bin64/ngx-sr/sauer_ngx-abi3-*.dll and bin64/ref-quality-abi3 — Quality pair with MVLowRes)
   SAUER_NGX_ABI_VERSION 2  (kept as bin64/ngx-sr/sauer_ngx-abi2-*.dll — previous Quality pair)
   SAUER_NGX_ABI_VERSION 1  (bin64/ngx/sauer_ngx.dll — frozen DLAA play client, do not overwrite)
+
+DLSS Programming Guide 310.6.0 conformance (checked 2026-10-04, shots/dlss-conformite)
+  Init        Init_with_ProjectID, CUSTOM engine, API 0x15; SuperSampling.Available, NeedsUpdatedDriver and
+              FeatureInitResult checked (5.2.6); Shutdown1(device) (5.6/5.7).
+  Logging     NGX level ON, not VERBOSE (3.19).
+  Sizes       GET_OPTIMAL_SETTINGS optimal size for Quality/Balanced/Performance, input = output for DLAA (3.2.1,
+              5.2.8); output at least 64x32 (5.3); feature released and re-created when sizes, mode or HDR change (3.2).
+  Presets     K for DLAA/Quality/Balanced, M for Performance (3.12, the documented defaults).
+  Flags       MVLowRes (render-resolution vectors, 3.6.2); MVJittered 0 (vectors from unjittered matrices);
+              DepthInverted 0 (GL depth, near 0, 3.8.1); IsHDR only for RGBA16F (3.1.2).
+  Exposure    SDR: AutoExposure (3.10). HDR + preset K: 1x1 exposure texture, AutoExposure off (3.9).
+              HDR + preset M: AutoExposure, no exposure texture (3.9: exposure texture only for presets J and K).
+              InPreExposure 1, InExposureScale 1 (3.9.2).
+  Masks       no BiasCurrentColorMask (3.15: not for the current models); no transparency/particle masks.
+  Evaluate    MV scale 1,1 in render pixels, previous - current (3.6.1/3.6.3); jitter in render pixels within
+              +-0.5, Halton(2,3), 16/18/24/32 phases (3.7); InReset on map change, teleport, respawn, mode or
+              output change (3.13); sharpening not used (3.11); inputs sampled, output storage, GENERAL layout (3.4).
+  Mip bias    scene textures (world slots, model skins) get log2(render/display) - 1 while DLAA/DLSS is in use
+              (3.5); FSR and Native keep 0. RT hit shading samples world diffuse at mip 0 (hwrtdiffmip 0).

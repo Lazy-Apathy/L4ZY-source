@@ -108,7 +108,10 @@ static void fillcommon(void)
     g_common.PathListInfo.Path = g_pathlist;
     g_common.PathListInfo.Length = g_dllw[0] ? 1u : 0u;
     g_common.LoggingInfo.LoggingCallback = ngxlog;
-    g_common.LoggingInfo.MinimumLoggingLevel = NVSDK_NGX_LOGGING_LEVEL_VERBOSE;
+    /* Normal NGX logging (DLSS guide 3.19): errors and the usual init/create
+     * lines reach the game log and bin64\ngx-hdr\logs. VERBOSE is a debugging
+     * level; a developer can still raise it with NVIDIA's ngx_log_verbose.reg. */
+    g_common.LoggingInfo.MinimumLoggingLevel = NVSDK_NGX_LOGGING_LEVEL_ON;
     g_common.LoggingInfo.DisableOtherLoggingSinks = false;
 }
 
@@ -378,18 +381,39 @@ int32_t __cdecl sauer_ngx_init(const SauerNgxInit *in, uint32_t bytes)
         seterr(SAUER_NGX_ERR_NGX, (uint32_t)r, msg);
         return SAUER_NGX_ERR_NGX;
     }
+    /* DLSS Programming Guide 5.2.6: SuperSampling.Available, then a driver that is
+     * too old (NeedsUpdatedDriver + MinDriverVersion) and a feature denied to this
+     * application (FeatureInitResult). A value is only trusted when Get succeeds. */
     unsigned int avail = 0;
     NVSDK_NGX_Parameter_GetUI(g_caps, NVSDK_NGX_Parameter_SuperSampling_Available, &avail);
-    if(!avail)
+    int needsdriver = 0, initresult = -1;
+    unsigned int drvmajor = 0, drvminor = 0;
+    bool havedriver = NVSDK_NGX_SUCCEED(NVSDK_NGX_Parameter_GetI(g_caps, NVSDK_NGX_Parameter_SuperSampling_NeedsUpdatedDriver, &needsdriver));
+    NVSDK_NGX_Parameter_GetUI(g_caps, NVSDK_NGX_Parameter_SuperSampling_MinDriverVersionMajor, &drvmajor);
+    NVSDK_NGX_Parameter_GetUI(g_caps, NVSDK_NGX_Parameter_SuperSampling_MinDriverVersionMinor, &drvminor);
+    bool haveinit = NVSDK_NGX_SUCCEED(NVSDK_NGX_Parameter_GetI(g_caps, NVSDK_NGX_Parameter_SuperSampling_FeatureInitResult, &initresult));
+    const char *refuse = NULL;
+    char refusebuf[160];
+    if(!avail) refuse = "SuperSampling.Available is 0";
+    else if(havedriver && needsdriver)
+    {
+        sprintf(refusebuf, "DLSS needs a newer NVIDIA driver (%u.%u or later)", drvmajor, drvminor);
+        refuse = refusebuf;
+    }
+    else if(haveinit && !initresult) refuse = "SuperSampling.FeatureInitResult is 0 (DLSS denied for this application)";
+    if(refuse)
     {
         destroyparams();
         NVSDK_NGX_VULKAN_Shutdown1(g_device);
         g_device = VK_NULL_HANDLE;
-        seterr(SAUER_NGX_ERR_UNSUPPORTED, 0, "SuperSampling.Available is 0");
+        seterr(SAUER_NGX_ERR_UNSUPPORTED, 0, refuse);
         return SAUER_NGX_ERR_UNSUPPORTED;
     }
     g_inited = true;
-    seterr(SAUER_NGX_OK, (uint32_t)NVSDK_NGX_Result_Success, "NGX Vulkan Init_with_ProjectID ok");
+    char okmsg[200];
+    sprintf(okmsg, "NGX Vulkan Init_with_ProjectID ok (Available 1, NeedsUpdatedDriver %d%s, FeatureInitResult %d%s)",
+            needsdriver, havedriver ? "" : " n/a", initresult, haveinit ? "" : " n/a");
+    seterr(SAUER_NGX_OK, (uint32_t)NVSDK_NGX_Result_Success, okmsg);
     return SAUER_NGX_OK;
 }
 
@@ -531,9 +555,9 @@ static int32_t create_feature_common(uint64_t device, uint64_t command_buffer,
         seterr(SAUER_NGX_ERR_STATE, 0, "create_feature before init");
         return SAUER_NGX_ERR_STATE;
     }
-    if(!command_buffer || out_w < 8 || out_h < 8)
+    if(!command_buffer || out_w < 64 || out_h < 32)
     {
-        seterr(SAUER_NGX_ERR_ARGS, 0, "create_feature needs recording command buffer and display size");
+        seterr(SAUER_NGX_ERR_ARGS, 0, "create_feature needs a recording command buffer and an output of at least 64x32 (DLSS guide 5.3)");
         return SAUER_NGX_ERR_ARGS;
     }
     if(!mode_ok(mode))
@@ -620,14 +644,21 @@ static int32_t create_feature_common(uint64_t device, uint64_t command_buffer,
         info->mode_applied = mode;
     }
 
-    if(hdr && auto_exposure)
+    /* DLSS Programming Guide 3.9: the exposure texture is "only supported by
+     * Presets J and K" (L always uses AutoExposure; M, the Performance preset we
+     * use, is not listed). So an HDR feature with preset K normalises with the
+     * 1x1 exposure texture, and one with preset M uses AutoExposure and gets no
+     * exposure texture. LDR keeps the caller's AutoExposure choice (3.10). */
+    bool hdr_auto = hdr && mode == SAUER_NGX_MODE_PERFORMANCE;
+    if(hdr && auto_exposure && !hdr_auto)
     {
-        seterr(SAUER_NGX_ERR_ARGS, 0, "HDR refuses AutoExposure; normalisation is the exposure texture, not a content estimate");
+        seterr(SAUER_NGX_ERR_ARGS, 0, "HDR with preset K refuses AutoExposure; normalisation is the exposure texture, not a content estimate");
         return SAUER_NGX_ERR_ARGS;
     }
+    bool use_auto = hdr ? hdr_auto : (auto_exposure != 0);
     int flags = 0;
     if(hdr) flags |= NVSDK_NGX_DLSS_Feature_Flags_IsHDR;
-    else if(auto_exposure) flags |= NVSDK_NGX_DLSS_Feature_Flags_AutoExposure;
+    if(use_auto) flags |= NVSDK_NGX_DLSS_Feature_Flags_AutoExposure;
     /* Depth is 0-1: do not set DepthInverted. Packed MVs are the same
      * resolution as the colour input, in that buffer's pixel units, and are
      * not jittered. MVLowRes must be set: without it NGX treats those values
@@ -691,7 +722,7 @@ static int32_t create_feature_common(uint64_t device, uint64_t command_buffer,
     slot->out_h = out_h;
     slot->mode = mode;
     slot->hdr = hdr ? 1u : 0u;
-    slot->auto_exposure = (!hdr && auto_exposure) ? 1u : 0u;
+    slot->auto_exposure = use_auto ? 1u : 0u;
     slot->flags = flags;
     g_feature = slot;
     if(out_handle) *out_handle = (uint64_t)(uintptr_t)slot;
@@ -788,9 +819,9 @@ int32_t __cdecl sauer_ngx_evaluate(uint64_t handle, const SauerNgxEval *in, uint
             seterr(SAUER_NGX_ERR_ARGS, 0, "IsHDR requires RGBA16F colour in and out");
             return SAUER_NGX_ERR_ARGS;
         }
-        if(!in->exposure.image_view || !in->exposure.image || in->exposure.width < 1 || in->exposure.height < 1)
+        if(!slot->auto_exposure && (!in->exposure.image_view || !in->exposure.image || in->exposure.width < 1 || in->exposure.height < 1))
         {
-            seterr(SAUER_NGX_ERR_ARGS, 0, "IsHDR requires the 1x1 exposure texture (AutoExposure is off)");
+            seterr(SAUER_NGX_ERR_ARGS, 0, "IsHDR with preset K requires the 1x1 exposure texture (AutoExposure is off)");
             return SAUER_NGX_ERR_ARGS;
         }
     }
@@ -823,16 +854,11 @@ int32_t __cdecl sauer_ngx_evaluate(uint64_t handle, const SauerNgxEval *in, uint
     eval.InRenderSubrectDimensions.Width = in->render_w ? in->render_w : in->color.width;
     eval.InRenderSubrectDimensions.Height = in->render_h ? in->render_h : in->color.height;
 
-    /* Public SDK: pInTransparencyMask is unused/reserved. pInIsParticleMask is
-     * documented as research-only. Only BiasCurrentColorMask is bound, and only
-     * when the game actually filled the optional image. */
-    NVSDK_NGX_Resource_VK biasres;
-    memset(&biasres, 0, sizeof(biasres));
-    if(in->bias.image_view && in->bias.image)
-    {
-        biasres = makeimg(&in->bias);
-        eval.pInBiasCurrentColorMask = &biasres;
-    }
+    /* No optional masks. DLSS Programming Guide 3.15: BiasCurrentColor "has not
+     * been introduced for use with latest models and should not be used" (only the
+     * deprecated preset F supported it); we use presets K and M, so in->bias is
+     * ignored even if a caller fills it. pInTransparencyMask is reserved and
+     * pInIsParticleMask is research-only. */
 
     /* Helper stores 0 as 1. The colour buffer is not pre-multiplied, so the
      * value passed here is 1. ExposureScale stays 1: it is not the artistic
@@ -843,7 +869,7 @@ int32_t __cdecl sauer_ngx_evaluate(uint64_t handle, const SauerNgxEval *in, uint
     eval.InExposureScale = scale;
     NVSDK_NGX_Resource_VK exposureres;
     memset(&exposureres, 0, sizeof(exposureres));
-    if(slot->hdr)
+    if(slot->hdr && !slot->auto_exposure)
     {
         exposureres = makeimg(&in->exposure);
         eval.pInExposureTexture = &exposureres;
@@ -865,9 +891,9 @@ int32_t __cdecl sauer_ngx_evaluate(uint64_t handle, const SauerNgxEval *in, uint
     sprintf(okmsg, "NGX_VULKAN_EVALUATE_DLSS_EXT ok IsHDR=%u AutoExposure=%u flags=0x%x pre_exposure=%.4f exposure_scale=%.4f exposure=%ux%u fmt=0x%x",
             (unsigned)slot->hdr, (unsigned)slot->auto_exposure, (unsigned)slot->flags,
             pre, scale,
-            slot->hdr ? (unsigned)in->exposure.width : 0u,
-            slot->hdr ? (unsigned)in->exposure.height : 0u,
-            slot->hdr ? (unsigned)in->exposure.format : 0u);
+            eval.pInExposureTexture ? (unsigned)in->exposure.width : 0u,
+            eval.pInExposureTexture ? (unsigned)in->exposure.height : 0u,
+            eval.pInExposureTexture ? (unsigned)in->exposure.format : 0u);
     seterr(SAUER_NGX_OK, (uint32_t)r, okmsg);
     return SAUER_NGX_OK;
 }

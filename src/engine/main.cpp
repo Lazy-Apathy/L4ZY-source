@@ -8,6 +8,17 @@
 
 SVAR(tradversion, SAUER_TRAD_VERSION);
 
+#ifdef WIN32
+// Ask hybrid laptops (NVIDIA Optimus, AMD PowerXpress / switchable graphics) for
+// the high-performance GPU, the standard way both drivers read from the EXE.
+// No effect on a machine with a single GPU.
+extern "C"
+{
+    __declspec(dllexport) DWORD NvOptimusEnablement = 1;
+    __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
+}
+#endif
+
 extern void cleargamma();
 extern void restoredesktopwindow();
 extern void logwindowstate(const char *when);
@@ -34,6 +45,18 @@ void cleanup()
     extern void clear_console(); clear_console();
     extern void clear_mdls();    clear_mdls();
     extern void clear_sound();   clear_sound();
+#ifdef WIN32
+    // A Vulkan start-up that never came back leaves its thread inside the
+    // driver, possibly holding the loader lock: a normal exit (DLL unloading)
+    // would then wait forever and leave the process behind. Settings are saved
+    // by now and gamma/window restored; end the process directly.
+    if(hwrtvkworkerstuck())
+    {
+        logoutf("hwrt vk: the Vulkan start-up thread never came back; ending the process directly");
+        closelogfile();
+        TerminateProcess(GetCurrentProcess(), 0);
+    }
+#endif
     closelogfile();
     SDL_Quit();
 }
@@ -792,24 +815,41 @@ void screenres(int w, int h)
 
 ICOMMAND(screenres, "ii", (int *w, int *h), screenres(*w, *h));
 
-static void setgamma(int val)
-{   
+// Windows HDR on for the game's screen (hdrout.cpp, read at startup). A gamma
+// table (SDL_SetWindowBrightness, put back by SDL at every focus change) on an
+// HDR screen can blank it or leave a wrong brightness: gamma is not applied
+// there. Unchanged behaviour when Windows HDR is off.
+extern bool hdrout_desktophdr();
+
+// Returns the gamma actually applied (100 when it is left alone).
+static int setgamma(int val)
+{
+    if(val != 100 && hdrout_desktophdr())
+    {
+        static bool told = false;
+        if(!told)
+        {
+            told = true;
+            conoutf("Gamma %d not applied: Windows HDR is on for this screen (a gamma table can blank or flicker an HDR screen).", val);
+        }
+        logoutf("gamma %d ignore: HDR Windows actif sur l'ecran du jeu, aucune table gamma appliquee", val);
+        return 100;
+    }
     if(screen && SDL_SetWindowBrightness(screen, val/100.0f) < 0) conoutf(CON_ERROR, "Could not set gamma: %s", SDL_GetError());
-}   
+    return val;
+}
 
 static int curgamma = 100;
 VARFNP(gamma, reqgamma, 30, 100, 300,
 {
     if(initing || reqgamma == curgamma) return;
-    curgamma = reqgamma;
-    setgamma(curgamma);
+    curgamma = setgamma(reqgamma);
 });
 
 void restoregamma()
-{       
+{
     if(initing || reqgamma == 100) return;
-    curgamma = reqgamma;
-    setgamma(curgamma);
+    curgamma = setgamma(reqgamma);
 }
 
 void cleargamma()
@@ -1008,6 +1048,7 @@ void resetgl()
     extern void cleanupglare();
     extern void cleanupdepthfx();
     extern void cleanuplookao();
+    extern void cleanupgtao();
     extern void cleanuplooktaa();
     extern void cleanupvelocity();
     extern void cleanuptemporal();
@@ -1028,6 +1069,7 @@ void resetgl()
     cleanupglare();
     cleanupdepthfx();
     cleanuplookao();
+    cleanupgtao();
     cleanuplooktaa();
     cleanupvelocity();
     cleanuptemporal();
@@ -1462,6 +1504,50 @@ int getclockmillis()
 
 VAR(numcpus, 1, 1, 16);
 
+// One-time settings migrations, in the spirit of p1xbraten: every persistent
+// setting is saved in config.cfg, so a changed default never reaches players
+// who already have the old value saved. l4zymigration (saved too) is the last
+// step applied; each step runs once, right after config.cfg is read and
+// before autoexec.cfg, and never again, so a choice made later is kept.
+// A fresh profile only records the latest step.
+enum { L4ZY_MIGRATION_LATEST = 2 };
+VARP(l4zymigration, 0, 0, 1000);
+
+static void applyl4zymigrations()
+{
+    if(l4zymigration < 1)
+    {
+        // 1: display output Automatic -> SDR (frozen/black screen at startup
+        // suspected with Automatic, under investigation). 0 and 1 untouched.
+        extern int hdroutpref;
+        if(hdroutpref == -1)
+        {
+            hdroutpref = 0;
+            logoutf("l4zymigration 1: hdroutpref -1 (Automatic) -> 0 (SDR)");
+        }
+    }
+    if(l4zymigration < 2)
+    {
+        // 2: RT sky rays 4 -> 1 (old default -> new default; 2 and 3 were
+        // chosen by the player and are kept; the Sauer filter still traces at
+        // least 4, see hwrtskyrayseffective), and DLAA/DLSS mip bias 1 -> 0
+        // (hwrtdlssmipbias is not saved, so this only catches a config.cfg
+        // line written by hand).
+        extern int hwrtskyrays, hwrtdlssmipbias;
+        if(hwrtskyrays == 4)
+        {
+            hwrtskyrays = 1;
+            logoutf("l4zymigration 2: hwrtskyrays 4 -> 1");
+        }
+        if(hwrtdlssmipbias == 1)
+        {
+            hwrtdlssmipbias = 0;
+            logoutf("l4zymigration 2: hwrtdlssmipbias 1 -> 0");
+        }
+    }
+    if(l4zymigration < L4ZY_MIGRATION_LATEST) l4zymigration = L4ZY_MIGRATION_LATEST;
+}
+
 int main(int argc, char **argv)
 {
     #ifdef WIN32
@@ -1472,6 +1558,9 @@ int main(int argc, char **argv)
     #endif
     #endif
     #endif
+
+    // Vulkan probe process (vkdevice.cpp): no window, no profile, no log.
+    if(argc >= 2 && !strcmp(argv[1], "-vkprobe")) return hwrtvkprobemain(argc, argv);
 
     setlogfile(NULL);
 
@@ -1543,6 +1632,7 @@ int main(int argc, char **argv)
         logoutf("init: sdl");
 
         if(SDL_Init(SDL_INIT_TIMER|SDL_INIT_VIDEO|SDL_INIT_AUDIO)<0) fatal("Unable to initialize SDL: %s", SDL_GetError());
+        conthreadinit();
         {
             SDL_version v;
             SDL_GetVersion(&v);
@@ -1622,11 +1712,13 @@ int main(int argc, char **argv)
         execfile(game::defaultconfig());
         writecfg(game::restoreconfig());
     }
+    applyl4zymigrations();
     execfile(game::autoexec(), false);
 
     identflags &= ~IDF_PERSIST;
     extern void hdrout_prefsloaded();
     hdrout_prefsloaded();
+    hwrtprefsloaded();
 
     initing = INIT_GAME;
     game::loadconfigs();
@@ -1709,6 +1801,8 @@ int main(int argc, char **argv)
 
         // diagnostic views are refused online, before anything is drawn
         hwrtonlineguard();
+        // background Vulkan probe, lines printed by the start-up thread
+        hwrtvkpoll();
 
         // Only trust "minimized" while SDL still reports the window iconic: a
         // stray MINIMIZED at startup (focus / HDR swapchain) otherwise froze the

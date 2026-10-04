@@ -98,21 +98,75 @@ bool chatlogfind(int num, int &uid, int &type)
     return true;
 }
 
-// RT/HDR/NGX diagnostics go to log.txt only; rtconsole 1 shows them again.
+// Technical lines go to log.txt only; rtconsole 1 shows them in the console
+// again. Technical = start-up information (CON_INIT: renderer, driver, Vulkan,
+// NGX, FSR...) or a line starting with one of the prefixes below, errors
+// included. A message the player must see (a feature he chose that cannot
+// run, a fallback) is a short plain-English line WITHOUT these prefixes.
 VARP(rtconsole, 0, 0, 1);
 
-static bool rtdiagline(const char *s)
+static bool techline(int type, const char *s)
 {
-    static const char * const prefixes[] = { "hwrt", "hdr", "ngx", "NGX", "nrd", "NRD", "SDR - sortie HDR" };
+    if(rtconsole) return false;
+    if(type&CON_INIT) return true;
+    static const char * const prefixes[] = { "hwrt", "hdr", "ngx", "NGX", "nrd", "NRD", "fsr", "upscale:", "SDR - sortie HDR", "comparateur", "son3d rapport" };
     loopi(sizeof(prefixes)/sizeof(prefixes[0])) if(!strncmp(s, prefixes[i], strlen(prefixes[i]))) return true;
     return false;
 }
 
+// Lines printed from another thread (the Vulkan start-up worker, the NGX and FSR
+// gateways it calls into) are written to log.txt at once, so the last line
+// before a driver hang is never lost, and are queued for the console, which only
+// the main thread may touch (conflushthreaded, every frame and while waiting).
+static SDL_threadID conmainthread = 0;
+static SDL_mutex *conthreadlock = NULL;
+static vector<cline> conthreadqueue;
+static SDL_atomic_t conthreadpending;
+
+void conthreadinit()
+{
+    conmainthread = SDL_ThreadID();
+    if(!conthreadlock) conthreadlock = SDL_CreateMutex();
+}
+
+static void conoutfthreaded(int type, const char *fmt, va_list args)
+{
+    char buf[CONSTRLEN];
+    vformatstring(buf, fmt, args, sizeof(buf));
+    FILE *f = getlogfile();
+    if(f) { fprintf(f, "%s\n", buf); fflush(f); }
+    if(!conthreadlock) return;
+    SDL_LockMutex(conthreadlock);
+    cline &cl = conthreadqueue.add();
+    cl.line = newstring(buf);
+    cl.type = type;
+    cl.outtime = cl.uid = 0;
+    SDL_AtomicSet(&conthreadpending, 1);
+    SDL_UnlockMutex(conthreadlock);
+}
+
+void conflushthreaded()
+{
+    if(!conthreadlock || !SDL_AtomicGet(&conthreadpending)) return;
+    vector<cline> lines;
+    SDL_LockMutex(conthreadlock);
+    loopv(conthreadqueue) lines.add(conthreadqueue[i]);
+    conthreadqueue.setsize(0);
+    SDL_AtomicSet(&conthreadpending, 0);
+    SDL_UnlockMutex(conthreadlock);
+    loopv(lines)
+    {
+        if(!techline(lines[i].type, lines[i].line)) conline(lines[i].type, lines[i].line);
+        delete[] lines[i].line;
+    }
+}
+
 void conoutfv(int type, const char *fmt, va_list args)
 {
+    if(conmainthread && SDL_ThreadID() != conmainthread) { conoutfthreaded(type, fmt, args); return; }
     static char buf[CONSTRLEN];
     vformatstring(buf, fmt, args, sizeof(buf));
-    if(rtconsole || (type&CON_ERROR) || !rtdiagline(buf)) conline(type, buf);
+    if(!techline(type, buf)) conline(type, buf);
     logoutf("%s", buf);
 }
 

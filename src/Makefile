@@ -108,6 +108,7 @@ CLIENT_OBJS= \
 	engine/hwrt/temporal.o \
 	engine/hwrt/dlaa.o \
 	engine/hwrt/nrd.o \
+	engine/hwrt/fsr.o \
 	engine/lightmap.o \
 	engine/main.o \
 	engine/hdrout.o \
@@ -210,11 +211,12 @@ $(filter fpsgame/%,$(CLIENT_OBJS)): $(filter fpsgame/%,$(CLIENT_PCH))
 $(filter engine/hwrt/%,$(CLIENT_OBJS)): engine/hwrt/hwrt.h
 engine/hwrt/trace.o: engine/hwrt/shaders/debug_comp.h engine/hwrt/shaders/silhouette_comp.h engine/hwrt/shaders/rtao_comp.h engine/hwrt/shaders/hitshade_comp.h engine/hwrt/shaders/hitlight_comp.h engine/hwrt/shaders/skycompose_comp.h
 engine/hwrt/nrd.o: include/nrd_gateway/sauer_nrd.h
+engine/hwrt/fsr.o: include/fsr_gateway/sauer_fsr.h
 
 $(SERVER_MASTER_OBJS): CXXFLAGS += $(SERVER_INCLUDES)
 
 ifneq (,$(findstring MINGW,$(PLATFORM)))
-# Public NGX Vulkan gateway. Isolated from Streamline dlaa.o (dlaaclient / velclient).
+# Public NGX Vulkan gateway (sauer_ngx.dll). Every Windows client links dlaa-ngx.o.
 NGX_CLIENT_OBJS= $(filter-out engine/hwrt/dlaa.o,$(CLIENT_OBJS)) engine/hwrt/dlaa-ngx.o
 engine/hwrt/dlaa-ngx.o: engine/hwrt/dlaa.cpp engine/hwrt/hwrt.h include/ngx_gateway/sauer_ngx.h
 	$(CXX) $(CXXFLAGS) $(CLIENT_INCLUDES) -DHWRT_NGX_GATEWAY -c -o $@ $<
@@ -240,14 +242,6 @@ hdrint: libenet $(NGX_CLIENT_OBJS)
 aretesint: libenet $(NGX_CLIENT_OBJS)
 	$(WINDRES) -I vcpp -i vcpp/mingw.rc -J rc -o vcpp/mingw.res -O coff
 	$(CXX) $(CXXFLAGS) -o $(WINBIN)/sauerbraten-aretes-int.exe vcpp/mingw.res $(NGX_CLIENT_OBJS) $(CLIENT_LIBS)
-
-velclient: libenet $(CLIENT_OBJS)
-	$(WINDRES) -I vcpp -i vcpp/mingw.rc -J rc -o vcpp/mingw.res -O coff
-	$(CXX) $(CXXFLAGS) -o $(WINBIN)/sauerbraten-vel6.exe vcpp/mingw.res $(CLIENT_OBJS) $(CLIENT_LIBS)
-
-dlaaclient: libenet $(CLIENT_OBJS)
-	$(WINDRES) -I vcpp -i vcpp/mingw.rc -J rc -o vcpp/mingw.res -O coff
-	$(CXX) $(CXXFLAGS) -o $(WINBIN)/sauerbraten-dlaa7.exe vcpp/mingw.res $(CLIENT_OBJS) $(CLIENT_LIBS)
 
 ngxclient: libenet $(NGX_CLIENT_OBJS)
 	$(WINDRES) -I vcpp -i vcpp/mingw.rc -J rc -o vcpp/mingw.res -O coff

@@ -101,6 +101,13 @@ static bool g_locked = false;
 static bool g_ui = false;
 static bool g_ready = false;
 static bool g_tried = false;
+// The presenter (D3D11 device, GL-D3D interop, child window, swap chain) is
+// opened only once the saved output choice is known and asks for native HDR.
+// g_open_failed: the last opening or presentation failed; no new attempt
+// until Native HDR is chosen again or the GL context is recreated.
+// g_disabled: hdrout-off.txt or no Windows window, never opened.
+static bool g_open_failed = false;
+static bool g_disabled = false;
 static bool g_child_on = false;
 // 0 = base SDR, 1 = HDR interne apercu SDR, 2 = HDR natif. -1 = pas compose cette image.
 static int g_frame_kind = -1;
@@ -688,6 +695,7 @@ static void abandon_hdr(const char *why)
     g_locked = false;
     g_ui = false;
     g_ready = false;
+    g_open_failed = true;
     g_frame_kind = -1;
     hide_child();
     set_reason(why ? why : "presentation echouee");
@@ -695,12 +703,17 @@ static void abandon_hdr(const char *why)
     else hflush();
 }
 
+// Shown only after a successful Present, so a child window holding no picture
+// never covers the game. SW_SHOWNA does not activate it; the child has
+// WS_EX_NOACTIVATE and ignores hit tests, so focus stays on the SDL window
+// without a SetFocus call (which only produced extra focus events).
 static void show_child()
 {
     if(!g_child || g_child_on) return;
     ShowWindow(g_child, SW_SHOWNA);
-    if(g_parent) SetFocus(g_parent);
     g_child_on = true;
+    logoutf("hdrout enfant montre apres Present reussi t=%u ms", SDL_GetTicks());
+    hflush();
 }
 
 static LRESULT CALLBACK child_proc(HWND hwnd, UINT msg, WPARAM w, LPARAM l)
@@ -721,7 +734,7 @@ static bool ensure_child()
     RegisterClassW(&wc);
     g_child = CreateWindowExW(WS_EX_NOACTIVATE | WS_EX_NOPARENTNOTIFY | WS_EX_TRANSPARENT,
                                L"SauerHDROut", L"",
-                               WS_CHILD | WS_VISIBLE,
+                               WS_CHILD,
                                0, 0, g_w > 0 ? g_w : 64, g_h > 0 ? g_h : 64,
                                g_parent, NULL, inst, NULL);
     if(!g_child)
@@ -729,8 +742,9 @@ static bool ensure_child()
         set_reason("fenetre de presentation absente");
         return false;
     }
-    g_child_on = true;
-    if(g_parent) SetFocus(g_parent);
+    // Created hidden: show_child() after the first successful Present.
+    g_child_on = false;
+    logoutf("hdrout enfant cree cache t=%u ms", SDL_GetTicks());
     return true;
 }
 
@@ -1377,6 +1391,7 @@ static bool ensure_size()
         if(!build_targets(screenw, screenh))
         {
             g_ready = false;
+            g_open_failed = true;
             hide_child();
             log_state("repli");
             return false;
@@ -2589,7 +2604,6 @@ bool hdrout_present()
         g_mire->set();
         screenquad(1, 1);
     }
-    show_child();
     // A locked surface is the HDR presentation, including the loading overlay
     // which does not pass through the scene compose. It is not an error fallback.
     if(g_frame_kind < 0) g_frame_kind = hdrout ? 2 : 1;
@@ -2602,7 +2616,12 @@ bool hdrout_present()
     bool opened = unlock_share();
     bool shown = false;
     if(opened) shown = present_dx();
-    if(shown) sync_limit();
+    if(shown)
+    {
+        // The child is only made visible once it holds a presented picture.
+        show_child();
+        sync_limit();
+    }
     else sync_drop_fences();
     if(!shown)
     {
@@ -2893,13 +2912,16 @@ void hdrout_preview_end()
 
 // Daily integration. The saved choice is hdroutpref; hwrthdr/hdrout are the
 // effective state, recomputed here every frame, never saved.
-// -1 = no choice yet: native HDR when Windows HDR is already on for this screen
+// -1 = Automatic: native HDR when Windows HDR is already on for this screen
 // and the NVIDIA OpenGL-D3D11 presenter started, SDR otherwise.
 // 0 = SDR, kept even when Windows HDR is on. 1 = native HDR when available,
 // otherwise SDR with the reason shown in Options > Graphics.
 // Windows HDR, VRR, gamma and the driver are only read, never changed.
+// Default SDR (was Automatic): a frozen/black screen at startup is suspected
+// with Automatic, under investigation. Automatic stays in the menu; saved -1
+// values are moved to 0 once by the l4zymigration step in main.cpp.
 static void hdrout_pref_changed();
-VARFP(hdroutpref, -1, -1, 1, hdrout_pref_changed());
+VARFP(hdroutpref, -1, 0, 1, hdrout_pref_changed());
 // Diagnostic only, not saved: the internal HDR image tone mapped for an SDR
 // look, shown in the HDR surface. Not native HDR, not in the normal menus.
 VARF(hdroutapercu, 0, 0, 1, hdrout_pref_changed());
@@ -2914,12 +2936,22 @@ void hdrout_prefsloaded()
 }
 
 static const char *reason_ui();
+static bool presenter_open();
+static void presenter_release(const char *why);
+static void probe_output();
 
+static bool presenter_allocated()
+{
+    return g_dev || g_ctx || g_dx || g_factory || g_child || g_swap;
+}
+
+// Automatic (-1) asks for native HDR when Windows HDR is on for the game's
+// screen (read without any D3D device) and the presenter has not failed.
 static int wanted_output()
 {
     if(hdroutpref == 0) return 0;
     if(hdroutpref == 1) return 1;
-    return g_ready ? 1 : 0;
+    return (g_ready || (!g_disabled && g_hdr && !g_open_failed)) ? 1 : 0;
 }
 
 static void hdrout_resolve()
@@ -2927,6 +2959,16 @@ static void hdrout_resolve()
     // A minimised window keeps its state; the presenter is simply not drawn.
     if(minimized && g_resolved_hdr >= 0) return;
     int want = g_prefs_loaded ? wanted_output() : 0;
+    if(g_tried && !g_locked)
+    {
+        // Native HDR wanted: open the presenter now (first time after the
+        // config, or a switch from the menu). Not before config.cfg/autoexec.
+        if(want && !g_ready && !g_open_failed && !g_disabled) presenter_open();
+        // SDR (or a failed presenter): release it, once the child is hidden,
+        // i.e. after an SDR frame has been presented over it.
+        else if((!want || !g_ready) && !g_child_on && presenter_allocated())
+            presenter_release(want ? "echec" : "sortie sdr");
+    }
     int eff = (want && g_ready) ? 1 : 0;
     // Native HDR asked for (saved choice) but not running: say it once in the console.
     static bool warned = false;
@@ -2960,10 +3002,11 @@ static void hdrout_pref_changed()
     if(!g_tried || !g_prefs_loaded) return;
     // Explicit HDR request while the presenter is down (Windows HDR turned on
     // after launch, or an earlier presentation error): try once more.
-    if(hdroutpref == 1 && !g_ready && !g_locked && screen)
+    if(hdroutpref == 1 && !g_ready && !g_locked && screen && !g_disabled)
     {
-        hdrout_shutdown();
-        hdrout_start();
+        presenter_release("nouvel essai");
+        probe_output();
+        g_open_failed = false;
     }
     hdrout_resolve();
 }
@@ -3000,24 +3043,94 @@ ICOMMAND(hdroutexpstep, "f", (float *d),
     setfvar("hwrthdrexp", v);
 });
 
+// Reads, without any D3D11 device, interop, window or swap chain, whether
+// Windows HDR is on for the screen of the game window, and the luminance range
+// it reports. Only a DXGI factory is used, released at once.
+static void probe_output()
+{
+    g_hdr = 0;
+    g_cs = -1;
+    g_min_nits = g_max_nits = g_full_nits = 0;
+    g_bits = 0;
+    g_output[0] = 0;
+    if(!g_parent) return;
+    HMONITOR mon = MonitorFromWindow(g_parent, MONITOR_DEFAULTTONEAREST);
+    IDXGIFactory1 *fac1 = NULL;
+    HRESULT hr = CreateDXGIFactory1(IID_IDXGIFactory1, (void **)&fac1);
+    if(FAILED(hr) || !fac1)
+    {
+        set_reason("fabrique DXGI absente");
+        logoutf("hdrout api CreateDXGIFactory1 hr 0x%08X", (unsigned)hr);
+        return;
+    }
+    // The adapter that drives the game's screen, else the first hardware one.
+    IDXGIAdapter1 *pick = NULL, *first = NULL;
+    for(UINT ai = 0; !pick; ai++)
+    {
+        IDXGIAdapter1 *ad = NULL;
+        if(fac1->EnumAdapters1(ai, &ad) == DXGI_ERROR_NOT_FOUND || !ad) break;
+        DXGI_ADAPTER_DESC1 desc;
+        memset(&desc, 0, sizeof(desc));
+        ad->GetDesc1(&desc);
+        if(desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE)
+        {
+            ad->Release();
+            continue;
+        }
+        bool owns = false;
+        for(UINT oi = 0; mon && !owns; oi++)
+        {
+            IDXGIOutput *out = NULL;
+            if(ad->EnumOutputs(oi, &out) == DXGI_ERROR_NOT_FOUND || !out) break;
+            DXGI_OUTPUT_DESC od;
+            memset(&od, 0, sizeof(od));
+            out->GetDesc(&od);
+            out->Release();
+            if(od.Monitor == mon) owns = true;
+        }
+        if(owns) pick = ad;
+        else if(!first) first = ad;
+        else ad->Release();
+    }
+    if(!pick) { pick = first; first = NULL; }
+    if(first) first->Release();
+    if(pick)
+    {
+        query_output(pick, mon);
+        pick->Release();
+    }
+    else set_reason("sortie DXGI introuvable");
+    fac1->Release();
+    logoutf("hdrout lecture de l'ecran (sans peripherique D3D11, interop, fenetre ni swapchain) %s hdr_dxgi=%d pic=%.0f nits",
+            g_output[0] ? g_output : "?", g_hdr, g_max_nits);
+}
+
+// Windows HDR on for the game's screen (read at startup). Used to leave the
+// gamma table alone: on an HDR screen it can blank or flicker the display.
+bool hdrout_desktophdr()
+{
+    if(g_hdr) return true;
+    return g_disabled && g_ac_on == 1;
+}
+ICOMMAND(hdroutwindowshdr, "", (), intret(hdrout_desktophdr() ? 1 : 0));
+
+// Startup, from gl_init (before config.cfg): only reads the screen state.
+// No D3D11 device, GL-D3D interop, child window or swap chain is created
+// here; hdrout_resolve() opens them once the saved choice asks for native HDR.
 void hdrout_start()
 {
     if(g_tried) return;
     g_tried = true;
+    g_disabled = false;
+    g_open_failed = false;
+    g_hdr = 0;
+    g_ac_sup = g_ac_on = -1;
     g_adapter[0] = g_output[0] = g_gl[0] = g_luid[0] = g_reason[0] = 0;
     const GLubyte *rend = glGetString(GL_RENDERER);
     copystring(g_gl, rend ? (const char *)rend : "inconnu", sizeof(g_gl));
-    // Diagnostic switch (black screen reports): with hdrout-off.txt in the
-    // profile, no D3D device / DXGI surface is created at all, only OpenGL.
-    if(fileexists(findfile("hdrout-off.txt", "r"), "r"))
-    {
-        set_reason("desactive par hdrout-off.txt");
-        logoutf("hdrout desactive: hdrout-off.txt present, aucune surface D3D/DXGI creee (OpenGL seul)");
-        log_state("demarrage");
-        return;
-    }
     if(!screen)
     {
+        g_disabled = true;
         set_reason("fenetre SDL absente");
         log_state("demarrage");
         return;
@@ -3026,24 +3139,95 @@ void hdrout_start()
     SDL_VERSION(&info.version);
     if(!SDL_GetWindowWMInfo(screen, &info) || info.subsystem != SDL_SYSWM_WINDOWS)
     {
+        g_disabled = true;
         set_reason("HWND SDL indisponible");
         log_state("demarrage");
         return;
     }
     g_parent = info.info.win.window;
-    if(!load_wgl())
+    // Diagnostic switch (black screen reports): with hdrout-off.txt in the
+    // profile, no D3D device / DXGI object is created at all, only OpenGL.
+    // Windows HDR is then read from the display configuration only (gamma).
+    if(fileexists(findfile("hdrout-off.txt", "r"), "r"))
     {
+        g_disabled = true;
+        MONITORINFOEXW mi;
+        memset(&mi, 0, sizeof(mi));
+        mi.cbSize = sizeof(mi);
+        if(GetMonitorInfoW(MonitorFromWindow(g_parent, MONITOR_DEFAULTTONEAREST), &mi))
+        {
+            narrow(mi.szDevice, g_output, sizeof(g_output));
+            read_display_path(mi.szDevice);
+        }
+        set_reason("desactive par hdrout-off.txt");
+        logoutf("hdrout desactive: hdrout-off.txt present, aucune surface D3D/DXGI creee (OpenGL seul)");
         log_state("demarrage");
         return;
     }
+    probe_output();
+    logoutf("hdrout presentateur differe t=%u ms: aucun peripherique D3D11, interop, fenetre ni swapchain avant la lecture de la config, puis seulement si la sortie doit etre en HDR natif", SDL_GetTicks());
+    log_state("demarrage");
+}
+
+static void perf_release();
+static void perf_release_d3d();
+
+// Destroys everything native HDR needs (swap chain, child window, interop,
+// D3D11 device). The screen reading and the failure reason are kept.
+static void presenter_release(const char *why)
+{
+    bool had = presenter_allocated();
+    sync_drop_fences();
+    perf_release_d3d();
+    preview_release();
+    hide_child();
+    release_views();
+    if(g_vs) { g_vs->Release(); g_vs = NULL; }
+    if(g_ps) { g_ps->Release(); g_ps = NULL; }
+    if(g_samp) { g_samp->Release(); g_samp = NULL; }
+    if(g_rast) { g_rast->Release(); g_rast = NULL; }
+    if(g_blend) { g_blend->Release(); g_blend = NULL; }
+    if(g_depth) { g_depth->Release(); g_depth = NULL; }
+    if(g_swap3) { g_swap3->Release(); g_swap3 = NULL; }
+    if(g_swap) { g_swap->Release(); g_swap = NULL; }
+    if(g_dx && pClose) pClose(g_dx);
+    g_dx = NULL;
+    if(g_ctx) { g_ctx->Release(); g_ctx = NULL; }
+    if(g_dev) { g_dev->Release(); g_dev = NULL; }
+    g_framelatency = 0;
+    if(g_factory) { g_factory->Release(); g_factory = NULL; }
+    if(g_child) { DestroyWindow(g_child); g_child = NULL; }
+    g_child_on = false;
+    g_ready = false;
+    g_w = g_h = 0;
+    if(had)
+    {
+        logoutf("hdrout presentateur libere (%s) t=%u ms: swapchain, fenetre enfant, interop et peripherique D3D11 detruits", why ? why : "", SDL_GetTicks());
+        hflush();
+    }
+}
+
+static bool presenter_open_inner()
+{
+    if(!g_parent)
+    {
+        set_reason("HWND SDL indisponible");
+        return false;
+    }
+    if(!g_hdr)
+    {
+        // Read at startup (or again when Native HDR is chosen): nothing to open.
+        if(!g_reason[0] || !strcmp(g_reason, "ok")) set_reason("Windows HDR inactif sur cet ecran");
+        return false;
+    }
+    if(!load_wgl()) return false;
     IDXGIFactory1 *fac1 = NULL;
     HRESULT hr = CreateDXGIFactory1(IID_IDXGIFactory1, (void **)&fac1);
     if(FAILED(hr) || !fac1)
     {
         set_reason("fabrique DXGI absente");
         logoutf("hdrout api CreateDXGIFactory1 hr 0x%08X", (unsigned)hr);
-        log_state("demarrage");
-        return;
+        return false;
     }
     hr = fac1->QueryInterface(IID_IDXGIFactory2, (void **)&g_factory);
     if(FAILED(hr) || !g_factory)
@@ -3051,8 +3235,7 @@ void hdrout_start()
         fac1->Release();
         set_reason("IDXGIFactory2 absente");
         logoutf("hdrout api Factory2 hr 0x%08X", (unsigned)hr);
-        log_state("demarrage");
-        return;
+        return false;
     }
     HMONITOR mon = MonitorFromWindow(g_parent, MONITOR_DEFAULTTONEAREST);
     UINT ai;
@@ -3105,67 +3288,52 @@ void hdrout_start()
     if(!opened)
     {
         set_reason("aucun GPU commun a OpenGL et D3D11");
-        log_state("demarrage");
-        return;
+        return false;
     }
-    if(!g_hdr)
-    {
-        log_state("demarrage");
-        return;
-    }
+    if(!g_hdr) return false;
     const char *sim = getenv("SAUER_HDROUT_SIM");
     if(sim && !strcmp(sim, "init"))
     {
         logoutf("hdrout SIMULATION: indisponibilite HDR a l'initialisation. La chaine n'est pas creee. Aucun reglage Windows, VRR, gamma ou pilote n'est modifie. Pas une perte de peripherique. Pas une certification de panne materielle.");
         set_reason("simulation: HDR indisponible a l'initialisation");
-        log_state("simulation-init");
-        return;
+        return false;
     }
-    if(!make_flip_shader() || !make_shaders() || !build_targets(screenw, screenh))
-    {
-        hide_child();
-        log_state("demarrage");
-        return;
-    }
+    if(!make_flip_shader() || !make_shaders() || !build_targets(screenw, screenh)) return false;
     g_ready = true;
     set_reason("ok");
-    log_state("demarrage");
+    return true;
 }
 
-static void perf_release();
+// Opens the native HDR presenter. Called by hdrout_resolve() only once the
+// saved choice is known and asks for native HDR, at the start of a frame.
+static bool presenter_open()
+{
+    if(g_ready) return true;
+    if(presenter_allocated()) presenter_release("reouverture");
+    logoutf("hdrout ouverture du presentateur HDR natif t=%u ms (preference=%d)", SDL_GetTicks(), hdroutpref);
+    bool ok = presenter_open_inner();
+    if(!ok)
+    {
+        g_open_failed = true;
+        presenter_release("echec ouverture");
+    }
+    log_state(ok ? "ouverture" : "ouverture echouee");
+    return ok;
+}
 
 void hdrout_shutdown()
 {
-    if(!g_tried && !g_dev && !g_child) return;
-    sync_drop_fences();
+    if(!g_tried && !presenter_allocated()) return;
+    presenter_release("arret");
     g_syncload = false;
     perf_release();
-    preview_release();
     g_pvshader = NULL;
-    hide_child();
-    release_views();
-    if(g_vs) { g_vs->Release(); g_vs = NULL; }
-    if(g_ps) { g_ps->Release(); g_ps = NULL; }
-    if(g_samp) { g_samp->Release(); g_samp = NULL; }
-    if(g_rast) { g_rast->Release(); g_rast = NULL; }
-    if(g_blend) { g_blend->Release(); g_blend = NULL; }
-    if(g_depth) { g_depth->Release(); g_depth = NULL; }
-    if(g_swap3) { g_swap3->Release(); g_swap3 = NULL; }
-    if(g_swap) { g_swap->Release(); g_swap = NULL; }
-    if(g_dx && pClose) pClose(g_dx);
-    g_dx = NULL;
-    if(g_ctx) { g_ctx->Release(); g_ctx = NULL; }
-    if(g_dev) { g_dev->Release(); g_dev = NULL; }
-    g_framelatency = 0;
-    if(g_factory) { g_factory->Release(); g_factory = NULL; }
-    if(g_child) { DestroyWindow(g_child); g_child = NULL; }
-    g_child_on = false;
-    g_ready = false;
     g_map = NULL;
     g_mire = NULL;
-    g_w = g_h = 0;
     g_parent = NULL;
     g_tried = false;
+    g_open_failed = false;
+    g_disabled = false;
 }
 
 // Performance lot 1: frame time decomposition, off unless hdroutperfwin runs.
@@ -3261,6 +3429,12 @@ static void perf_release()
     memset(g_pqmask, 0, sizeof(g_pqmask));
     g_pstate = 0;
     g_parm = 0;
+}
+
+static void perf_release_d3d()
+{
+    loopi(PERF_Q) loopj(3) if(g_pdq[i][j]) { g_pdq[i][j]->Release(); g_pdq[i][j] = NULL; }
+    memset(g_pdqon, 0, sizeof(g_pdqon));
 }
 
 // Offset from the GL clock to the QueryPerformanceCounter clock (seconds).

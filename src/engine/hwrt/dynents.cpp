@@ -120,6 +120,9 @@ static hwrtbuf dummygeom;
 static GLuint mdlenvgl = 0, mdlenvuploaded = 0;
 static hwrttexarray mdlenv;
 static VkSampler mdlenvsampler = VK_NULL_HANDLE;
+// Traced reflections: the sky cubemap a traced reflection sees when it escapes.
+static GLuint skyenvuploaded = 0;
+static hwrttexarray skyenv;
 
 void hwrtnoteenvmap(GLuint gltex)
 {
@@ -522,6 +525,8 @@ static void destroyskins()
     hwrtdestroytexarray(mdlenv);
     hwrtdestroysampler(mdlenvsampler);
     mdlenvuploaded = 0;
+    hwrtdestroytexarray(skyenv);
+    skyenvuploaded = 0;
 }
 
 void hwrtdirtyskins()
@@ -869,6 +874,41 @@ static void syncskins()
     hwrtskinw = skins.tex.w;
     hwrtskinh = skins.tex.h;
     conoutf("hwrt: %d model skin layers %dx%d", skins.tex.layers, skins.tex.w, skins.tex.h);
+}
+
+// Traced reflections. Same round trip as the model envmap, but the sky itself
+// (lookupskyenvmap), at up to 512 per face, and only once the switch is on.
+static void syncskyenv()
+{
+    if(!hwrtreflections || !hwrtdev.ok() || !ensurecmd()) return;
+    GLuint want = hwrtskyenvtex();
+    if(!want || (skyenv.view && skyenvuploaded == want)) return;
+    if(!mdlenvsampler && !hwrtcreatesampler(false, mdlenvsampler, true)) return;
+    vkDeviceWaitIdle(hwrtdev.device);
+    if(!hwrtuploadcubemapcap(dyn.cmd, want, skyenv, "sky envmap", 512))
+    {
+        conoutf(CON_WARN, "hwrt: sky envmap copy failed, reflections fall back to the model envmap");
+        return;
+    }
+    skyenvuploaded = want;
+    conoutf("hwrt: sky envmap cubemap %u for reflections", uint(want));
+}
+
+void hwrtwriteskyenvbinding(VkDescriptorSet set)
+{
+    if(!set || !mdlenvsampler) return;
+    VkDescriptorImageInfo info = {};
+    info.sampler = mdlenvsampler;
+    info.imageView = skyenv.view ? skyenv.view : mdlenv.view;
+    info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    if(!info.imageView) return;
+    VkWriteDescriptorSet write = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+    write.dstSet = set;
+    write.dstBinding = 27;
+    write.descriptorCount = 1;
+    write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    write.pImageInfo = &info;
+    vkUpdateDescriptorSets(hwrtdev.device, 1, &write, 0, NULL);
 }
 
 static void syncmdlenv()
@@ -2732,6 +2772,7 @@ void hwrtsyncdynents()
     // while skinning frame N therefore lands in the array at frame N+1.
     syncskins();
     syncmdlenv();
+    syncskyenv();
 }
 
 // The game knows which pickups the current mode can spawn; an unpatched

@@ -141,7 +141,9 @@ struct LightEnv {
     mat4 prevViewProj; // last dispatch's world -> clip, for the skyvis history
     vec3 prevCam;      // and where the camera stood when it wrote that history
     float skyAlpha;    // 0 off, 1 seed (write only), else the new estimate's weight
-    float diffFilter;  // 0 textureLod 0 (old), 1 textureGrad from pixel UV footprint
+    float diffFilter;  // 0 textureLod 0 (old), 1 textureGrad from pixel UV footprint,
+                       // >= 4: footprint + bias, 8*m + bias with m = 1 + aniso + 2*texel (texel 0-2)
+                       // (see sampleWorldDiff and lights.cpp)
     float diffVis;     // 0 play, 1 albedo, 2 lighting, 3 lod heatmap
     float skyStable;   // 0 pixel+frame RNG, 1 pixel only (no frame)
     // Packed: bit0 hold, bit1 bilinear history, bits2-3 visdbg, bit4 per-pixel age,
@@ -162,10 +164,20 @@ struct Light { vec3 pos; float radius; vec3 color; float flags; };
 const int MAXLIGHTS = 256;
 const uint KIND_ALWAYS = 1u;
 const uint KIND_NEAR = 2u;
+// Traced reflections: the water planes ride behind the lamp table and the
+// kind words (pos = min x, min y, surface z; radius = max x; color = max y,
+// group, first rectangle; flags = rectangle count; the box has the margin),
+// then the rectangles of the surfaces GL draws (min x, min y, max x, max y).
+const int REFL_MAXPLANES = 16;
+const int REFL_MAXRECTS = 512;
 layout(std430, binding = 6) readonly buffer Lights {
     LightEnv env;
     Light l[MAXLIGHTS];
     uint kind[MAXLIGHTS];
+    Light water[REFL_MAXPLANES];
+#ifndef HWRT_NO_REFL
+    vec4 waterRect[REFL_MAXRECTS];
+#endif
 } lights;
 
 // Per-BLAS attributes, reached by device address so each rest-pose / animated
@@ -222,6 +234,16 @@ layout(binding = 24, rgba16f) uniform writeonly image2D nrdp3;
 // bit 13 of the sky flags says the tile is live.
 layout(std430, binding = 25) readonly buffer SkyBlueNoise { uint v[]; } skybn;
 const uint SKYBN_SIZE = 128u;
+// Traced reflections (hwrtreflections). 26: the water reflection seen at each
+// pixel, shared with GL's water shader (layout in waterReflection()). 27: the
+// sky cubemap an escaping reflection ray sees. 28: the normal maps of the
+// world faces that have a spec or envmap shader (layer in ShadeTri.x).
+layout(binding = 26, rgba32f) uniform writeonly image2D reflout;
+layout(binding = 27) uniform samplerCube skyenv;
+layout(binding = 28) uniform sampler2DArray normals;
+// The world diffuse again (same image as binding 5) through an anisotropic
+// sampler, for hwrtdiffmip 2. Plain sampler when the device has no anisotropy.
+layout(binding = 29) uniform sampler2DArray diffusesAniso;
 
 layout(push_constant) uniform Params
 {
@@ -270,6 +292,24 @@ const int TEST_GLDEPTH = 0x400;
 // the same image the lighting pass writes.
 const int HDR = 0x800;
 const int HDRPROBE = 0x1000;
+// Traced reflections and world spec. REFL_WATER: trace the water planes
+// packed in lights.water (count in bits 16-20) into reflout. REFL_WORLD:
+// envmapped world faces (colorscale top byte) mix in a traced reflection
+// instead of staying matte. SPEC: the world's spec shaders get their lamp and
+// sun highlights back.
+// Built a second time with HWRT_NO_REFL (tools/compile-hwrt-shaders.py): that
+// variant drops the reflection and world spec code, and trace.cpp uses it when
+// both options are off, so they cost nothing then. Every other line is shared.
+const int REFL_WATER = 0x2000;
+const int REFL_WORLD = 0x4000;
+const int SPEC = 0x8000;
+const int REFL_PLANESHIFT = 16;
+// ShadeTri.x: bits 0-8 diffuse layer, 9-16 specscale x 16, 17 "times the spec
+// map in diffuse.a", 18-25 normal layer (255 = none). All ones = no triangle.
+const uint TRI_LAYER_MASK = 0x1FFu;
+const uint TRI_NORMAL_NONE = 255u;
+// glsl.cfg bumpvariantshader, non-glare exponent.
+const float WORLD_SPEC_POW = 32.0;
 // How far in front of the hit GL has to be before the pixel is handed back.
 // The BLAS is the same geometry the rasteriser draws, so a hit that really is
 // the nearest surface matches to within depth-buffer precision and whatever
@@ -541,13 +581,57 @@ vec3 lodHeat(float lod)
     return vec3(clamp(l - 1.0, 0.0, 1.0), clamp(1.0 - abs(l - 1.0), 0.0, 1.0), clamp(1.0 - l, 0.0, 1.0));
 }
 
+// Grow a UV gradient (one pixel step) to at least minTexels texels of the
+// array, keeping its direction (an anisotropic footprint keeps its long axis).
+vec2 clampGrad(vec2 g, vec2 tsz, float minTexels)
+{
+    float l = length(g * tsz);
+    if(l >= minTexels) return g;
+    if(l < 1e-8) return vec2(minTexels / tsz.x, 0.0);
+    return g * (minTexels / l);
+}
+
 // World diffuse only. Model skins stay on their own sampler/upload path.
-vec3 sampleWorldDiff(int layer, vec2 uv, ivec2 pix, vec3 p0, vec3 p1, vec3 p2, vec3 n, vec2 uv0, vec2 uv1, vec2 uv2, inout float lod)
+// texlvl: the array level that holds this layer at its own resolution
+// (ShadeTri.x bits 26-28 / 29-31, as.cpp packdifftexellevels).
+vec3 sampleWorldDiff(int layer, vec2 uv, ivec2 pix, vec3 p0, vec3 p1, vec3 p2, vec3 n, vec2 uv0, vec2 uv1, vec2 uv2, uint texlvl, inout float lod)
 {
     int ndiff = int(pc.range.y);
     if(ndiff <= 0 || layer < 0 || layer >= ndiff) return vec3(1.0, 0.0, 1.0);
     vec3 coord = vec3(uv, float(layer));
-    bool wantgrad = lights.env.diffFilter > 0.5 || lights.env.diffVis > 2.5;
+    float filt = lights.env.diffFilter;
+    if(filt > 3.5)
+    {
+        // hwrtdiffmip 2: pixel footprint from the neighbour pixels' rays on the
+        // face plane (ray differentials; the same jittered matrix as the primary
+        // ray, at the render resolution), scaled by 2^bias (hwrtdiffmipbias
+        // [+ log2(render/display) when upscaling]), never finer than the
+        // texture's own texels, filtered anisotropically when available.
+        float m = floor((filt + 4.0) / 8.0);
+        float bias = filt - 8.0 * m;
+        int mi = int(m) - 1;
+        bool aniso = (mi & 1) != 0;
+        int texel = mi >> 1;    // 0 off, 1 the texture's own texels, 2 one level finer
+        vec2 gx = wrapDelta(uvOnPlane(pix + ivec2(1, 0), p0, p1, p2, n, uv0, uv1, uv2, uv) - uv);
+        vec2 gy = wrapDelta(uvOnPlane(pix + ivec2(0, 1), p0, p1, p2, n, uv0, uv1, uv2, uv) - uv);
+        float s = exp2(bias);
+        gx *= s;
+        gy *= s;
+        vec2 tsz = vec2(textureSize(diffuses, 0).xy);
+        int clampl = texel == 1 ? int(texlvl) : (texel == 2 ? int(texlvl) - 1 : 0);
+        if(clampl > 0)
+        {
+            float mt = exp2(float(clampl));
+            gx = clampGrad(gx, tsz, mt);
+            gy = clampGrad(gy, tsz, mt);
+        }
+        float lx = length(gx * tsz), ly = length(gy * tsz);
+        float major = max(lx, ly), minor = max(min(lx, ly), 1e-6);
+        lod = aniso ? log2(max(major / min(major / minor, 16.0), 1e-6)) : log2(max(major, 1e-6));
+        if(aniso) return textureGrad(diffusesAniso, coord, gx, gy).rgb;
+        return textureGrad(diffuses, coord, gx, gy).rgb;
+    }
+    bool wantgrad = filt > 0.5 || lights.env.diffVis > 2.5;
     if(!wantgrad)
     {
         lod = 0.0;
@@ -701,6 +785,28 @@ bool skyHistGeomOk(vec4 h, vec3 hp, vec3 n, float hitdist)
     return off < max(0.5, hitdist * 0.01) && along < max(4.0, hitdist * 0.05);
 }
 
+// World spec (hwrtspecular). glsl.cfg's bump spec shaders add
+// specscale * pow(dot(H, bump), 32) [* the spec map in diffuse.a] to the
+// diffuse before it meets the lightmap, so each light leaves
+// light * N.L * spec on top of the lit texture. The traced lights already
+// carry their own shadow ray; this adds their highlight, with the face's
+// normal map, for every lamp and the sun that reaches the pixel.
+bool gWSpecOn = false;
+vec3 gWSpecN = vec3(0.0, 0.0, 1.0);
+vec3 gWSpecAcc = vec3(0.0);
+
+void addWorldSpec(vec3 ldir, vec3 viewDir, vec3 color)
+{
+    if(!gWSpecOn) return;
+    float ndl = dot(gWSpecN, ldir);
+    if(ndl <= 0.0) return;
+    vec3 H = ldir - viewDir;
+    float hlen = length(H);
+    if(hlen < 1e-6) return;
+    float sp = pow(clamp(dot(gWSpecN, H / hlen), 0.0, 1.0), WORLD_SPEC_POW);
+    gWSpecAcc += color * (ndl * sp);
+}
+
 void addSpec(vec3 ldir, vec3 n, vec3 viewDir, vec3 color, float specMul, inout vec3 specAcc)
 {
     if(specMul <= 0.0) return;
@@ -755,7 +861,15 @@ void addOmni(int i, vec3 hit, vec3 n, vec3 sorigin, uint shmask, uint skipInst, 
         shadowed = occluded(sorigin, ldir, mag - slack, shmask, skipInst);
     if(shadowed) return;
     acc += lights.l[i].color * intensity * ndotl;
-    if(!aura) addSpec(ldir, n, viewDir, lights.l[i].color * intensity, specMul, specAcc);
+    if(!aura)
+    {
+        addSpec(ldir, n, viewDir, lights.l[i].color * intensity, specMul, specAcc);
+        // Real lamps only: the glow omnis (teleporters, jump pads, lava) are
+        // RT extras with no highlight in classic lighting.
+#ifndef HWRT_NO_REFL
+        if(flags < 1.5) addWorldSpec(ldir, viewDir, lights.l[i].color * intensity);
+#endif
+    }
 }
 
 // Integration HDR lot 1. Players (fullbright models) in HDR are shaded exactly
@@ -787,6 +901,302 @@ void storeHdrProbe(ivec2 p)
     else if(lx >= 176 && lx < 224) v = 16.0;
     if(v < 0.0) return;
     imageStore(result, p, vec4(v, v, v, 1.0));
+}
+
+// ---------------------------------------------------------------------------
+// Traced reflections (hwrtreflections): one sharp reflection ray, no denoiser.
+//
+// What the ray hits is coloured without any random sample, so the mirror image
+// cannot sparkle: world faces take albedo x the baked lightmap x colorparams
+// (the classic look of that spot, same units as the traced light), models a
+// small deterministic key (ambient + sun with one shadow ray + radius-0 omnis),
+// an escaping ray the sky cubemap. Texture level comes from a ray cone (pixel
+// angle x distance travelled), so a far wall seen in the water does not alias.
+// ---------------------------------------------------------------------------
+
+// Primary WORLD hit distance of this pixel, set by shadePixel(); 1e30 on a
+// miss or a model hit. A model in front of the water does not stop the water
+// trace: GL may already have moved it (the BLAS is last frame's pose), and a
+// pixel left untraced there would show nothing.
+float gPrimaryT = 1e30;
+
+float reflPixelAngle()
+{
+    ivec2 c = pc.size / 2;
+    return length(worldRayDir(c + ivec2(1, 0)) - worldRayDir(c));
+}
+
+vec3 reflSky(vec3 d)
+{
+    return colorTex(textureLod(skyenv, d, 0.0).rgb);
+}
+
+float reflLod(vec3 p0, vec3 p1, vec3 p2, vec2 t0, vec2 t1, vec2 t2, float texdim, float cone)
+{
+    vec2 du = t1 - t0, dv = t2 - t0;
+    float uvarea = abs(du.x * dv.y - du.y * dv.x);
+    float warea = length(cross(p1 - p0, p2 - p0));
+    float texelsPerUnit = sqrt(uvarea / max(warea, 1e-8)) * texdim;
+    return max(log2(max(cone * texelsPerUnit, 1e-6)), 0.0);
+}
+
+vec3 reflWorld(uint prim, vec2 bary, float cone)
+{
+    uint ntris = uint(max(pc.range.w, 0.0));
+    if(prim >= ntris) return vec3(0.0);
+    uvec4 t = tri.t[prim];
+    if(t.x == 0xFFFFFFFFu) return vec3(0.0);
+    int layer = int(t.x & TRI_LAYER_MASK);
+    float a = 1.0 - bary.x - bary.y, b = bary.x, c = bary.y;
+    uint i0 = idx.i[prim * 3u + 0u];
+    uint i1 = idx.i[prim * 3u + 1u];
+    uint i2 = idx.i[prim * 3u + 2u];
+    vec3 p0 = verts.v[i0].pos, p1 = verts.v[i1].pos, p2 = verts.v[i2].pos;
+    vec2 t0 = verts.v[i0].tc, t1 = verts.v[i1].tc, t2 = verts.v[i2].tc;
+    vec2 tc = t0 * a + t1 * b + t2 * c;
+    vec2 lm = verts.v[i0].lm * a + verts.v[i1].lm * b + verts.v[i2].lm * c;
+    int ndiff = int(pc.range.y);
+    float texdim = float(textureSize(diffuses, 0).x);
+    float lod = reflLod(p0, p1, p2, t0, t1, t2, texdim, cone);
+    vec3 albedo = vec3(0.5);
+    if(ndiff > 0 && layer < ndiff)
+        albedo = colorTex(textureLod(diffuses, vec3(tc, float(layer)), lod).rgb);
+    uint lmid = t.y & 0xFFFFu;
+    uint bot = t.y >> 16u;
+    int nlm = textureSize(lightmaps, 0).z;
+    if(bot != 0xFFFFu && ndiff > 0 && int(bot) < ndiff)
+    {
+        vec2 bt0 = vec2(verts.v[i0].pad, verts.v[i0].pad2);
+        vec2 bt1 = vec2(verts.v[i1].pad, verts.v[i1].pad2);
+        vec2 bt2 = vec2(verts.v[i2].pad, verts.v[i2].pad2);
+        vec2 btc = bt0 * a + bt1 * b + bt2 * c;
+        vec3 botc = colorTex(textureLod(diffuses, vec3(btc, float(bot)), reflLod(p0, p1, p2, bt0, bt1, bt2, texdim, cone)).rgb);
+        float ba = 1.0;
+        if(lmid >= 6u && nlm > 0 && int(lmid) < nlm)
+            ba = texture(lightmaps, vec3(lm, float(lmid))).a;
+        albedo = mix(botc, albedo, ba);
+    }
+    // Reserved lightmaps are constants, exactly as hitshade.comp (mode 6).
+    vec3 bake = vec3(0.098);
+    if(lmid == 2u || lmid == 3u) bake = vec3(0.502);
+    else if(lmid == 4u || lmid == 5u) bake = vec3(0.0);
+    else if(lmid >= 6u && nlm > 0 && int(lmid) < nlm)
+        bake = texture(lightmaps, vec3(lm, float(lmid))).rgb;
+    vec3 scale = vec3(float(t.z & 255u), float((t.z >> 8u) & 255u), float((t.z >> 16u) & 255u)) * (2.0 / 255.0);
+    vec3 col = albedo * bake * scale;
+    uint glayer = t.w & 255u;
+    int nglow = int(lights.env.glowLayers + 0.5);
+    if(glayer != 255u && nglow > 0 && int(glayer) < nglow)
+    {
+        vec3 gcol = vec3(float((t.w >> 8u) & 255u), float((t.w >> 16u) & 255u), float((t.w >> 24u) & 255u)) * (1.0 / 255.0);
+        col += colorTex(textureLod(glows, vec3(tc, float(glayer)), lod).rgb) * colorTex(gcol);
+    }
+    return col;
+}
+
+// hitT < 0: the ray escaped and saw the sky.
+vec3 traceReflection(vec3 ro, vec3 rd, float travelled, float pixangle, out float hitT)
+{
+    hitT = -1.0;
+    float tmax = max(pc.range.x, 1.0);
+    // World and other models; never SELF, like GL's reflection pass, which
+    // does not draw the first-person player either.
+    uint mask = RAYMASK_WORLD | RAYMASK_MODEL;
+    rayQueryEXT rq;
+    rayQueryInitializeEXT(rq, tlas, 0, mask, ro, 0.02, rd, tmax);
+    while(rayQueryProceedEXT(rq))
+    {
+        if(rayQueryGetIntersectionTypeEXT(rq, false) == gl_RayQueryCandidateIntersectionTriangleEXT)
+        {
+            uint ccustom = uint(rayQueryGetIntersectionInstanceCustomIndexEXT(rq, false));
+            uint cprim = uint(rayQueryGetIntersectionPrimitiveIndexEXT(rq, false));
+            uint cgeom = uint(rayQueryGetIntersectionGeometryIndexEXT(rq, false));
+            vec2 cbary = rayQueryGetIntersectionBarycentricsEXT(rq, false);
+            if(alphaTexel(ccustom, cprim, cgeom, cbary))
+                rayQueryConfirmIntersectionEXT(rq);
+        }
+    }
+    if(rayQueryGetIntersectionTypeEXT(rq, true) != gl_RayQueryCommittedIntersectionTriangleEXT)
+        return reflSky(rd);
+
+    uint custom = uint(rayQueryGetIntersectionInstanceCustomIndexEXT(rq, true));
+    uint prim = uint(rayQueryGetIntersectionPrimitiveIndexEXT(rq, true));
+    vec2 bary = rayQueryGetIntersectionBarycentricsEXT(rq, true);
+    float t = rayQueryGetIntersectionTEXT(rq, true);
+    hitT = t;
+    float cone = pixangle * (travelled + t);
+    if(custom == 0u) return reflWorld(prim, bary, cone);
+
+    // A model. Anything the primary pass would hand back to GL (skin overflow,
+    // no attributes) has no GL raster to fall back on here: dim neutral grey
+    // rather than a hole.
+    vec3 base = pc.lighting.xyz;
+    vec3 fallback = vec3(0.35) * max(base, vec3(0.25));
+    if((pc.mode & SHADE_MODELS) == 0 || (custom & 0xFFu) >= MAXGEOMS) return fallback;
+    ModelGeom g = geoms.g[nonuniformEXT(custom & 0xFFu)];
+    uint geomid = uint(rayQueryGetIntersectionGeometryIndexEXT(rq, true));
+    uint nopaque = g.flags >> 2u;
+    uint trii = prim + (geomid != 0u ? nopaque : 0u);
+    if((g.flags & GEOM_SHADE) == 0u || (g.verts.x == 0u && g.verts.y == 0u) || (g.indices.x == 0u && g.indices.y == 0u) || trii >= g.ntris)
+        return fallback;
+    ModelVertRef mv = ModelVertRef(g.verts);
+    ModelIdxRef mi = ModelIdxRef(g.indices);
+    uint i0 = mi.i[trii * 3u + 0u];
+    uint i1 = mi.i[trii * 3u + 1u];
+    uint i2 = mi.i[trii * 3u + 2u];
+    ModelVert v0 = mv.v[i0];
+    ModelVert v1 = mv.v[i1];
+    ModelVert v2 = mv.v[i2];
+    float a = 1.0 - bary.x - bary.y, b = bary.x, c = bary.y;
+    vec2 tc = v0.tc * a + v1.tc * b + v2.tc * c;
+    mat4x3 o2w = rayQueryGetIntersectionObjectToWorldEXT(rq, true);
+    mat3 o2wn = mat3(o2w);
+    vec3 gn = cross(v1.pos - v0.pos, v2.pos - v0.pos);
+    vec3 ng = normalize(o2wn * (length(gn) > 1e-8 ? gn : vec3(0.0, 0.0, 1.0)));
+    vec3 ln = v0.n * a + v1.n * b + v2.n * c;
+    vec3 n = length(ln) > 1e-6 ? normalize(o2wn * ln) : ng;
+    if(dot(n, -rd) < 0.0) n = -n;
+    if(dot(ng, -rd) < 0.0) ng = -ng;
+    uint nskin = geoms.g[0].ntris;
+    if((g.tris.x == 0u && g.tris.y == 0u) || nskin == 0u) return fallback;
+    ModelTriRef mt = ModelTriRef(g.tris);
+    uint packed = mt.t[trii];
+    uint layer = packed & 255u;
+    if(layer == 255u || layer >= nskin) return fallback;
+    float skindim = float(textureSize(skins, 0).x);
+    float lod = reflLod(v0.pos, v1.pos, v2.pos, v0.tc, v1.tc, v2.tc, skindim, cone);
+    vec3 albedo = colorTex(textureLod(skins, vec3(tc, float(layer)), lod).rgb) * 2.0;
+    bool fullbright = (g.flags & GEOM_FULLBRIGHT) != 0u;
+    vec3 hit = ro + rd * t;
+    vec3 lit = base * MODEL_AMBWRAP;
+    if(lights.env.skyOn > 0.5) lit += lights.env.skyColor * MODEL_AMBWRAP * 0.5;
+    if(lights.env.sunOn > 0.5)
+    {
+        vec3 sdir = lights.env.sunDir;
+        if(length(sdir) > 1e-6)
+        {
+            sdir = normalize(sdir);
+            float ndl = modelWrap(dot(n, sdir));
+            uint inst = uint(rayQueryGetIntersectionInstanceIdEXT(rq, true));
+            if(ndl > 0.0 && !occluded(hit + ng * MODEL_SHADOW_BIAS, sdir, tmax, RAYMASK_WORLD | RAYMASK_MODEL, inst))
+                lit += lights.env.sunColor * ndl;
+        }
+    }
+    int nlights = clamp(int(pc.lighting.w), 0, 256);
+    int nunlim = 0;
+    for(int i = 0; i < nlights && nunlim < 16; i++)
+    {
+        if(lights.l[i].radius > 0.0) continue;
+        nunlim++;
+        vec3 L = lights.l[i].pos - hit;
+        float mag = length(L);
+        lit += lights.l[i].color * modelWrap(mag > 1e-4 ? dot(n, L / mag) : 1.0);
+    }
+    if(fullbright) lit = max(lit, vec3(max(lights.env.modelMin, MODEL_MINSHADE)));
+    if((pc.mode & HDR) == 0) lit = min(lit, vec3(1.5));
+    vec3 col = albedo * lit;
+    uint maskl = (packed >> 8u) & 255u;
+    if(maskl != 255u && maskl < nskin)
+    {
+        vec3 m = textureLod(skins, vec3(tc, float(maskl)), lod).rgb;
+        float glowk = float((packed >> 16u) & 255u) * (1.0 / 32.0);
+        col = mix(col, albedo * (0.5 * glowk), m.g);
+    }
+    return col;
+}
+
+// Water: the camera ray against every packed plane (z, then the rectangles
+// of its surfaces). The nearest plane in front of the primary world hit whose
+// rectangles hold the point wins; failing that, the nearest one passing within
+// REFL_MARGIN of them (GL's waves lift the very edge). Writes every pixel. rgb is the
+// reflection in the same space as `result`; alpha packs the plane's group
+// (1-based; planes of one height share it) times 65536 plus the length of the
+// whole reflected path (camera -> water -> what it hit, 65535 for the sky),
+// which GL turns into a depth for the particles it draws into this image.
+// 0 = nothing traced: GL then draws that pixel from its own planar texture.
+#ifndef HWRT_NO_REFL
+void waterReflection(ivec2 p)
+{
+    if((pc.mode & REFL_WATER) == 0) return;
+    if(p.x >= pc.size.x || p.y >= pc.size.y) return;
+    int nplanes = (pc.mode >> REFL_PLANESHIFT) & 31;
+    vec3 o = pc.origin.xyz;
+    vec3 d = worldRayDir(p);
+    const float REFL_MARGIN = 2.0;
+    float bestT = gPrimaryT, nearT = gPrimaryT;
+    int best = -1, nearest = -1;
+    if(d.z < -1e-5)
+    {
+        for(int k = 0; k < nplanes; k++)
+        {
+            Light W = lights.water[k];
+            float z = W.pos.z;
+            if(o.z <= z + 0.05) continue;
+            float t = (z - o.z) / d.z;
+            if(t <= 0.0 || t >= max(bestT, nearT)) continue;
+            vec3 hp = o + d * t;
+            if(hp.x < W.pos.x || hp.y < W.pos.y || hp.x > W.radius || hp.y > W.color.x) continue;
+            int r0 = int(W.color.z), r1 = min(r0 + int(W.flags), REFL_MAXRECTS);
+            bool inside = false, close = false;
+            for(int r = r0; r < r1; r++)
+            {
+                vec4 R = lights.waterRect[r];
+                if(hp.x >= R.x && hp.y >= R.y && hp.x <= R.z && hp.y <= R.w) { inside = true; break; }
+                if(hp.x >= R.x - REFL_MARGIN && hp.y >= R.y - REFL_MARGIN && hp.x <= R.z + REFL_MARGIN && hp.y <= R.w + REFL_MARGIN) close = true;
+            }
+            if(inside && t < bestT) { bestT = t; best = k; }
+            else if(close && t < nearT) { nearT = t; nearest = k; }
+        }
+        if(best < 0) { best = nearest; bestT = nearT; }
+    }
+    vec4 outv = vec4(0.0);
+    if(best >= 0)
+    {
+        vec3 hp = o + d * bestT;
+        vec3 rd = vec3(d.x, d.y, -d.z);
+        float rt;
+        vec3 c = traceReflection(hp + vec3(0.0, 0.0, 0.02), rd, bestT, reflPixelAngle(), rt);
+        float path = rt < 0.0 ? 65535.0 : min(bestT + rt, 65535.0);
+        outv = vec4(c, lights.water[best].color.y * 65536.0 + path);
+    }
+    imageStore(reflout, p, outv);
+}
+#endif
+
+// UV change one pixel right and one pixel up on the face's plane.
+vec4 worldUvGrad(ivec2 pix, vec3 p0, vec3 p1, vec3 p2, vec3 n, vec2 t0, vec2 t1, vec2 t2, vec2 tc)
+{
+    vec2 uvx = uvOnPlane(pix + ivec2(1, 0), p0, p1, p2, n, t0, t1, t2, tc);
+    vec2 uvy = uvOnPlane(pix + ivec2(0, 1), p0, p1, p2, n, t0, t1, t2, tc);
+    return vec4(wrapDelta(uvx - tc), wrapDelta(uvy - tc));
+}
+
+// Tangent-space normal map of a world face in the frame GL builds for it
+// (tangent along the texture's s axis, bitangent along t), and in .w the spec
+// map that layer carries (the diffuse alpha, resampled smoothly), -1 when the
+// face has no layer. Gradients from the pixel footprint, so a far floor does
+// not glitter.
+vec4 worldNormalSpec(uint nlayer, vec2 tc, vec4 grad, vec3 p0, vec3 p1, vec3 p2, vec3 n, vec2 t0, vec2 t1, vec2 t2)
+{
+    int nnorm = textureSize(normals, 0).z;
+    if(nlayer == TRI_NORMAL_NONE || int(nlayer) >= nnorm) return vec4(n, -1.0);
+    vec4 ns = textureGrad(normals, vec3(tc, float(nlayer)), grad.xy, grad.zw);
+    vec3 e1 = p1 - p0, e2 = p2 - p0;
+    vec2 d1 = t1 - t0, d2 = t2 - t0;
+    float det = d1.x * d2.y - d2.x * d1.y;
+    if(abs(det) < 1e-12) return vec4(n, ns.a);
+    vec3 T = (e1 * d2.y - e2 * d1.y) / det;
+    vec3 B = (e2 * d1.x - e1 * d2.x) / det;
+    T -= n * dot(n, T);
+    float tl = length(T);
+    if(tl < 1e-8) return vec4(n, ns.a);
+    T /= tl;
+    vec3 Bo = cross(n, T);
+    if(dot(Bo, B) < 0.0) Bo = -Bo;
+    vec3 nm = ns.rgb * 2.0 - 1.0;
+    vec3 nb = T * nm.x + Bo * nm.y + n * nm.z;
+    float bl = length(nb);
+    return vec4(bl > 1e-6 ? nb / bl : n, ns.a);
 }
 
 void shadePixel()
@@ -837,6 +1247,12 @@ void shadePixel()
     uint omnimask = 0u, nearmask = 0u, sunmask = 0u, skymask = 0u;
     uint skipInst = 0xFFFFFFFFu;
     int nuse = 1;
+    // Reflections lot: read again after tileCull (world spec, envmap mirror).
+    uint envbits = 0u;
+    vec3 bumpn = n;
+    float specmask = 1.0;
+    float wspecScale = 0.0;
+    float reflHitT = 0.0;
 
     if(live) do
     {
@@ -999,11 +1415,19 @@ void shadePixel()
 
     vec3 noffset = n;
     vec2 tc = vec2(0.0);
+    envbits = 0u;
+    bumpn = n;
+    specmask = 1.0;
+    vec4 uvgrad = vec4(0.0);
+    wspecScale = 0.0;
     uint modelmask = 0xFFu;
     float modelspec = 0.5;
 
     if(custom == 0u)
     {
+#ifndef HWRT_NO_REFL
+        gPrimaryT = hitT;
+#endif
         uint ntris = uint(max(pc.range.w, 0.0));
         if(prim >= ntris)
         {
@@ -1048,8 +1472,9 @@ void shadePixel()
 
         int ndiff = int(pc.range.y);
         albedo = vec3(1.0, 0.0, 1.0);
-        if(ndiff > 0 && int(t.x) >= 0 && int(t.x) < ndiff)
-            albedo = colorTex(sampleWorldDiff(int(t.x), tc, p, p0, p1, p2, n, tc0, tc1, tc2, difflod));
+        int layer = int(t.x & TRI_LAYER_MASK);
+        if(ndiff > 0 && layer < ndiff)
+            albedo = colorTex(sampleWorldDiff(layer, tc, p, p0, p1, p2, n, tc0, tc1, tc2, (t.x >> 26u) & 7u, difflod));
         // t.y: low 16 = lightmap index, high 16 = bottom (dirt) diffuse layer.
         // GL draws the dirt opaque then blends grass with lightmap.a.
         uint lmid = t.y & 0xFFFFu;
@@ -1057,7 +1482,7 @@ void shadePixel()
         if(bot != 0xFFFFu && ndiff > 0 && int(bot) < ndiff)
         {
             float botlod = 0.0;
-            vec3 botc = colorTex(sampleWorldDiff(int(bot), btc, p, p0, p1, p2, n, btc0, btc1, btc2, botlod));
+            vec3 botc = colorTex(sampleWorldDiff(int(bot), btc, p, p0, p1, p2, n, btc0, btc1, btc2, t.x >> 29u, botlod));
             float ba = 1.0;
             int nlm = textureSize(lightmaps, 0).z;
             if(lmid >= 6u && nlm > 0 && int(lmid) < nlm)
@@ -1067,6 +1492,30 @@ void shadePixel()
         }
         vec3 scale = vec3(float(t.z & 255u), float((t.z >> 8u) & 255u), float((t.z >> 16u) & 255u)) * (1.0 / 255.0);
         albedo *= scale;
+#ifndef HWRT_NO_REFL
+        envbits = t.z >> 24u;
+        // The spec shaders' highlight and the envmap mirror both follow the
+        // normal map, as in GL; the diffuse lighting keeps the flat face.
+        uint specq = (t.x >> 9u) & 255u;
+        bool wantspec = (pc.mode & SPEC) != 0 && specq != 0u;
+        bool wantenv = (pc.mode & REFL_WORLD) != 0 && envbits != 0u;
+        if(wantspec || wantenv)
+        {
+            uvgrad = worldUvGrad(p, p0, p1, p2, n, tc0, tc1, tc2, tc);
+            vec4 ns = worldNormalSpec((t.x >> 18u) & 255u, tc, uvgrad, p0, p1, p2, n, tc0, tc1, tc2);
+            bumpn = ns.xyz;
+            if(ns.w >= 0.0) specmask = ns.w;
+            else if(ndiff > 0 && layer < ndiff)
+                specmask = textureGrad(diffuses, vec3(tc, float(layer)), uvgrad.xy, uvgrad.zw).a;
+        }
+        if(wantspec)
+        {
+            wspecScale = float(specq) * (1.0 / 16.0);
+            if((t.x & 0x20000u) != 0u) wspecScale *= specmask;
+            gWSpecOn = wspecScale > 0.0;
+            gWSpecN = bumpn;
+        }
+#endif
         // t.w: low 8 = glow layer (0xFF = none), high 24 = glowcolor rgb.
         uint glayer = t.w & 255u;
         int nglow = int(lights.env.glowLayers + 0.5);
@@ -1222,6 +1671,9 @@ void shadePixel()
         if(ss >= 3.5) omnimask = nearmask = sunmask = skymask = RAYMASK_ALL;
     }
     skipInst = ismodel ? hitInst : 0xFFFFFFFFu;
+#ifndef HWRT_NO_REFL
+    reflHitT = hitT;
+#endif
     reach = true;
     } while(false);
 
@@ -1309,6 +1761,9 @@ void shadePixel()
                 {
                     direct += lights.env.sunColor * ndotl;
                     addSpec(sdir, n, dir, lights.env.sunColor, specMul, specAcc);
+#ifndef HWRT_NO_REFL
+                    addWorldSpec(sdir, dir, lights.env.sunColor);
+#endif
                 }
             }
         }
@@ -1358,6 +1813,41 @@ void shadePixel()
         // so REBLUR used its full blur radius and snow bled into gravel.
         if(nrdOn) skyHitDist = (hitN > 0) ? (hitAcc / float(hitN)) : 65504.0;
     }
+
+#ifndef HWRT_NO_REFL
+    // World spec, then the envmap mirror, in glsl.cfg's order: the highlight
+    // joins the lit diffuse, and mix(lit, reflection, envscale [* spec map])
+    // scales both down where the mirror takes over.
+    vec3 wspec = vec3(0.0);
+    if(gWSpecOn)
+    {
+        // GL's lumel is 8 bit: the light under the highlight stops at 1.
+        vec3 sl = gWSpecAcc;
+        if((pc.mode & HDR) == 0) sl = min(sl, vec3(1.0));
+        wspec = sl * wspecScale;
+    }
+    // An envmapped face (the mapper asked GL for a cubemap mirror there) gets
+    // the traced reflection instead, dosed the way GL doses its cubemap.
+    if(!ismodel && envbits != 0u && (pc.mode & REFL_WORLD) != 0)
+    {
+        float k = float(envbits & 127u) / 127.0;
+        if((envbits & 128u) != 0u) k *= specmask;
+        if(k > 0.002)
+        {
+            vec3 rd = reflect(dir, bumpn);
+            // A bumped normal can send the ray into the face itself.
+            if(dot(rd, n) < 0.02) rd = normalize(rd - n * (dot(rd, n) - 0.02));
+            float rt;
+            vec3 rc = traceReflection(hit + n * 0.05, rd, reflHitT, reflPixelAngle(), rt);
+            // mix(albedo * lit, rc, k): the diffuse part shrinks, the mirror
+            // rides in specAcc, which both the direct and the NRD compose add.
+            albedo *= 1.0 - k;
+            wspec *= 1.0 - k;
+            specAcc += rc * k;
+        }
+    }
+    specAcc += wspec;
+#endif
 
     valid = true;
     } while(false);
@@ -1789,5 +2279,8 @@ void shadePixel()
 void main()
 {
     shadePixel();
+#ifndef HWRT_NO_REFL
+    waterReflection(ivec2(gl_GlobalInvocationID.xy));
+#endif
     storeHdrProbe(ivec2(gl_GlobalInvocationID.xy));
 }

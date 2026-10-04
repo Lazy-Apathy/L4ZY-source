@@ -14,7 +14,7 @@ Not selected, and why:
   nvsdk_ngx_uwp_*.lib      UWP. Unused.
 
 Runtime:
-  lib/Windows_x86_64/rel/nvngx_dlss.dll  (snippet, copied to bin64/ngx)
+  lib/Windows_x86_64/rel/nvngx_dlss.dll  (snippet, copied next to sauer_ngx.dll in bin64/ngx-hdr)
   nvngx.dll from the NVIDIA driver (DriverStore / System32). Not copied.
 
 Headers used by the DLL:
@@ -34,12 +34,12 @@ MinGW (present):
 Portable MSVC (no system Visual Studio; preferred on this machine):
   powershell -File third_party\fetch-msvc.ps1
   Writes third_party\msvc\setup_x64.bat (MSVC 14.44 + Windows SDK 26100).
-  Then src\ngx_gateway\build-dll.bat finds it automatically.
+  Then src\ngx_gateway\build-dll-hdr.bat finds it automatically.
 
 System-wide alternative (needs your approval):
   winget install Microsoft.VisualStudio.2022.BuildTools --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
 
 Then:
-  src\ngx_gateway\build-dll.bat
+  src\ngx_gateway\build-dll-hdr.bat
   src\ngx_gateway\build-probe.bat
   src\build-ngx.bat

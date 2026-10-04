@@ -194,13 +194,17 @@ lowlatency: low latency mode, the mouse is read once the GPU catches up. 0 off, 
 vsynctear: allow tearing when the frame rate drops below the refresh rate
 maxfps: frame rate limit (0 = none)
 windowmode: 0 windowed, 1 exclusive fullscreen, 2 borderless fullscreen
-hdroutpref: display output. -1 automatic (HDR if Windows HDR is on), 0 SDR, 1 native HDR
+hdroutpref: display output. -1 automatic (HDR if Windows HDR is on), 0 SDR (default), 1 native HDR
 hdroutref: HDR paper white: brightness of normal white in HDR, in nits
 hdroutmax: HDR peak brightness in nits (0 = what the screen reports)
 hdrouthud: brightness of the HUD and menus in HDR, in nits (0 = same as paper white)
 hwrt: ray traced lighting (RTX). 1 on, 0 off (classic lighting)
-hwrtngxmode: anti-aliasing / upscaling. 0 native, 1 DLAA, 2 DLSS quality, 3 DLSS balanced, 4 DLSS performance
+hwrtngxmode: anti-aliasing / upscaling. 0 native, 1 DLAA, 2 DLSS quality, 3 DLSS balanced, 4 DLSS performance (DLAA/DLSS need an NVIDIA RTX card), 5 FSR native, 6 FSR quality, 7 FSR balanced, 8 FSR performance (AMD FSR, any graphics card)
+hwrtfsrsharpness: extra sharpening after AMD FSR, 0 off to 100
 hwrtnrd: denoiser for ray traced lighting
+hwrtreflections: sharp ray traced reflections on water and reflective surfaces (ray tracing). 1 on, 0 off
+hwrtspecular: shine of lamps and sun on glossy surfaces (ray tracing). 1 on, 0 off
+hwrtdiffupscale: how small wall and floor textures are enlarged with ray tracing (blocky, shimmering steps up close otherwise). 2 bicubic (default), 3 Lanczos (a little sharper, slower map load), 0 nearest (old blocky look), 1 bilinear (softer)
 hwrtshadowself: which lights cast my own shadow with ray tracing. 0 none, 1 the sun, 2 + small lights, 3 + nearest lamps, 4 + sky
 hwrtteleportlight: teleporters glow and light the room (ray tracing)
 hwrtjumppadlight: jump pads glow and light the room (ray tracing)
@@ -225,6 +229,7 @@ rtaobias: -
 dlaa: -
 dlss: -
 dlssquality: -
+gtao: ambient occlusion in classic lighting (darkens corners, wall bases and contacts with props, only the ambient and sky part of the light; never players, guns, water or effects). 0 off, 1 low (small, close occlusion), 2 high (wider). Not used with ray tracing
 lookao: soft shadows in creases and corners (ambient occlusion)
 lookaoscale: strength of that ambient occlusion
 lookaoradius: size of that ambient occlusion

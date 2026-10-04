@@ -1036,6 +1036,46 @@ int texalign(const void *data, int w, int bpp)
     return 4;
 }
     
+// NVIDIA DLSS Programming Guide 3.5 (mip-map bias): while DLAA/DLSS renders the
+// scene, the scene textures (world slots and model skins, Texture::scene) are
+// sampled with LOD bias log2(render width / display width) - 1, set by dlaa.cpp
+// through setscenelodbias. UI, HUD, fonts and render targets keep 0, as do
+// Native and FSR (bias 0: no GL call at all, the old state is untouched).
+static float scenelodbias = 0;
+
+static void applyscenelodbias(Texture &t, bool reset)
+{
+    if(!t.id || !t.mipmap || (t.type&Texture::TYPE) != Texture::IMAGE || (t.type&Texture::STUB)) return;
+    if(scenelodbias == 0 && !reset) return;
+    glBindTexture(GL_TEXTURE_2D, t.id);
+    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_LOD_BIAS, scenelodbias);
+}
+
+void markscenetexture(Texture *t)
+{
+    if(!t || t == notexture || t->scene) return;
+    t->scene = true;
+    if(scenelodbias != 0)
+    {
+        GLint prev = 0;
+        glGetIntegerv(GL_TEXTURE_BINDING_2D, &prev);
+        applyscenelodbias(*t, false);
+        glBindTexture(GL_TEXTURE_2D, prev);
+    }
+}
+
+void setscenelodbias(float bias)
+{
+    if(bias == scenelodbias) return;
+    scenelodbias = bias;
+    GLint prev = 0;
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &prev);
+    enumerate(textures, Texture, tex, { if(tex.scene) applyscenelodbias(tex, true); });
+    glBindTexture(GL_TEXTURE_2D, prev);
+}
+
+float getscenelodbias() { return scenelodbias; }
+
 static Texture *newtexture(Texture *t, const char *rname, ImageData &s, int clamp = 0, bool mipit = true, bool canreduce = false, bool transient = false, int compress = 0)
 {
     if(!t)
@@ -1109,6 +1149,8 @@ static Texture *newtexture(Texture *t, const char *rname, ImageData &s, int clam
         GLenum component = compressedformat(format, t->w, t->h, compress);
         createtexture(t->id, t->w, t->h, s.data, clamp, filter, component, GL_TEXTURE_2D, t->xs, t->ys, s.pitch, false, format, swizzle);
     }
+    if(canreduce) t->scene = true;
+    if(t->scene) applyscenelodbias(*t, false);
     return t;
 }
 
@@ -2679,8 +2721,11 @@ struct envmap
 static vector<envmap> envmaps;
 static Texture *skyenvmap = NULL;
 
+static GLuint hwrtskycube = 0;
+
 void clearenvmaps()
 {
+    if(hwrtskycube) { glDeleteTextures(1, &hwrtskycube); hwrtskycube = 0; }
     if(skyenvmap)
     {
         if(skyenvmap->type&Texture::TRANSIENT) cleanuptexture(skyenvmap);
@@ -2826,6 +2871,58 @@ static inline GLuint lookupskyenvmap()
 {
     return envmaps.length() && envmaps[0].radius < 0 ? envmaps[0].tex : (skyenvmap ? skyenvmap->id : 0);
 }
+
+// Traced reflections: the sky a traced mirror sees when its ray escapes. GL
+// draws its sky with more than the skybox images (yawsky, skyboxcolour, the
+// fog dome, cloud layers, the atmosphere), so with ray tracing and reflections
+// on, the sky is rendered once per map exactly as GL draws it, into a cubemap
+// of its own (gl_drawframe calls this before anything else of the frame, the
+// way Sauerbraten itself generates its env maps). Until then, and in classic
+// lighting, nothing is rendered and the plain sky envmap is used.
+void hwrtgenskycube()
+{
+    extern int hwrtavailable;
+    if(hwrtskycube || !hwrt || !hwrtreflections || !hwrtavailable) return;
+    int size = 512, sizelimit = min(hwcubetexsize, min(screenw, screenh));
+    if(maxtexsize) sizelimit = min(sizelimit, maxtexsize);
+    while(size > sizelimit) size /= 2;
+    if(size < 16) return;
+    GLint prevfb = 0;
+    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &prevfb);
+    glBindFramebuffer_(GL_FRAMEBUFFER, 0);
+    hwrthdrsetlin(false);
+    glGenTextures(1, &hwrtskycube);
+    glViewport(0, 0, size, size);
+    uchar *pixels = new uchar[3*size*size];
+    glPixelStorei(GL_PACK_ALIGNMENT, texalign(pixels, size, 3));
+    loopi(6)
+    {
+        const cubemapside &side = cubemapsides[i];
+        float yaw = 0, pitch = 0;
+        switch(side.target)
+        {
+            case GL_TEXTURE_CUBE_MAP_NEGATIVE_X: yaw = 90; pitch = 0; break;
+            case GL_TEXTURE_CUBE_MAP_POSITIVE_X: yaw = 270; pitch = 0; break;
+            case GL_TEXTURE_CUBE_MAP_NEGATIVE_Y: yaw = 180; pitch = 0; break;
+            case GL_TEXTURE_CUBE_MAP_POSITIVE_Y: yaw = 0; pitch = 0; break;
+            case GL_TEXTURE_CUBE_MAP_NEGATIVE_Z: yaw = 270; pitch = -90; break;
+            case GL_TEXTURE_CUBE_MAP_POSITIVE_Z: yaw = 270; pitch = 90; break;
+        }
+        glFrontFace((side.flipx==side.flipy)!=side.swapxy ? GL_CW : GL_CCW);
+        drawcubemap(size, camera1->o, yaw, pitch, side, true);
+        glReadPixels(0, 0, size, size, GL_RGB, GL_UNSIGNED_BYTE, pixels);
+        createtexture(hwrtskycube, size, size, pixels, 3, 2, GL_RGB8, side.target);
+    }
+    glFrontFace(GL_CW);
+    delete[] pixels;
+    glViewport(0, 0, screenw, screenh);
+    glBindFramebuffer_(GL_FRAMEBUFFER, prevfb);
+    // drawcubemap moved the view cell to the cube's eye: put it back.
+    setviewcell(camera1->o);
+    conoutf("hwrt: sky rendered into a %dx%d cubemap for the traced reflections", size, size);
+}
+
+GLuint hwrtskyenvtex() { return hwrtskycube ? hwrtskycube : lookupskyenvmap(); }
 
 GLuint lookupenvmap(Slot &slot)
 {

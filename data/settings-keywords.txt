@@ -169,8 +169,13 @@ translatepreview: apercu frappe traduction
 translatefemme: femme feminin accord
 hwrt: ray tracing rt eclairage raytracing
 hdroutpref: hdr sdr sortie ecran
-hwrtngxmode: dlss dlaa anticrenelage
+hwrtngxmode: dlss dlaa fsr amd upscaling anticrenelage
+hwrtfsrsharpness: fsr nettete sharpening rcas
+hwrtreflections: reflets eau miroir reflexion rt
+hwrtspecular: brillance speculaire reflet lampe soleil rt
+hwrtdiffupscale: textures lissage agrandissement bicubique lanczos pixels blocs escalier scintillement nettete rt
 looktaa: anticrenelage temporel taa
+gtao: occlusion ambiante ao gtao ssao coins recoins relief ombres contact
 lookao: ombres occlusion ssao
 lookselfshadow: ombre soleil
 invmouse: inverser souris

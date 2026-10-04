@@ -107,8 +107,10 @@ void main()
     int ndiff = int(pc.range.z);
     int nlm = int(pc.range.y);
     vec3 albedo = vec3(1.0, 0.0, 1.0);
-    if(ndiff > 0 && int(t.x) >= 0 && int(t.x) < ndiff)
-        albedo = texture(diffuses, vec3(tc, float(t.x))).rgb;
+    // t.x low 9 bits: the diffuse layer (the rest is hitlight's spec / normal data).
+    int layer = int(t.x & 0x1FFu);
+    if(ndiff > 0 && layer < ndiff)
+        albedo = texture(diffuses, vec3(tc, float(layer))).rgb;
     vec2 btc = vec2(verts.v[i0].pad, verts.v[i0].pad2) * a
              + vec2(verts.v[i1].pad, verts.v[i1].pad2) * b
              + vec2(verts.v[i2].pad, verts.v[i2].pad2) * c;

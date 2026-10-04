@@ -2740,7 +2740,8 @@ namespace server
         loopv(clients)
         {
             clientinfo *ci = clients[i];
-            if(!ci->connected || ci->state.aitype != AI_NONE) continue;
+            // a local game is your own client: nothing to check
+            if(!ci->connected || ci->local || ci->state.aitype != AI_NONE) continue;
             if(ci->clanmodok || ci->clanmodlocked) continue;
             if(!ci->clanmodhello) continue;
             if(totalmillis - ci->clanmodhello < 3000) continue;
@@ -3971,7 +3972,7 @@ namespace server
                 {
                     ci->clanmodok = true;
                     ci->clanmodlocked = false;
-                    sendf(ci->clientnum, 1, "ris", N_SERVMSG, CLANMOD_WELCOME);
+                    if(!ci->local) sendf(ci->clientnum, 1, "ris", N_SERVMSG, CLANMOD_WELCOME);
                     if(ci->state.state==CS_SPECTATOR && mastermode < MM_LOCKED)
                     {
                         unspectate(ci);

@@ -242,6 +242,9 @@ struct hwrtdevice
     uint32_t scratchalign;
     float timestampperiod;  // nanoseconds per timestamp tick
     uint32_t timestampbits; // 0 = this queue cannot timestamp
+    // samplerAnisotropy enabled on this device: the largest ratio a sampler
+    // may ask for (limits.maxSamplerAnisotropy). 0 = not available.
+    float maxaniso;
 
     bool ok() const { return device != VK_NULL_HANDLE; }
 };
@@ -269,6 +272,38 @@ extern void hwrtdlaacleanup();
 extern void hwrtdlaaframe();
 extern bool hwrtdlaaneedsdata();
 extern bool hwrtdlaaactive();
+
+// AMD FSR 3.1 upscaler (fsr.cpp, bin64\fsr\sauer_fsr.dll). Same best-effort
+// rules as NGX; dlaa.cpp drives it through the shared images for modes 5-8.
+struct hwrtfsrimage
+{
+    VkImage image;
+    VkFormat format;
+    int w, h;
+};
+struct hwrtfsrdispatchargs
+{
+    VkCommandBuffer cmd;
+    hwrtfsrimage color, depth, motion, reactive, exposure, output; // reactive/exposure: image 0 = none
+    float jitterx, jittery;  // render pixels, +Y down (the values NGX receives)
+    int renderw, renderh;
+    bool reset;
+};
+extern bool hwrtfsrloadgateway();
+extern bool hwrtfsrgatewayloaded();
+// Device features vkdevice.cpp enabled for FSR (same bits as SAUER_FSR_DEV_*).
+enum { HWRT_FSR_DEV_FORMATLESS = 1u << 0, HWRT_FSR_DEV_FP16 = 1u << 1 };
+extern void hwrtfsrondevice(uint32_t enabledfeatures);
+extern void hwrtfsrshutdown();
+extern bool hwrtfsravailable();
+extern const char *hwrtfsrreason();
+extern bool hwrtfsrsimulating(const char *mode);
+extern bool hwrtfsrquerysize(int enginemode, int outw, int outh, int &inw, int &inh);
+extern bool hwrtfsrcreate(int enginemode, int inw, int inh, int outw, int outh, bool hdr, char *err, int errlen);
+extern bool hwrtfsrdispatch(const hwrtfsrdispatchargs &a, char *err, int errlen);
+extern void hwrtfsrrelease();
+extern bool hwrtfsrconfigured();
+extern uint64_t hwrtfsrvram();
 
 // ---------------------------------------------------------------------------
 // GL <-> Vulkan interop
@@ -338,6 +373,26 @@ extern void hwrtwaitgl();        // Vulkan -> GL handoff
 extern void hwrtcomposite(bool replace, float alpha);
 extern void hwrtcompositeao();
 extern void hwrtprobeshared();
+
+// Traced reflections and world spec (Options > Graphics, RT only). A second
+// shared RGBA32F image, same size as the result: the lighting pass writes the
+// water reflection seen at each pixel into it (hitlight.comp waterReflection),
+// GL draws the particles of each traced plane into it, and the water shader
+// samples it in screen space in place of its 2^reflectsize planar texture.
+extern int hwrtreflections, hwrtspecular;
+extern bool hwrtrefllive();       // image exists and the pass wrote it this frame
+extern VkImage hwrtreflimage();
+extern VkImageView hwrtreflview();
+extern GLuint hwrtreflgltex();
+extern int hwrtwaterplanecount;   // planes packed by hwrtupdatelights() this frame
+extern void hwrtsetreflwritten(bool on);
+enum { HWRT_MAX_WATERPLANES = 16, HWRT_MAX_WATERRECTS = 512 };
+// min x, min y, max x, max y (with the margin), z, group, first rectangle,
+// rectangle count: one row per plane GL will reflect this frame that the RT
+// can take over; rects: min x, min y, max x, max y of its surfaces (water.cpp).
+extern int hwrtgatherwaterplanes(float (*out)[8], int maxplanes, float (*rects)[4], int maxrects);
+extern GLuint hwrtskyenvtex();
+extern void hwrtwriteskyenvbinding(VkDescriptorSet set);
 
 // ---------------------------------------------------------------------------
 // Vulkan side of the frame
@@ -437,6 +492,11 @@ enum { HWRT_RAYMASK_WORLD = 0x01, HWRT_RAYMASK_MODEL = 0x02, HWRT_RAYMASK_SELF =
 // GLDEPTH says this frame's window depth reached the shared R32F, so the
 // shader can drop any hit GL rasterised something in front of.
 enum { HWRT_MODE_MASK_MODELS = 0x100, HWRT_MODE_SHADE_MODELS = 0x200, HWRT_MODE_GLDEPTH = 0x400, HWRT_MODE_HDR = 0x800, HWRT_MODE_HDRPROBE = 0x1000 };
+// Traced reflections: water planes traced into the reflection image, envmapped
+// world faces traced instead of left matte (hwrtreflections); SPEC gives the
+// world's spec shaders their highlights back (hwrtspecular). Bits 16-20 carry
+// the water plane count.
+enum { HWRT_MODE_REFL_WATER = 0x2000, HWRT_MODE_REFL_WORLD = 0x4000, HWRT_MODE_SPEC = 0x8000, HWRT_MODE_REFL_PLANESHIFT = 16 };
 
 extern int hwrthdrprobe;
 extern int hwrthdrpushmode;
@@ -554,13 +614,17 @@ struct hwrttexarray
     int w, h, layers, mips;
 };
 
-extern bool hwrtuploadtexarray(VkCommandBuffer cmd, const vector<GLuint> &ids, int maxdim, hwrttexarray &out, const char *what, bool mips = false);
+// upscale (world diffuse only, needs mips): 0 nearest (blocks), 1 bilinear,
+// 2 bicubic Catmull-Rom, 3 Lanczos-3; 1-3 build every mip level from the
+// original texture (as.cpp, hwrtdiffupscale).
+extern bool hwrtuploadtexarray(VkCommandBuffer cmd, const vector<GLuint> &ids, int maxdim, hwrttexarray &out, const char *what, bool mips = false, int upscale = 0);
 extern bool hwrtuploadcubemap(VkCommandBuffer cmd, GLuint gltex, hwrttexarray &out, const char *what);
 // Same layers as hwrtuploadtexarray into an image with spare layers;
 // first > 0 appends ids[first..] without touching the others (see as.cpp).
 extern bool hwrtuploadtexlayers(const vector<GLuint> &ids, int first, int maxdim, int capacity, hwrttexarray &out, int &outcap, const char *what, bool mips);
 extern void hwrtreaptexupload(bool wait);
 extern void hwrtdestroytexupload();
+extern bool hwrtuploadcubemapcap(VkCommandBuffer cmd, GLuint gltex, hwrttexarray &out, const char *what, int dimcap);
 extern void hwrtdestroytexarray(hwrttexarray &t);
 extern void hwrtnoteenvmap(GLuint gltex);
 extern bool hwrtcreatesampler(bool repeat, VkSampler &out, bool mips = false);
@@ -600,6 +664,8 @@ extern bool hwrtskybluenoiseready();
 extern void hwrtnrdpreload();
 extern bool hwrtnrdensure(int w, int h);
 extern bool hwrtnrdsession();
+// Sky rays actually traced: hwrtskyrays with NRD, at least 4 otherwise (lights.cpp).
+extern int hwrtskyrayseffective();
 extern bool hwrtnrdsetimages(VkImage diff, VkImage viewz, VkImage normal, VkImage mv, VkImage outdiff, int w, int h);
 extern bool hwrtnrddenoise(VkCommandBuffer cmd, int w, int h, int reset);
 extern void hwrtdestroynrd();
@@ -643,12 +709,46 @@ enum
     HWRT_WHY_DRIVER,     // driver too old: no GL/Vulkan sharing, or Vulkan below 1.2
     HWRT_WHY_NOMATCH,    // Vulkan does not list the GPU OpenGL runs on
     HWRT_WHY_NORT,       // the GPU has no hardware ray tracing (no ray query)
-    HWRT_WHY_FAILED      // it should work but failed to start: see the console
+    HWRT_WHY_FAILED,     // it should work but failed to start: see the console
+    HWRT_WHY_TIMEOUT,    // the Vulkan driver did not answer in time (probe or start-up)
+    HWRT_WHY_CRASH       // the Vulkan probe process crashed (driver or overlay layer)
 };
 extern void hwrtunavailable(int why);
-// SAUER_HWRT_SIMULATE=novulkan|driver|nort|failed, read once at bring-up, fakes an
-// incompatible GPU through the real fallback path. Returns true if MODE is simulated.
+// SAUER_HWRT_SIMULATE=novulkan|driver|nort|failed|hang|hanglate|crash, read once at
+// bring-up, fakes an incompatible or stuck GPU through the real fallback path.
+// Returns true if MODE is simulated.
 extern bool hwrtsimulating(const char *mode);
+
+// Deferred Vulkan start-up (vkdevice.cpp). States, in order:
+enum
+{
+    HWRT_VK_IDLE = 0,    // nothing known yet, nothing started
+    HWRT_VK_PROBING,     // the probe process (sauerbraten.exe -vkprobe) is running
+    HWRT_VK_PROBED,      // probe answered; hwrtvkprobe holds what it saw, nothing created here
+    HWRT_VK_STARTING,    // the start-up worker thread is creating the device
+    HWRT_VK_READY,       // device, NGX, FSR and trace pipelines are up in this process
+    HWRT_VK_FAILED,      // start-up failed (hwrtwhy says why); Vulkan stays off
+    HWRT_VK_TIMEOUT      // probe or worker did not answer in time; Vulkan stays off
+};
+struct hwrtvkproberesult
+{
+    int why;             // HWRT_WHY_* the probe found (NONE = GL's GPU can share with Vulkan)
+    int rtwhy;           // HWRT_WHY_* for ray tracing alone (NONE = it can trace)
+    bool rayquery;       // that GPU can trace
+    bool nvidia;         // that GPU is NVIDIA (DLAA/DLSS can be offered)
+    char name[VK_MAX_PHYSICAL_DEVICE_NAME_SIZE];
+};
+extern int hwrtvkstate;
+extern hwrtvkproberesult hwrtvkprobe;
+extern bool hwrtvkabandoned;        // a timed-out worker may still be inside the driver
+extern bool hwrtvkready();          // HWRT_VK_READY and never abandoned
+extern bool hwrtvkchecking();       // IDLE/PROBING: the menus say "checking"
+extern bool hwrtvkcanstart();       // probe said yes (or still running) and nothing failed
+extern bool hwrtvkensure(const char *why); // start now (bounded wait), true if READY
+extern const char *hwrtvkstallreason(); // "" or why Vulkan was given up (timeout/crash)
+extern int hwrtvktimeoutsecs();
+extern void hwrtvksetuuid(const uint8_t *uuid);
+extern void hwrtvkschedule(int delayms); // background probe in DELAYMS (nothing wanted at start)
 
 #define HWRTCHECK(call, what) \
     do { \

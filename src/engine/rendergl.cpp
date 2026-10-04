@@ -1612,6 +1612,54 @@ void drawreflection(float z, bool refract, int fogdepth, const bvec &col)
     setcamprojmatrix(false, true);
 }
 
+// Traced water reflections (water.cpp): GL's mirror camera for the plane at
+// z, exactly the setup drawreflection() gives its reflecting pass, but nothing
+// is drawn here; the caller renders the particles of that plane into the
+// traced image. begin = false puts the main camera back.
+static matrix4 reflpartcammatrix, reflpartprojmatrix;
+
+void hwrtreflectcamera(float z, bool begin)
+{
+    if(begin)
+    {
+        reflpartcammatrix = cammatrix;
+        reflpartprojmatrix = projmatrix;
+        reflectz = z;
+        reflecting = true;
+
+        vec color(0, 0, 0);
+        float start = 0, end = 0;
+        blendfog(MAT_AIR, 1, 1, start, end, color);
+        pushfogdist(start, end);
+        pushfogcolor(color);
+
+        cammatrix.reflectz(z);
+        glFrontFace(GL_CCW);
+        if(reflectclip)
+        {
+            float zclip = z - reflectclip/4.0f;
+            if(camera1->o.z>=zclip && camera1->o.z<=z+4.0f) zclip = z;
+            zclip = 2*z - zclip;
+            plane clipplane;
+            invcammatrix.transposedtransform(plane(0, 0, -1, zclip), clipplane);
+            clipmatrix.clip(clipplane, projmatrix);
+            projmatrix = clipmatrix;
+        }
+        setcamprojmatrix(false, true);
+    }
+    else
+    {
+        cammatrix = reflpartcammatrix;
+        projmatrix = reflpartprojmatrix;
+        glFrontFace(GL_CW);
+        popfogdist();
+        popfogcolor();
+        reflectz = 1e16f;
+        reflecting = false;
+        setcamprojmatrix(false, true);
+    }
+}
+
 int drawtex = 0;
 
 void drawcubemap(int size, const vec &o, float yaw, float pitch, const cubemapside &side, bool onlysky)
@@ -2034,6 +2082,254 @@ void addlookao()
     screenquad(1, 1);
 }
 
+// Ground Truth Ambient Occlusion, classic lighting only (XeGTAO port, see
+// glsl.cfg). Runs after the world and the mapmodels, before the players:
+// its depth never holds a player or the first-person gun, and its result is
+// applied to the lightmapped world alone, on the ambient and sky part of
+// each lumel. Off by default; with RT lighting the bake is skipped and RT
+// has its own sky visibility, so it does nothing there.
+void cleanupgtao();
+VARFP(gtao, 0, 1, 2, cleanupgtao());
+VAR(gtaodebug, 0, 0, 3);
+FVAR(gtaolowradius, 1, 5, 64);
+FVAR(gtaohighradius, 1, 10, 64);
+VAR(gtaolowslices, 1, 2, 8);
+VAR(gtaohighslices, 1, 3, 8);
+VAR(gtaolowsteps, 1, 3, 8);
+VAR(gtaohighsteps, 1, 4, 8);
+FVAR(gtaopower, 0.5f, 1, 3);
+FVAR(gtaomaxscreen, 0.02f, 0.12f, 0.5f);
+FVAR(gtaofadestart, 0, 600, 1e4f);
+FVAR(gtaofadelength, 1, 400, 1e4f);
+FVAR(gtaodenoisetol, 0, 2, 64);
+
+#define GTAO_MIPS 5
+static GLuint gtaodepthtex = 0, gtaolintex = 0, gtaorawtex = 0, gtaoaotex = 0;
+static GLuint gtaolinfbo[GTAO_MIPS] = { 0 }, gtaorawfbo = 0, gtaoaofbo = 0;
+static int gtaow = 0, gtaoh = 0;
+static bool gtaoapplied = false;
+
+void cleanupgtao()
+{
+    if(gtaodepthtex) { glDeleteTextures(1, &gtaodepthtex); gtaodepthtex = 0; }
+    if(gtaolintex) { glDeleteTextures(1, &gtaolintex); gtaolintex = 0; }
+    if(gtaorawtex) { glDeleteTextures(1, &gtaorawtex); gtaorawtex = 0; }
+    if(gtaoaotex) { glDeleteTextures(1, &gtaoaotex); gtaoaotex = 0; }
+    loopi(GTAO_MIPS) if(gtaolinfbo[i]) { glDeleteFramebuffers_(1, &gtaolinfbo[i]); gtaolinfbo[i] = 0; }
+    if(gtaorawfbo) { glDeleteFramebuffers_(1, &gtaorawfbo); gtaorawfbo = 0; }
+    if(gtaoaofbo) { glDeleteFramebuffers_(1, &gtaoaofbo); gtaoaofbo = 0; }
+    gtaow = gtaoh = 0;
+}
+
+static void gtaotexparams(GLenum minfilter)
+{
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, minfilter);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+}
+
+static bool gtaofbo(GLuint &fbo, GLuint tex, int level)
+{
+    if(!fbo) glGenFramebuffers_(1, &fbo);
+    glBindFramebuffer_(GL_FRAMEBUFFER, fbo);
+    glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, level);
+    return glCheckFramebufferStatus_(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+}
+
+static bool setupgtao(int w, int h)
+{
+    if(gtaow == w && gtaoh == h && gtaoaofbo) return true;
+    cleanupgtao();
+    glGenTextures(1, &gtaodepthtex);
+    glBindTexture(GL_TEXTURE_2D, gtaodepthtex);
+    gtaotexparams(GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_NONE);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, w, h, 0, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, NULL);
+
+    glGenTextures(1, &gtaolintex);
+    glBindTexture(GL_TEXTURE_2D, gtaolintex);
+    gtaotexparams(GL_NEAREST_MIPMAP_NEAREST);
+    loopi(GTAO_MIPS) glTexImage2D(GL_TEXTURE_2D, i, GL_R32F, max(w>>i, 1), max(h>>i, 1), 0, GL_RED, GL_FLOAT, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, GTAO_MIPS-1);
+
+    glGenTextures(1, &gtaorawtex);
+    glBindTexture(GL_TEXTURE_2D, gtaorawtex);
+    gtaotexparams(GL_NEAREST);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, w, h, 0, GL_RED, GL_UNSIGNED_BYTE, NULL);
+
+    glGenTextures(1, &gtaoaotex);
+    glBindTexture(GL_TEXTURE_2D, gtaoaotex);
+    gtaotexparams(GL_NEAREST);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, w, h, 0, GL_RED, GL_UNSIGNED_BYTE, NULL);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    bool ok = true;
+    loopi(GTAO_MIPS) ok = gtaofbo(gtaolinfbo[i], gtaolintex, i) && ok;
+    ok = gtaofbo(gtaorawfbo, gtaorawtex, 0) && ok;
+    ok = gtaofbo(gtaoaofbo, gtaoaotex, 0) && ok;
+    if(!ok)
+    {
+        static bool gtaowarned = false;
+        if(!gtaowarned)
+        {
+            gtaowarned = true;
+            logoutf("gtao: render targets incomplete, ambient occlusion disabled");
+            conoutf(CON_WARN, "Ambient occlusion could not start on this graphics card; it stays off.");
+        }
+        cleanupgtao();
+        return false;
+    }
+    gtaow = w;
+    gtaoh = h;
+    return true;
+}
+
+// The pass the frame actually gets: never with RT lighting (no bake to
+// darken), never without GLSL 1.30 (texelFetch / textureLod).
+static bool gtaousable()
+{
+    if(!gtao || minimized || glslversion < 130 || !hasFBO) return false;
+    if(wireframe && editmode) return false;
+    if(hwrtnobake()) return false;
+    return true;
+}
+
+static void gtaopass(Shader *s, GLuint fbo, int w, int h)
+{
+    glBindFramebuffer_(GL_FRAMEBUFFER, fbo);
+    glViewport(0, 0, w, h);
+    s->set();
+}
+
+void rendergtao()
+{
+    gtaoapplied = false;
+    if(!gtaousable()) return;
+    int w = hwrtfbw(), h = hwrtfbh();
+    if(w < 8 || h < 8) return;
+    Shader *linshader = useshaderbyname("gtaolinear"), *mipshader = useshaderbyname("gtaomip"),
+           *mainshader = useshaderbyname("gtaomain"), *denoiseshader = useshaderbyname("gtaodenoise"),
+           *applyshader = useshaderbyname("gtaoapply");
+    if(!linshader || linshader->invalid() || !mipshader || mipshader->invalid() ||
+       !mainshader || mainshader->invalid() || !denoiseshader || denoiseshader->invalid() ||
+       !applyshader || applyshader->invalid())
+        return;
+
+    GLint prevfb = 0;
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prevfb);
+    if(!setupgtao(w, h)) { glBindFramebuffer_(GL_FRAMEBUFFER, prevfb); return; }
+    glBindFramebuffer_(GL_FRAMEBUFFER, prevfb);
+
+    // World + mapmodels depth, players not drawn yet.
+    glActiveTexture_(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, gtaodepthtex);
+    glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, w, h);
+
+    bool depthtest = glIsEnabled(GL_DEPTH_TEST) != 0, cull = glIsEnabled(GL_CULL_FACE) != 0,
+         stencil = glIsEnabled(GL_STENCIL_TEST) != 0, blend = glIsEnabled(GL_BLEND) != 0;
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);
+    glDisable(GL_STENCIL_TEST);
+    glDisable(GL_BLEND);
+
+    gtaopass(linshader, gtaolinfbo[0], w, h);
+    LOCALPARAMF(gtaoproj, nearplane, float(farplane), 0, 0);
+    screenquad();
+
+    bool high = gtao >= 2;
+    float radius = high ? gtaohighradius : gtaolowradius;
+    float falloffrange = 0.615f*radius, fallofffrom = radius*(1 - 0.615f);
+    float falloffmul = -1.0f/falloffrange, falloffadd = fallofffrom/falloffrange + 1;
+    {
+        // XeGTAO_DepthMIPFilter: 0.75 x radius
+        float mr = 0.75f*radius, mrange = 0.615f*mr, mfrom = mr*(1 - 0.615f);
+        glBindTexture(GL_TEXTURE_2D, gtaolintex);
+        for(int i = 1; i < GTAO_MIPS; i++)
+        {
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, i-1);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, i-1);
+            gtaopass(mipshader, gtaolinfbo[i], max(w>>i, 1), max(h>>i, 1));
+            LOCALPARAMF(gtaomipparams, -1.0f/mrange, mfrom/mrange + 1, 0, 0);
+            screenquad();
+        }
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, GTAO_MIPS-1);
+    }
+
+    // View position from the (possibly jittered) projection this frame uses.
+    vec4 gtaoview(1.0f/projmatrix.a.x, 1.0f/projmatrix.b.y, projmatrix.c.x, projmatrix.c.y);
+    float pixview = 2.0f/(projmatrix.b.y*h);
+    gtaopass(mainshader, gtaorawfbo, w, h);
+    LOCALPARAM(gtaoview, gtaoview);
+    LOCALPARAMF(gtaosize, w, h, 1.0f/w, 1.0f/h);
+    LOCALPARAMF(gtaoradius, radius, falloffmul, falloffadd, pixview);
+    LOCALPARAMF(gtaoparams, high ? gtaohighslices : gtaolowslices, high ? gtaohighsteps : gtaolowsteps, gtaomaxscreen*h, gtaopower);
+    LOCALPARAMF(gtaofade, gtaofadestart, 1.0f/gtaofadelength, float(farplane)*0.999f, 0);
+    screenquad();
+
+    glActiveTexture_(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, gtaolintex);
+    glActiveTexture_(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, gtaorawtex);
+    gtaopass(denoiseshader, gtaoaofbo, w, h);
+    LOCALPARAM(gtaoview, gtaoview);
+    LOCALPARAMF(gtaosize, w, h, 1.0f/w, 1.0f/h);
+    LOCALPARAMF(gtaodenoiseparams, gtaodenoisetol, pixview, 0.05f, 0);
+    screenquad();
+
+    glBindFramebuffer_(GL_FRAMEBUFFER, prevfb);
+    glViewport(0, 0, w, h);
+
+    if(gtaodebug == 1 || gtaodebug == 3)
+    {
+        Shader *showshader = useshaderbyname("gtaoshow");
+        if(showshader && !showshader->invalid())
+        {
+            glBindTexture(GL_TEXTURE_2D, gtaodebug == 3 ? gtaorawtex : gtaoaotex);
+            showshader->set();
+            screenquad();
+        }
+    }
+    else
+    {
+        // Multiplier on the lightmapped world, over the depth it wrote.
+        glActiveTexture_(GL_TEXTURE2);
+        glBindTexture(GL_TEXTURE_2D, gtaoaotex);
+        glActiveTexture_(GL_TEXTURE0);
+        glEnable(GL_DEPTH_TEST);
+        glDepthFunc(GL_LEQUAL);
+        glDepthMask(GL_FALSE);
+        glEnable(GL_CULL_FACE);
+        if(gtaodebug != 2)
+        {
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_ZERO, GL_SRC_COLOR);
+        }
+        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
+        applyshader->set();
+        extern bvec skylightcolor;
+        LOCALPARAMF(gtaosky, skylightcolor.x/255.0f, skylightcolor.y/255.0f, skylightcolor.z/255.0f, 0);
+        LOCALPARAMF(gtaoscreen, 1.0f/w, 1.0f/h, gtaodebug == 2 ? 1 : 0, 0);
+        extern void rendergtaogeom();
+        rendergtaogeom();
+        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        glDepthMask(GL_TRUE);
+        glDepthFunc(GL_LESS);
+        glDisable(GL_BLEND);
+        glActiveTexture_(GL_TEXTURE2);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glActiveTexture_(GL_TEXTURE0);
+    }
+
+    if(depthtest) glEnable(GL_DEPTH_TEST); else glDisable(GL_DEPTH_TEST);
+    if(cull) glEnable(GL_CULL_FACE); else glDisable(GL_CULL_FACE);
+    if(stencil) glEnable(GL_STENCIL_TEST);
+    if(blend) glEnable(GL_BLEND);
+    gtaoapplied = true;
+}
+
 static GLuint looktaacolor = 0, looktaadepth = 0, looktaahist = 0;
 static int looktaaw = 0, looktaah = 0;
 static bool looktaaready = false;
@@ -2051,7 +2347,9 @@ void cleanuplooktaa()
 VARFP(looktaa, 0, 0, 1, {
     looktaaready = false;
     if(!looktaa) cleanuplooktaa();
-    if(identexists("LOOK_apply")) execute("LOOK_apply");
+    // Not while config.cfg loads: the shaders are not loaded yet ("no such postfx
+    // shader: fxaa" at every start); glsl.cfg runs LOOK_apply once they are.
+    if(!initing && identexists("LOOK_apply")) execute("LOOK_apply");
 });
 
 static bool looktaausable()
@@ -2174,6 +2472,7 @@ void gl_drawframe()
     extern void hdrout_framebegin();
     hdrout_framebegin();
     if(deferdrawtextures) drawtextures();
+    hwrtgenskycube();
 
     updatedynlights();
     hwrtapplyvelspin();
@@ -2259,6 +2558,7 @@ void gl_drawframe()
     hwrtvelmark();
     rendermapmodels();
     hwrtvelstencilsnap("after_models");
+    rendergtao();
     hwrtvelunmark();
     rendergame(true);
     hwrtvelstencilsnap("after_game");
@@ -2278,6 +2578,7 @@ void gl_drawframe()
     drawglaretex();
     drawdepthfxtex();
     drawreflections();
+    drawtracedreflectionparticles();
 
     if(wireframe && editmode) glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 
@@ -2311,7 +2612,7 @@ void gl_drawframe()
     else
     {
         addmotionblur();
-        addlookao();
+        if(!gtaoapplied) addlookao();
         addlooktaa();
     }
     // Colour gun after the velocity image (which now includes the hudgun
@@ -2680,9 +2981,13 @@ void gl_drawhud()
                 else draw_textf("fps %d", conw-5*FONTH, conh-FONTH*3/2, curfps[0]);
                 hudrect(conw-(showfpsrange ? 7 : 5)*FONTH, conh-FONTH*3/2, (showfpsrange ? 7 : 5)*FONTH - FONTH/2, FONTH);
                 int ngxshow = hwrtngxmodeapplied();
-                if(ngxshow >= 2) draw_textf("DLSS-%c %dx%d", conw-13*FONTH, conh-FONTH*3/2 - FONTH, ngxshow==2?'Q':(ngxshow==3?'B':'P'), hwrtrenderw(), hwrtrenderh());
-                else if(ngxshow == 1) draw_textf("DLAA", conw-5*FONTH, conh-FONTH*3/2 - FONTH);
-                if(ngxshow) hudrect(conw-(ngxshow >= 2 ? 13 : 5)*FONTH, conh-FONTH*3/2 - FONTH, (ngxshow >= 2 ? 13 : 5)*FONTH - FONTH/2, FONTH);
+                // 1 DLAA, 2-4 DLSS Q/B/P, 5 FSR Native, 6-8 FSR Q/B/P
+                bool fsrshow = ngxshow >= 5;
+                int srshow = fsrshow ? ngxshow - 4 : ngxshow;
+                int labelw = srshow >= 2 ? 13 : (fsrshow ? 8 : 5);
+                if(srshow >= 2) draw_textf("%s-%c %dx%d", conw-labelw*FONTH, conh-FONTH*3/2 - FONTH, fsrshow ? "FSR" : "DLSS", srshow==2?'Q':(srshow==3?'B':'P'), hwrtrenderw(), hwrtrenderh());
+                else if(srshow == 1) draw_textf(fsrshow ? "FSR Native" : "DLAA", conw-labelw*FONTH, conh-FONTH*3/2 - FONTH);
+                if(ngxshow) hudrect(conw-labelw*FONTH, conh-FONTH*3/2 - FONTH, labelw*FONTH - FONTH/2, FONTH);
                 roffset += FONTH;
                 if(ngxshow) roffset += FONTH;
             }

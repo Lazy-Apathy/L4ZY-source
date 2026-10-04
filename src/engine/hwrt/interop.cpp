@@ -349,6 +349,155 @@ static bool importimage(int w, int h)
 }
 
 // ---------------------------------------------------------------------------
+// Traced water reflections: a second shared image the lighting pass writes the
+// water reflection into (hitlight.comp waterReflection: rgb, then group *
+// 65536 + reflected path length, hence 32-bit float). GL draws the particles
+// of each traced plane into it and the water shader samples it, nearest, in
+// screen space. Same NT-handle rules as the result image; a failure here only
+// leaves the water on GL's planar pass.
+// ---------------------------------------------------------------------------
+
+struct hwrtreflshared
+{
+    VkImage image;
+    VkDeviceMemory memory;
+    VkDeviceSize memorysize;
+    VkImageView view;
+    GLuint glmemory, gltex;
+#ifdef WIN32
+    HANDLE memhandle;
+#endif
+    bool written; // the lighting pass wrote it this frame
+};
+static hwrtreflshared refl;
+// A failure here must not take the RT layer down with it.
+#define REFLCHECK(call, what) \
+    do { \
+        VkResult _reflres = (call); \
+        if(_reflres != VK_SUCCESS) { conoutf(CON_WARN, "hwrt: %s failed (%s)", what, hwrtresultstr(_reflres)); return false; } \
+    } while(0)
+
+bool hwrtrefllive() { return refl.gltex && refl.written; }
+VkImage hwrtreflimage() { return refl.image; }
+VkImageView hwrtreflview() { return refl.view; }
+GLuint hwrtreflgltex() { return refl.gltex; }
+void hwrtsetreflwritten(bool on) { refl.written = on && refl.gltex; }
+
+static void destroyreflimage()
+{
+    refl.written = false;
+    if(refl.gltex) { glDeleteTextures(1, &refl.gltex); refl.gltex = 0; }
+    if(refl.glmemory) { glDeleteMemoryObjects_(1, &refl.glmemory); refl.glmemory = 0; }
+    if(hwrtdev.device)
+    {
+        if(refl.view) vkDestroyImageView(hwrtdev.device, refl.view, NULL);
+        if(refl.image) vkDestroyImage(hwrtdev.device, refl.image, NULL);
+        if(refl.memory) vkFreeMemory(hwrtdev.device, refl.memory, NULL);
+    }
+    refl.view = VK_NULL_HANDLE;
+    refl.image = VK_NULL_HANDLE;
+    refl.memory = VK_NULL_HANDLE;
+    refl.memorysize = 0;
+#ifdef WIN32
+    if(refl.memhandle) { CloseHandle(refl.memhandle); refl.memhandle = NULL; }
+#endif
+}
+
+static bool createreflimage(int w, int h)
+{
+    VkExternalMemoryImageCreateInfo extinfo = { VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO };
+    extinfo.handleTypes = HWRT_MEM_HANDLE;
+    VkImageCreateInfo imginfo = { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+    imginfo.pNext = &extinfo;
+    imginfo.imageType = VK_IMAGE_TYPE_2D;
+    imginfo.format = VK_FORMAT_R32G32B32A32_SFLOAT;
+    imginfo.extent.width = w;
+    imginfo.extent.height = h;
+    imginfo.extent.depth = 1;
+    imginfo.mipLevels = 1;
+    imginfo.arrayLayers = 1;
+    imginfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    imginfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    imginfo.usage = VK_IMAGE_USAGE_STORAGE_BIT|VK_IMAGE_USAGE_SAMPLED_BIT|VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    imginfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    imginfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    REFLCHECK(vkCreateImage(hwrtdev.device, &imginfo, NULL, &refl.image), "vkCreateImage (reflection)");
+    VkMemoryRequirements req;
+    vkGetImageMemoryRequirements(hwrtdev.device, refl.image, &req);
+    int memtype = hwrtfindmemtype(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    if(memtype < 0) return false;
+    VkMemoryDedicatedAllocateInfo dedicated = { VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO };
+    dedicated.image = refl.image;
+    VkExportMemoryAllocateInfo exportinfo = { VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO };
+    exportinfo.handleTypes = HWRT_MEM_HANDLE;
+    exportinfo.pNext = &dedicated;
+#ifdef WIN32
+    VkExportMemoryWin32HandleInfoKHR win32info = { VK_STRUCTURE_TYPE_EXPORT_MEMORY_WIN32_HANDLE_INFO_KHR };
+    win32info.dwAccess = GENERIC_ALL;
+    exportinfo.pNext = &win32info;
+    win32info.pNext = &dedicated;
+#endif
+    VkMemoryAllocateInfo allocinfo = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+    allocinfo.pNext = &exportinfo;
+    allocinfo.allocationSize = req.size;
+    allocinfo.memoryTypeIndex = uint32_t(memtype);
+    REFLCHECK(vkAllocateMemory(hwrtdev.device, &allocinfo, NULL, &refl.memory), "vkAllocateMemory (reflection)");
+    refl.memorysize = req.size;
+    REFLCHECK(vkBindImageMemory(hwrtdev.device, refl.image, refl.memory, 0), "vkBindImageMemory (reflection)");
+    VkImageViewCreateInfo viewinfo = { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+    viewinfo.image = refl.image;
+    viewinfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    viewinfo.format = imginfo.format;
+    viewinfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    viewinfo.subresourceRange.levelCount = 1;
+    viewinfo.subresourceRange.layerCount = 1;
+    REFLCHECK(vkCreateImageView(hwrtdev.device, &viewinfo, NULL, &refl.view), "vkCreateImageView (reflection)");
+    return true;
+}
+
+static bool importreflimage(int w, int h)
+{
+#ifdef WIN32
+    VkMemoryGetWin32HandleInfoKHR getinfo = { VK_STRUCTURE_TYPE_MEMORY_GET_WIN32_HANDLE_INFO_KHR };
+    getinfo.memory = refl.memory;
+    getinfo.handleType = HWRT_MEM_HANDLE;
+    HANDLE handle = NULL;
+    REFLCHECK(vkGetMemoryWin32HandleKHR(hwrtdev.device, &getinfo, &handle), "vkGetMemoryWin32HandleKHR (reflection)");
+#else
+    VkMemoryGetFdInfoKHR getinfo = { VK_STRUCTURE_TYPE_MEMORY_GET_FD_INFO_KHR };
+    getinfo.memory = refl.memory;
+    getinfo.handleType = HWRT_MEM_HANDLE;
+    int handle = -1;
+    REFLCHECK(vkGetMemoryFdKHR(hwrtdev.device, &getinfo, &handle), "vkGetMemoryFdKHR (reflection)");
+#endif
+    while(glGetError() != GL_NO_ERROR);
+    glCreateMemoryObjects_(1, &refl.glmemory);
+    GLint dedicated = GL_TRUE;
+    glMemoryObjectParameteriv_(refl.glmemory, GL_DEDICATED_MEMORY_OBJECT_EXT, &dedicated);
+#ifdef WIN32
+    glImportMemoryWin32Handle_(refl.glmemory, refl.memorysize, GL_HANDLE_TYPE_OPAQUE_WIN32_EXT, handle);
+    refl.memhandle = handle;
+#else
+    glImportMemoryFd_(refl.glmemory, refl.memorysize, GL_HANDLE_TYPE_OPAQUE_FD_EXT, handle);
+#endif
+    if(!checkglsoft("importing the reflection image")) return false;
+    glActiveTexture_(GL_TEXTURE0);
+    glGenTextures(1, &refl.gltex);
+    glBindTexture(GL_TEXTURE_2D, refl.gltex);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_TILING_EXT, GL_OPTIMAL_TILING_EXT);
+    glTexStorageMem2D_(GL_TEXTURE_2D, 1, GL_RGBA32F, w, h, refl.glmemory, 0);
+    bool ok = checkglsoft("attaching the reflection storage");
+    // Nearest: the alpha is an id and a length, a blend of two is neither.
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    if(ok) conoutf(CON_INIT, "hwrt: reflection image %dx%d RGBA32F, %.1f MB", w, h, refl.memorysize/(1024.0f*1024.0f));
+    return ok;
+}
+
+// ---------------------------------------------------------------------------
 // Shared R32F depth (GL window depth copied in, Vulkan samples it)
 // ---------------------------------------------------------------------------
 
@@ -738,6 +887,11 @@ bool hwrtcreateshared(int w, int h)
         conoutf(CON_WARN, "hwrt: shared depth unavailable, RTAO and the mode 7 depth mask disabled");
         destroyshareddepthgl();
     }
+    if(!createreflimage(w, h) || !importreflimage(w, h))
+    {
+        conoutf(CON_WARN, "hwrt: reflection image unavailable, traced water reflections disabled");
+        destroyreflimage();
+    }
     return true;
 }
 
@@ -746,6 +900,7 @@ void hwrtdestroyshared()
     if(hwrtdev.device) vkDeviceWaitIdle(hwrtdev.device);
     hwrtunbindshared();
     destroyshareddepth();
+    destroyreflimage();
 
     if(hwrtio.glvkdone) { glDeleteSemaphores_(1, &hwrtio.glvkdone); hwrtio.glvkdone = 0; }
     if(hwrtio.glglready) { glDeleteSemaphores_(1, &hwrtio.glglready); hwrtio.glglready = 0; }
@@ -782,8 +937,8 @@ void hwrtdestroyshared()
 
 void hwrtsignalgl()
 {
-    GLuint texs[2];
-    GLenum layouts[2];
+    GLuint texs[3];
+    GLenum layouts[3];
     texs[0] = hwrtio.gltex;
     layouts[0] = GL_LAYOUT_GENERAL_EXT;
     int n = 1;
@@ -792,6 +947,14 @@ void hwrtsignalgl()
         texs[1] = hwrtio.gldepthtex;
         layouts[1] = GL_LAYOUT_GENERAL_EXT;
         n = 2;
+    }
+    // Reflections off: the image is never written nor read, so it is not
+    // handed over at all (trace.cpp skips its barrier the same frame).
+    if(refl.gltex && hwrtreflections)
+    {
+        texs[n] = refl.gltex;
+        layouts[n] = GL_LAYOUT_GENERAL_EXT;
+        n++;
     }
     glSignalSemaphore_(hwrtio.glglready, 0, NULL, n, texs, layouts);
     // The signal has to reach the driver before the Vulkan submit that waits on
@@ -803,8 +966,9 @@ void hwrtsignalgl()
 
 void hwrtwaitgl()
 {
-    GLenum layout = GL_LAYOUT_GENERAL_EXT;
-    glWaitSemaphore_(hwrtio.glvkdone, 0, NULL, 1, &hwrtio.gltex, &layout);
+    GLuint texs[2] = { hwrtio.gltex, refl.gltex };
+    GLenum layouts[2] = { GL_LAYOUT_GENERAL_EXT, GL_LAYOUT_GENERAL_EXT };
+    glWaitSemaphore_(hwrtio.glvkdone, 0, NULL, refl.gltex && hwrtreflections ? 2 : 1, texs, layouts);
 }
 
 // Reads the shared texture back through GL. Slow and only meant for the console

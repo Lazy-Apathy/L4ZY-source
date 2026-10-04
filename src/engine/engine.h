@@ -64,6 +64,9 @@ extern void reloadfonts();
 extern int hwtexsize, hwcubetexsize, hwmaxaniso, maxtexsize;
 
 extern Texture *textureload(const char *name, int clamp = 0, bool mipit = true, bool msg = true);
+extern void markscenetexture(Texture *t);
+extern void setscenelodbias(float bias);
+extern float getscenelodbias();
 extern int texalign(const void *data, int w, int bpp);
 extern void cleanuptexture(Texture *t);
 extern uchar *loadalphamask(Texture *t);
@@ -354,6 +357,14 @@ extern void hudquad(float x, float y, float w, float h, float tx = 0, float ty =
 // hwrt: Vulkan hardware ray tracing layer running beside the GL renderer
 extern void hwrtinit();
 extern void hwrtcleanup();
+// Vulkan is started only when ray tracing or a Vulkan upscaler is wanted, after
+// the config is read (hwrtprefsloaded), never by gl_init; see vkdevice.cpp.
+extern void hwrtprefsloaded();
+extern void hwrtvkpoll();
+extern bool hwrtvkworkerstuck();
+extern int hwrtvkprobemain(int argc, char **argv);
+extern void conthreadinit();
+extern void conflushthreaded();
 extern void hwrtrender();
 extern void hwrtdrawtimes(int conw, int conh);
 extern void hwrtrebuildworld();
@@ -402,6 +413,15 @@ struct hwrtskingeom
 extern bool hwrtskinmodel(dynent *d, model *m, float pitch, hwrtskingeom *geom, hwrtposekey &key);
 extern void hwrtlookupskin(model *m, Texture *tex, Texture *&masks, float &glow, float &spec, float &envmin, float &envmax, GLuint &envid, float &alphatest);
 extern void hwrtnoteenvmap(GLuint gltex);
+// Traced water reflections (hwrtreflections): the water pass samples the
+// image the RT lighting pass wrote this frame, and draws the particles of
+// each traced plane into it with GL's mirror camera.
+extern bool hwrtrefllive();
+extern GLuint hwrtreflgltex();
+extern void hwrtresultsize(int *w, int *h);
+extern void hwrtreflectcamera(float z, bool begin);
+extern int hwrt, hwrtreflections;
+extern void hwrtgenskycube();
 // Game fills the same attachments renderplayer() uses (gun, armour, quad).
 // Weak fallback returns 0 so an unpatched fpsgame still links.
 extern int hwrtdynentattach(dynent *d, modelattach *dst, int maxa);
@@ -595,6 +615,7 @@ extern const bvec &getglasscolor(int mat);
 extern void cleanreflections();
 extern void queryreflections();
 extern void drawreflections();
+extern void drawtracedreflectionparticles();
 extern void renderwater();
 extern void setuplava(Texture *tex, float scale);
 extern void renderlava(const materialsurface &m);
@@ -759,6 +780,7 @@ extern void clearparticleemitters();
 extern void seedparticles();
 extern void updateparticles();
 extern void renderparticles(bool mainpass = false);
+extern bool hasparticlework();
 extern bool printparticles(extentity &e, char *buf, int len);
 struct hwrtpartlabframe
 {

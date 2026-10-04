@@ -1,15 +1,16 @@
 {
- "version": "AAAA.M.J.N",
+ "version": "2026.10.4.1",
  "channel": "stable",
- "label": "a remplir",
- "notes": "a remplir (anglais, court)",
+ "label": "L4ZY: FSR, RT reflections, smoother RT, safer start-up",
+ "notes": "FSR 3.1, RT reflections, smoother RT textures, ambient occlusion, SDR by default, safer Vulkan start-up, fixes",
  "starter_model": "",
  "features": {
   "service_port_env": true
  },
  "base": {
   "game_exe": "src/ compile par distrib/tools/build-game.bat",
-  "menus": "data/menus.cfg de l atelier (= L4ZY)"
+  "menus": "data/menus.cfg de l atelier (= L4ZY)",
+  "source": "L4ZY-source@v2026.10.4.1"
  },
  "files": [
   {

@@ -15,6 +15,14 @@ VAR(hwrtngx, 1, 0, 0);
 VAR(hwrtstalls, 1, 0, 0);
 // 1 draws a HUD overlay of the last completed GL / Vulkan / CPU stage times.
 VARP(hwrttimes, 0, 0, 1);
+// RT mode only (Options > Graphics, "RT Reflections" / "RT Specular"); the
+// classic lighting never reads them. hwrtreflections: one sharp traced ray for
+// the water planes and for the world faces whose shader asks GL for an envmap
+// mirror. hwrtspecular: the lamp and sun highlights of the world's spec
+// shaders, which the traced lighting used to drop. 0 leaves the RT image
+// exactly as it was before either existed.
+VARP(hwrtreflections, 0, 1, 1);
+VARP(hwrtspecular, 0, 1, 1);
 
 hwrttimings hwrttime;
 
@@ -44,8 +52,15 @@ extern int hwrt;
 static int hwrtlitmillis = -100000;
 // 1 = the RT lighting pass was composed within the last second.
 ICOMMAND(hwrtlighteffective, "", (), intret(hwrt && hwrtavailable && !hwrtfailed && totalmillis - hwrtlitmillis < 1000 ? 1 : 0));
-static bool hwrtcanrun() { return hwrtavailable && hwrtrayquery && !hwrtfailed; }
-ICOMMAND(hwrtisavailable, "", (), intret(hwrtcanrun() ? 1 : 0));
+static bool hwrtcanrun() { return hwrtavailable && hwrtrayquery && !hwrtfailed && !hwrtvkabandoned; }
+// RT can be chosen: running, or Vulkan not started yet but the probe saw a GPU
+// that can trace (it is started when the player picks ray tracing).
+static bool hwrtcanoffer()
+{
+    if(hwrtcanrun()) return true;
+    return hwrtvkstate == HWRT_VK_PROBED && hwrtvkprobe.why == HWRT_WHY_NONE && hwrtvkprobe.rayquery && !hwrtvkabandoned;
+}
+ICOMMAND(hwrtisavailable, "", (), intret(hwrtcanoffer() ? 1 : 0));
 
 static int hwrtwhy = HWRT_WHY_NONE;
 static string hwrtsimulate = "";
@@ -53,6 +68,12 @@ static string hwrtsimulate = "";
 void hwrtunavailable(int why)
 {
     if(hwrtwhy == HWRT_WHY_NONE) hwrtwhy = why;
+}
+
+// A timeout or a crash replaces whatever a stuck worker may have recorded.
+void hwrtvksetwhy(int why)
+{
+    hwrtwhy = why;
 }
 
 bool hwrtsimulating(const char *mode)
@@ -64,7 +85,17 @@ bool hwrtsimulating(const char *mode)
 static const char *hwrtreason()
 {
     if(hwrtcanrun()) return "";
+    if(hwrtvkchecking()) return "Ray tracing: checking the graphics card and driver...";
+    if(hwrtvkstate == HWRT_VK_TIMEOUT)
+    {
+        static string msg;
+        formatstring(msg, "Ray tracing is not available: %s", hwrtvkstallreason());
+        return msg;
+    }
+    if(hwrtcanoffer()) return "";
     int why = hwrtwhy;
+    // The probe answered, nothing is started here yet: its view of the GPU decides.
+    if(hwrtvkstate == HWRT_VK_PROBED && hwrtvkprobe.why == HWRT_WHY_NONE) why = hwrtvkprobe.rtwhy;
     // interop without ray query is a device that came up fine but has no RT cores
     if(why == HWRT_WHY_NONE && hwrtavailable && !hwrtrayquery && !hwrtfailed) why = HWRT_WHY_NORT;
     switch(why)
@@ -75,27 +106,44 @@ static const char *hwrtreason()
         case HWRT_WHY_NORT:
         {
             static string msg;
-            if(hwrtdev.name[0]) formatstring(msg, "Ray tracing is not available: this graphics card (%s) has no hardware ray tracing.", hwrtdev.name);
+            const char *name = hwrtdev.name[0] ? hwrtdev.name : hwrtvkprobe.name;
+            if(name[0]) formatstring(msg, "Ray tracing is not available: this graphics card (%s) has no hardware ray tracing.", name);
             else copystring(msg, "Ray tracing is not available: this graphics card has no hardware ray tracing.");
             return msg;
         }
-        default: return "Ray tracing is not available: it failed to start (see the console).";
+        default: return "Ray tracing is not available: it failed to start (details in log.txt).";
     }
 }
 ICOMMAND(hwrtraison, "", (), result(hwrtreason()));
 // read-only: the SAUER_HWRT_SIMULATE mode in force, "" in normal use
 ICOMMAND(hwrtsimulated, "", (), result(hwrtsimulate));
 
+// Vulkan may still be unstarted when this changes. While the config loads, a
+// saved `hwrt 1` is kept and hwrtprefsloaded decides once Vulkan answered (or
+// not). Afterwards (menu, console, script) Vulkan is started here, with the
+// same bounded wait, and the value is corrected if it still cannot trace.
+// Interop alone (no ray query) is not enough: nothing would be traced.
+static bool hwrtcouldtrace()
+{
+    if(!hwrtvkcanstart()) return false;
+    return !(hwrtvkstate == HWRT_VK_PROBED && !hwrtvkprobe.rayquery);
+}
 VARFP(hwrt, 0, 0, 1,
 {
-    // hwrtinit runs during gl_init, before any config is executed, so a saved
-    // `hwrt 1` can be corrected here rather than left lying to menus and scripts.
-    // The reason was already logged once at init, hence the silence while loading.
-    // Interop alone (no ray query) is not enough: nothing would be traced.
     if(hwrt && !hwrtcanrun())
     {
-        if(!initing) conoutf(CON_WARN, "hwrt: staying on OpenGL. %s", hwrtreason());
-        hwrt = 0;
+        if(initing)
+        {
+            if(!hwrtcouldtrace()) hwrt = 0;
+            return;
+        }
+        if(hwrtcouldtrace()) hwrtvkensure("ray tracing chosen");
+        if(!hwrtcanrun())
+        {
+            logoutf("hwrt: staying on OpenGL (ray tracing chosen, cannot run)");
+            if(hwrtreason()[0]) conoutf(CON_WARN, "%s", hwrtreason());
+            hwrt = 0;
+        }
     }
     if(initing) return;
     if(!hwrt) hwrtdestroyshared();
@@ -112,15 +160,19 @@ VARFP(hwrt, 0, 0, 1,
 // so `hwrt 1` is RT lighting for the player; 1–6 stay available.
 VARP(hwrtdebug, 0, 7, 7);
 VARP(hwrtdlights, 1, 1, 4);
-// Four cosine-weighted sky rays (the cap). One ray is a coin flip per
-// pixel; spatial mix + TAA did not get the testers to zero dots, and they
-// were already fine with four. Keep hwrtskyfilter on so neighbours still
-// share the leftover. Do not drop this back to 1 for fps.
-VARP(hwrtskyrays, 1, 4, 4);
+// Cosine-weighted sky rays per pixel (1..4). Default 1 since 2026-10-04: with
+// NRD + blue noise, 1 ray showed no grain on the canon maps (shots/rayons-ciel
+// study, then a tester's own test) and gives back 0.07-0.48 ms per ray dropped.
+// That only holds where NRD denoises: the Sauer filter (skyage, pcg hash; NRD
+// off, unavailable or failed) is the path where one ray was a coin flip the
+// testers rejected, so hwrtskyrayseffective() (lights.cpp) traces at least 4
+// there, without touching this saved preference. l4zymigration 2 (main.cpp)
+// moves a saved 4 (the old default) to 1 once; 2 and 3 are kept.
+VARP(hwrtskyrays, 1, 1, 4);
 // Average skyvis across the 16x16 lighting workgroup before the bake-style
 // max(). One 5x5 on the same plane (four rays carry the grain; a wider
-// kernel smeared mid/far lighting). 0 is the raw term. Do not drop
-// hwrtskyrays back to 1.
+// kernel smeared mid/far lighting). 0 is the raw term. The skyage path never
+// traces fewer than 4 rays (hwrtskyrayseffective).
 VARP(hwrtskyfilter, 0, 1, 1);
 // Frames of skyvis a converged pixel keeps. Four rays are 4 coin flips, so the
 // raw fraction has an irreducible 0.25 of noise; the 5x5 brings about 12
@@ -290,6 +342,7 @@ static const struct { const char *name; float play, alsook; } hwrtonlineonly[] =
     { "hwrtdiffvis", 0, 0 },        // albedo only (no shadows) / lighting only (no textures)
     { "hwrtskyvisdbg", 0, 0 },      // sky visibility heatmaps
     { "hdrlightdbg", 0, 0 },        // classic world: light alone / texture alone
+    { "gtaodebug", 0, 0 },          // classic GTAO: grey AO / raw AO / multiplier alone
     { "hwrtdepthmask", 1, 1 },      // 0 draws traced hits over grass, water, world alpha
     // test drives: they move or pin the camera, the player, other players or a mapmodel
     { "hwrtvelwalk", 0, 0 },
@@ -392,10 +445,14 @@ bool hwrtnobake()
     return true;
 }
 
+static int hwrtinitcount = 0;
+static bool hwrtvkwasready = false;
+
 void hwrtinit()
 {
     if(hwrtinited) return;
     hwrtinited = true;
+    bool reset = hwrtinitcount++ > 0;   // resetgl, not the first start
     hwrtfailed = false;
 
     // A stuck semaphore takes the process down without unwinding, and the engine
@@ -403,60 +460,112 @@ void hwrtinit()
     // ones that would be lost. The log is a few dozen lines a session.
     if(getlogfile()) setvbuf(getlogfile(), NULL, _IONBF, 0);
 
-    hwrtwhy = HWRT_WHY_NONE;
-    const char *sim = getenv("SAUER_HWRT_SIMULATE");
-    copystring(hwrtsimulate, sim ? sim : "");
-    if(hwrtsimulate[0])
+    if(!reset)
     {
-        static const char * const modes[] = { "novulkan", "driver", "nort", "failed" };
-        bool known = false;
-        loopi(int(sizeof(modes)/sizeof(modes[0]))) if(!strcmp(hwrtsimulate, modes[i])) known = true;
-        if(known) conoutf(CON_WARN, "hwrt: SAUER_HWRT_SIMULATE=%s, simulating an incompatible GPU (diagnostic)", hwrtsimulate);
-        else
+        hwrtwhy = HWRT_WHY_NONE;
+        time_t now = time(NULL);
+        char when[64] = "?";
+        strftime(when, sizeof(when), "%Y-%m-%d %H:%M:%S", localtime(&now));
+        conoutf(CON_INIT, "hwrt: [%u ms] start-up at %s", SDL_GetTicks(), when);
+        const char *sim = getenv("SAUER_HWRT_SIMULATE");
+        copystring(hwrtsimulate, sim ? sim : "");
+        if(hwrtsimulate[0])
         {
-            conoutf(CON_WARN, "hwrt: SAUER_HWRT_SIMULATE=%s is not novulkan, driver, nort or failed; ignored", hwrtsimulate);
-            hwrtsimulate[0] = 0;
+            static const char * const modes[] = { "novulkan", "driver", "nort", "failed", "hang", "hanglate", "crash", "crashigpu", "crashigpuold", "crashigpulayer", "hangigpu", "crashoverlay", "hangoverlay", "crashsearch" };
+            bool known = false;
+            loopi(int(sizeof(modes)/sizeof(modes[0]))) if(!strcmp(hwrtsimulate, modes[i])) known = true;
+            if(known) conoutf(CON_WARN, "hwrt: SAUER_HWRT_SIMULATE=%s, simulating an incompatible or stuck GPU (diagnostic)", hwrtsimulate);
+            else
+            {
+                conoutf(CON_WARN, "hwrt: SAUER_HWRT_SIMULATE=%s is not novulkan, driver, nort, failed, hang, hanglate, crash, crashigpu, crashigpuold, crashigpulayer, hangigpu, crashoverlay, hangoverlay or crashsearch; ignored", hwrtsimulate);
+                hwrtsimulate[0] = 0;
+            }
         }
     }
+    if(hwrtvkabandoned) return;   // a stuck worker owns Vulkan for this run
 
     if(hwrtsimulating("driver"))
     {
         conoutf(CON_INIT, "hwrt: OpenGL driver has no GL_EXT_memory_object (simulated), staying on OpenGL");
         hwrtunavailable(HWRT_WHY_DRIVER);
+        hwrtvkstate = HWRT_VK_FAILED;
         return;
     }
-    if(!hwrtloadglinterop()) { hwrtunavailable(HWRT_WHY_DRIVER); return; }
+    if(!hwrtloadglinterop()) { hwrtunavailable(HWRT_WHY_DRIVER); hwrtvkstate = HWRT_VK_FAILED; return; }
 
     uint8_t gluuid[VK_UUID_SIZE];
     if(!hwrtglgetdeviceuuid(gluuid))
     {
         conoutf(CON_INIT, "hwrt: OpenGL will not report a device UUID, staying on OpenGL");
         hwrtunavailable(HWRT_WHY_DRIVER);
+        hwrtvkstate = HWRT_VK_FAILED;
         return;
     }
-    if(!hwrtinitdevice(gluuid) || !hwrtinittrace())
+    hwrtvksetuuid(gluuid);
+    if(!reset)
     {
-        hwrtunavailable(HWRT_WHY_FAILED);
-        hwrtdestroytrace();
-        hwrtdestroydevice();
+        // Not here any more: vkCreateInstance loads every Vulkan driver and
+        // implicit layer of the machine, and one of them can hang or crash.
+        conoutf(CON_INIT, "hwrt: GL side ready; Vulkan starts only for ray tracing or DLAA/DLSS/FSR, after the settings are read");
         return;
     }
+    if(hwrtvkwasready) hwrtvkensure("graphics reset");
+}
+
+// After config.cfg and autoexec.cfg: start Vulkan now only if something saved
+// needs it, otherwise let the probe find out in the background.
+void hwrtprefsloaded()
+{
+    extern int hwrtngxmode, hwrtvkstall;
+    bool want = hwrt || hwrtngxmode != 0;
+    logoutf("hwrt vk: [%u ms] settings read: hwrt %d, AA mode %d -> Vulkan %s", SDL_GetTicks(), hwrt, hwrtngxmode,
+            !want ? "not needed now" : (hwrtvkstall ? "needed, but not started automatically (hwrtvkstall 1)" : "needed"));
+    if(want && !hwrtvkstall) hwrtvkensure("saved settings");
+    else
+    {
+        if(want)
+        {
+            logoutf("hwrt vk: Vulkan did not answer during an earlier start (hwrtvkstall 1): classic lighting and Native AA for now; choosing RT, DLAA, DLSS or FSR in Graphics retries");
+            conoutf(CON_WARN, "Ray tracing and DLAA/DLSS/FSR are off this time: the graphics driver did not answer during an earlier start. Choose them again in Graphics to retry.");
+        }
+        hwrtvkschedule(3000);
+    }
+    if(hwrt && !hwrtcanrun())
+    {
+        if(want && hwrtvkstall && hwrtvkcanstart()) logoutf("hwrt: staying on OpenGL this time (Vulkan did not answer during an earlier start); choose Ray tracing again in Graphics to retry");
+        else
+        {
+            logoutf("hwrt: staying on OpenGL (saved ray tracing setting cannot run)");
+            if(hwrtreason()[0] && hwrtvkstate != HWRT_VK_TIMEOUT) conoutf(CON_WARN, "%s", hwrtreason()); // a timeout was announced by vkgiveup
+        }
+        hwrt = 0;
+    }
+}
+
+// The worker brought the device up (main thread, before anything uses it).
+bool hwrtvkonready()
+{
     if(hwrtsimulating("failed"))
     {
         hwrtfail("simulated start-up failure (SAUER_HWRT_SIMULATE=failed)");
         hwrtunavailable(HWRT_WHY_FAILED);
         hwrtdestroytrace();
         hwrtdestroydevice();
-        return;
+        hwrtvkstate = HWRT_VK_FAILED;
+        return false;
     }
-
     hwrtavailable = 1;
     hwrtrayquery = hwrtdev.rayquery ? 1 : 0;
     hwrtnrdpreload();
+    return true;
 }
 
 void hwrtcleanup()
 {
+    hwrtinited = false;
+    // A worker that never came back may still be inside the driver with these
+    // objects: nothing of Vulkan is touched again in this process.
+    if(hwrtvkabandoned) { hwrtavailable = hwrtrayquery = 0; return; }
     hwrtcleanupmask();
     hwrtcleanupgltimes();
     hwrtdestroyshared();
@@ -465,13 +574,15 @@ void hwrtcleanup()
     hwrtdestroylights();
     hwrtdestroydevice();
     hwrtavailable = hwrtrayquery = 0;
-    hwrtinited = false;
     memset(&hwrttime, 0, sizeof(hwrttime));
+    hwrtvkwasready = hwrtvkstate == HWRT_VK_READY;
+    if(hwrtvkstate == HWRT_VK_READY) hwrtvkstate = HWRT_VK_PROBED;   // the probe's answer still holds
 }
 
 static void disablehwrt(const char *why)
 {
-    conoutf(CON_WARN, "hwrt: %s, falling back to OpenGL", why);
+    logoutf("hwrt: %s, falling back to OpenGL", why);
+    conoutf(CON_WARN, "Ray tracing stopped after an error; classic lighting is used (details in log.txt).");
     hwrt = 0;
     hwrtavailable = 0;
     hwrtdestroyshared();
@@ -479,6 +590,9 @@ static void disablehwrt(const char *why)
 
 void hwrtrender()
 {
+    // Only this frame's lighting pass may hand the water shader a reflection:
+    // RT off, a failed device or a skipped frame leaves GL on its own pass.
+    hwrtsetreflwritten(false);
     if(!hwrt || !hwrtavailable || hwrtfailed) return;
 
     // A framebuffer with no area is a transient state, not an interop failure.
@@ -695,10 +809,11 @@ ICOMMAND(hwrtstats, "", (),
                 hwrtworldtris, hwrtworldverts, hwrthasworld() ? "" : " (empty)",
                 hwrthasshade() ? ", hit-shade ready" : "",
                 hwrthaslights() ? ", lights ready" : "");
-    if(hwrthaslights()) conoutf("hwrt: %d point lights (%d unlimited, %d glow), hwrtdlights %d, sun %s, sky %s (cvar %d rays packed %.2f, filter %s, temporal %d, hold %d, histfilter %d, age %d), world gain %.2f",
+    if(hwrthaslights()) conoutf("hwrt: %d point lights (%d unlimited, %d glow), hwrtdlights %d, sun %s, sky %s (cvar %d rays, effective %d with %s, packed %.2f, filter %s, temporal %d, hold %d, histfilter %d, age %d), world gain %.2f",
             hwrtlightcount, hwrtunlimcount, hwrtglowlightcount, int(hwrtdlights),
             hwrtsunon ? "on" : "off", hwrtskyon ? "on" : "off", int(hwrtskyrays),
-            float(hwrtskyrays) + (hwrtskyfilter ? 0.25f : 0.0f),
+            hwrtskyrayseffective(), hwrtnrdsession() ? "NRD" : "Sauer filter",
+            float(hwrtskyrayseffective()) + (hwrtskyfilter ? 0.25f : 0.0f),
             hwrtskyfilter ? "on" : "off", int(hwrtskytemporal),
             getvar("hwrtskyhold"), getvar("hwrtskyhistfilter"), getvar("hwrtskyage"), hwrtworldgain);
     extern int hwrtnrd;

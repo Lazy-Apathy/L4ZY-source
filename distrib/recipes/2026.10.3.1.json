@@ -1,15 +1,16 @@
 {
- "version": "AAAA.M.J.N",
+ "version": "2026.10.3.1",
  "channel": "stable",
- "label": "a remplir",
- "notes": "a remplir (anglais, court)",
+ "label": "L4ZY: 3D sound, low latency, faster ray tracing",
+ "notes": "optional 3D sound, low latency mode, much faster ray tracing, no freeze on item respawn, version announce, fixes",
  "starter_model": "",
  "features": {
   "service_port_env": true
  },
  "base": {
   "game_exe": "src/ compile par distrib/tools/build-game.bat",
-  "menus": "data/menus.cfg de l atelier (= L4ZY)"
+  "menus": "data/menus.cfg de l atelier (= L4ZY)",
+  "source": "L4ZY-source@v2026.10.3.1 (a69c394)"
  },
  "files": [
   {
@@ -19,7 +20,7 @@
   {
    "dest": "data/glsl.cfg",
    "src": "data/glsl.cfg",
-   "sha256": "07583f1ebd13bab9cca441be1178d53672e59ddcbee25b7515e0b5148e72d518"
+   "sha256": "4d9125769787320aa41f30d91e33afb21e26d902a6f0871614869333da18c53b"
   },
   {
    "dest": "data/menus.cfg",
@@ -28,7 +29,7 @@
   {
    "dest": "bin64/ngx-hdr/sauer_ngx.dll",
    "src": "bin64/ngx-hdr/sauer_ngx.dll",
-   "sha256": "f4dd701f2da748ddf86da30729d8ff6cc98e82b90b22cc2859bd697e37be9e07"
+   "sha256": "520a31223ec7f57a7b12a8b9fef8188787cd95172eb55b3c550f24bb3459b93e"
   },
   {
    "dest": "bin64/ngx-hdr/nvngx_dlss.dll",
@@ -214,16 +215,6 @@
    "dest": "bin64/nrd/LICENSE-NRD.txt",
    "src": "bin64/nrd/LICENSE-NRD.txt",
    "sha256": "85201d19c2dc5041d9a2029e9fda9d78105fe41ce21ce9701d4aa7e56184b6e7"
-  },
-  {
-   "dest": "bin64/fsr/sauer_fsr.dll",
-   "src": "bin64/fsr/sauer_fsr.dll",
-   "sha256": "2eb797aa301b8ddf9ded272bdce5c92f1ca1a59e6c6d77c5a54e2c036517c856"
-  },
-  {
-   "dest": "bin64/fsr/LICENSE-FidelityFX.txt",
-   "src": "bin64/fsr/LICENSE-FidelityFX.txt",
-   "sha256": "c93d509cd69d50698796c9c3274247352736ef122a3197ace2010f0978e21aa6"
   },
   {
    "dest": "autoexec.cfg",

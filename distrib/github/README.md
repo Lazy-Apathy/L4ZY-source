@@ -1,6 +1,6 @@
 # L4ZY
 
-A Cube 2: Sauerbraten (2020) client with **hardware ray-traced lighting**, **NVIDIA DLAA/DLSS**, **native HDR output**, **local AI chat translation** and a **settings assistant**, **3D sound**, a **drag-and-drop HUD editor**, and a lot of quality-of-life additions: friends list, kill feed, CTF flag timer, automatic match recording, HD-aim demos and more.
+A Cube 2: Sauerbraten (2020) client with **hardware ray-traced lighting**, **NVIDIA DLAA/DLSS** and **AMD FSR**, **native HDR output**, **local AI chat translation** and a **settings assistant**, **3D sound**, a **drag-and-drop HUD editor**, and a lot of quality-of-life additions: friends list, kill feed, CTF flag timer, automatic match recording, HD-aim demos and more.
 
 It plays on normal Sauerbraten servers. The only extra thing it sends is one `__L4ZY <version>` line when you connect, which vanilla servers ignore (see [Online rules](#online-rules)).
 
@@ -62,7 +62,7 @@ Uninstalling (Start menu → *Uninstall L4ZY*) keeps your settings and models.
 
 ## Requirements
 
-Windows 10/11 64-bit with an up-to-date graphics driver that supports Vulkan (L4ZY starts Vulkan at launch).
+Windows 10/11 64-bit with an up-to-date graphics driver. Vulkan is only started when you use ray tracing, DLAA/DLSS or FSR.
 
 ### Graphics cards
 
@@ -80,6 +80,7 @@ Windows 10/11 64-bit with an up-to-date graphics driver that supports Vulkan (L4
   - AMD and Intel cards have hardware RT, but this sharing has not been checked on their drivers.
   - If something is missing, the game stays on *Classic* lighting and says so in the menu.
 - **DLAA/DLSS** need NVIDIA Tensor cores (RTX).
+- **AMD FSR** uses the same OpenGL/Vulkan memory sharing as ray tracing. It has only been tested on the RTX 4070 Ti SUPER.
 - **Native HDR** uses the NVIDIA OpenGL/Direct3D bridge.
 - **Chat translation** runs on any Vulkan GPU, or on the CPU (slower).
   - Small model: about 4 GB of VRAM.
@@ -115,6 +116,9 @@ L4ZY ships its own `menus.cfg`: a new main menu, and an Options hub with pages f
 | `hwrtteleportlight` / `hwrtjumppadlight` | light cast by teleporters / jump pads | `1` / `0` |
 | `hwrtsmokeshadow` | rifle/rocket smoke casts RT shadows | `0` |
 | `hwrtsundisk` | hide the skybox and draw a sun disk | `0` |
+| `hwrtreflections` | sharp RT reflections on water and on surfaces the map made reflective (*RT Reflections*) | `1` |
+| `hwrtspecular` | shine of lamps and the sun on glossy surfaces (*RT Specular*) | `1` |
+| `hwrtdiffupscale` | RT texture upscaling (Options → Graphics → *RT Textures*): `2` Bicubic, `3` Lanczos, `0` Nearest (old blocky look); `1` bilinear (console only) | `2` |
 
 Useful commands:
 
@@ -141,16 +145,18 @@ Commands:
 - `/hwrtraison`: why ray tracing cannot run (empty when it can).
 - `/hwrtstats`, `hwrttimes 1`: RT statistics and GPU time per stage.
 
-### Anti-aliasing and upscaling: DLAA / DLSS
+### Anti-aliasing and upscaling: DLAA / DLSS / FSR
 
 **Menu:** Options → Graphics → *Anti-Aliasing*
 
 | Setting | Values | Default |
 |---|---|---|
-| `hwrtngxmode` | `0` Native, `1` DLAA, `2` DLSS Quality, `3` DLSS Balanced, `4` DLSS Performance | `0` |
+| `hwrtngxmode` | `0` Native, `1` DLAA, `2` DLSS Quality, `3` DLSS Balanced, `4` DLSS Performance, `5` FSR Native, `6` FSR Quality, `7` FSR Balanced, `8` FSR Performance | `0` |
+| `hwrtfsrsharpness` | FSR sharpening after upscaling (`0` off, `10` close to DLSS) | `10` |
 
-- FXAA and Temporal AA are not stacked with DLAA/DLSS. They come back in Native.
-- If DLAA/DLSS cannot start, the game falls back to Native and says so.
+- FXAA and Temporal AA are not stacked with DLAA/DLSS/FSR. They come back in Native.
+- If DLAA/DLSS or FSR cannot start, the game falls back to Native and says so.
+- No frame generation.
 
 ### RT sky denoising: NRD
 
@@ -169,7 +175,7 @@ Commands:
 
 | Setting | Values | Default |
 |---|---|---|
-| `hdroutpref` | `-1` Automatic, `0` SDR, `1` Native HDR | `-1` |
+| `hdroutpref` | `-1` Automatic, `0` SDR, `1` Native HDR | `0` |
 | `hwrthdrexp` | exposure, in EV (−8…8; menu steps ±0.1 / ±0.5) | `0` |
 | `hdroutref` | reference white, in nits (40–480) | `80` |
 | `hdroutmax` | peak, in nits; `0` = automatic, from the display | `0` |
@@ -220,6 +226,7 @@ The game reads your mouse once the GPU has caught up, instead of queueing frames
 | `lookao` | "Creases" (SSAO) | `1` |
 | `looktaa` | Temporal AA (otherwise FXAA in Native) | `0` |
 | `lookselfshadow` | your own body casts a sun shadow in first person (classic shadows) | `1` |
+| `gtao` | Ambient Occlusion, classic lighting only (Options → Graphics → *Lighting*): `0` off, `1` Low, `2` High. Slightly darker corners and wall bases; players are never darkened | `1` |
 
 ### Chat translation (local AI)
 
@@ -440,7 +447,7 @@ Tints your body, name, HUD gun and chat/kill-feed name. Click the player preview
 
 ### Online rules
 
-**Client announce.** When you connect to a server, L4ZY sends it one line, once per connection: `__L4ZY <version>` (for example `__L4ZY 2026.9.28.1`), the same way WC-NG announces itself.
+**Client announce.** When you connect to a server, L4ZY sends it one line, once per connection: `__L4ZY <version>` (for example `__L4ZY 2026.9.28.1`).
 
 - Only a released version number (`YEAR.MONTH.DAY.N`) is sent; any other build sends `__L4ZY dev`.
 - Nothing is sent in a local game or a local demo.
@@ -460,14 +467,27 @@ Tints your body, name, HUD gun and chat/kill-feed name. Click the player preview
 
 Each release is listed on the [Releases](https://github.com/Lazy-Apathy/L4ZY/releases) page, newest first.
 
-### 2026.10.3.1 (test)
+### 2026.10.4.1 (test)
+
+- AMD FSR 3.1 upscaling, next to DLAA/DLSS: Options → Graphics → *Anti-Aliasing* (FSR Native, Quality, Balanced, Performance, with a sharpening slider). No frame generation.
+- Ray tracing: sharp reflections on water and on surfaces the map made reflective, and the shine of lamps and the sun on glossy surfaces. Both On; you can turn them off in Options → Graphics (*RT Reflections*, *RT Specular*).
+- Ray tracing: textures no longer shimmer in the distance, and close-up textures are smoothed instead of blocky (Options → Graphics → *RT Textures*: Bicubic by default, Lanczos, or Nearest for the old look).
+- Ray tracing: water no longer turns dull and blurry all of a sudden.
+- Ray tracing: one sky ray per pixel with NRD (was four): faster, with no visible difference in our tests.
+- Ambient Occlusion for classic lighting: slightly darker corners and wall bases, players never darkened. Low by default (Options → Graphics → *Lighting*).
+- DLAA/DLSS set up as NVIDIA's integration guide asks.
+- Display output is now SDR by default. If yours was on Automatic, it is moved to SDR once; choose *Native HDR* in Options → Graphics → *Display output* if you want it.
+- Start-up: Vulkan now starts only when ray tracing, DLAA/DLSS or FSR is used. It is checked first in a separate process; if that check crashes or hangs, the game retries without the faulty Vulkan layer or driver (for example an old AMD integrated-graphics driver on some NVIDIA laptops), remembers what worked, and otherwise falls back to classic lighting + Native with the reason instead of closing. This should help with the start-up crashes and freezes reported on some PCs.
+- Start-up: laptops now ask Windows for the high-performance graphics card.
+
+### 2026.10.3.1 (stable)
 
 - 3D sound (Steam Audio): Options → Sound → *3D Sound*. Headphones (HRTF) let you hear whether a sound is ahead or behind, above or below; walls muffle sounds (*Occlusion*). Off by default.
 - Low latency mode: the mouse is read once the GPU catches up, for a more direct aim with ray tracing, native HDR or V-Sync. On by default; *Strict* goes further at the cost of some FPS (Options → Display).
 - Ray tracing: about twice the FPS on maps with many teleporters; no more wasted work when the model cache is full.
 - Ray tracing: cleaner sky light with NRD (blue-noise sky rays).
 - Ray tracing is greyed out in Options → Graphics → *Lighting* when your graphics card or driver cannot run it, with the reason.
-- Online: L4ZY tells the server its version once when you connect (`__L4ZY <version>`, like WC-NG), so admins can see which client you use. `/l4zyversion` shows it.
+- Online: L4ZY tells the server its version once when you connect (`__L4ZY <version>`), so admins can see which client you use. `/l4zyversion` shows it.
 - Online: debug and diagnostic views (such as `hwrtdebug 4`) only work offline and in demos.
 - Crosshair colour in hex: Options → Mouse → *crosshair:*, or `crosshairhex FF8800`.
 - Settings search also finds colour pickers, text fields and one-line options.
@@ -509,6 +529,8 @@ First public release:
 - **Also included:** Python (PSF licence), llama.cpp (MIT) and the Microsoft Visual C++ runtime.
 - **Translation models:** Qwen3, Apache 2.0, downloaded from the official Qwen repositories.
 - **Steam Audio** (`phonon.dll`, for the optional 3D sound): Apache 2.0, (c) Valve Corporation; it contains third-party parts listed in `docs\licenses\steam-audio\THIRDPARTY.md`. Valve does not endorse L4ZY.
+- **AMD FidelityFX FSR 3.1** (`sauer_fsr.dll`): MIT, (c) Advanced Micro Devices. AMD does not endorse L4ZY.
+- **Ambient Occlusion** is adapted from Intel's XeGTAO (MIT).
 - Full texts are in `docs\licenses` in the installed game.
 - Source code: https://github.com/Lazy-Apathy/L4ZY-source (one tag per release)
 - L4ZY is not an official Sauerbraten release, and is not endorsed by NVIDIA or Valve.

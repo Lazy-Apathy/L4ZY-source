@@ -140,6 +140,8 @@ def component_of(rel):
             return "ngx"
         if len(parts) > 2 and parts[1] == "nrd":
             return "nrd"
+        if len(parts) > 2 and parts[1] == "fsr":
+            return "fsr"
         return "game-bin"
     if top == "data" or len(parts) == 1:
         return "game-data"

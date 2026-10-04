@@ -12,8 +12,10 @@ one shadow ray), 6 (mapmodels and dynents in the TLAS), sun / skylight
 in the lighting view, an optional visible-sun disk (`hwrtsundisk`, off
 by default so the map skybox stays), skipping the GL bake when
 that lighting view is showing, and mode-7 lighting of those models
-(same lights as the world) are implemented. Reflections and DLSS are
-not.
+(same lights as the world) are implemented. DLAA / DLSS Super Resolution
+(`dlaa.cpp`, public NGX Vulkan SDK through `bin64/ngx-hdr/sauer_ngx.dll`,
+see `src/ngx_gateway/VERSIONS.txt`) and AMD FSR 3.1 (`fsr.cpp`) are separate
+upscaling paths chosen with `hwrtngxmode`; they also work with classic lighting.
 
 ## Requirements
 
@@ -21,7 +23,7 @@ not.
 |---|---|
 | GPU | anything with `VK_KHR_external_memory` + `VK_KHR_external_semaphore` for the interop |
 | GPU for actual ray tracing | RT cores, i.e. `VK_KHR_acceleration_structure` + `VK_KHR_ray_query` (phase 2 onwards) |
-| GPU for `dlaa` / `dlss` | NVIDIA with an NGX runtime (phase 8) |
+| GPU for DLAA / DLSS | NVIDIA RTX with an NGX runtime in the driver; `nvngx_dlss.dll` and `sauer_ngx.dll` in `bin64/ngx-hdr` |
 | Driver | must expose `GL_EXT_memory_object`, `GL_EXT_semaphore` and their `_win32` / `_fd` companions |
 | Build | nothing new. The Vulkan loader is opened at runtime and the headers are vendored in `src/include/vulkan` |
 
@@ -366,7 +368,7 @@ config always wins.
 | `hwrtworldgain` | GL's world overbright, applied to the light mode 7 traces. Default 2, which is what `renderva.cpp` hands the world shader as `colorparams`. Scales point lights, sun and sky; never the `ambient` constant, so raising it opens the gap between lit and shadowed rather than flattening it. 1 is the old half-dark world |
 | `hwrtskinbudget` | megabytes of GPU memory allowed for the model-skin array at 1024 before falling back to 512 (default 1024, min 64, max 4096). A ceiling, not a reservation. 192 layers at 1024 need 768 MB, so the default never trips the fallback |
 | `hwrtmaxinsts` | how many TLAS instances the scenery may fill (default 4096 = the cap, min 128). Only mapmodels answer to it, and always the nearest ones, so lowering it never removes a player and what it drops is on the horizon. Barely a speed dial: dispatch on `cmvalley` at 1440p in its forest is 5.90 ms for the nearest 256, 6.94 for 1024, 7.46 for all 2614, i.e. 48 fps either way against 62 with `hwrt 0`. What a ray costs is the alpha-tested canopy in front of the camera, which the sort always keeps |
-| `hwrtskyrays` | cosine-weighted hemisphere rays for skylight (default 4, cap 4). One ray is a coin flip; filter + TAA did not reach zero dots, so the default stays at the cap. `hwrtskyfilter` still averages leftover grain with a 5×5 on the same plane before the bake-style `max()`. Unfiltered on `authentic` at 1440p: 331 / 294 / 224 fps at 1 / 2 / 4 rays (GL 869) |
+| `hwrtskyrays` | cosine-weighted hemisphere rays for skylight (default 1 since 2026-10-04, cap 4). With NRD + blue noise one ray shows no grain (`shots/rayons-ciel` study, then a tester's test). Whenever NRD is not the effective denoiser (Sauer filter / skyage: NRD off, unavailable or failed), at least 4 rays are traced, without changing the saved value: there one ray is a coin flip and filter + TAA did not reach zero dots. `l4zymigration 2` moves a saved 4 to 1 once; `hwrtskystatus` prints `cvar_rays` and `eff_rays`. `hwrtskyfilter` still averages leftover grain with a 5×5 on the same plane before the bake-style `max()`. Unfiltered on `authentic` at 1440p: 331 / 294 / 224 fps at 1 / 2 / 4 rays (GL 869) |
 | `hwrtskyfilter` | 1 (default) = the workgroup skyvis filter. Neighbours on the same plane share leftover grain. 0 is the raw term |
 | `hwrtskytemporal` | frames of skyvis to accumulate on top of the spatial filter (default 32, cap 128; 0 or 1 is off). skyvis is view-independent geometry, so a hit recognised as the same surface point inherits the whole running average that point carries — no colour clamp, and therefore not capped by its own neighbourhood the way `looktaa` is. History lives in a ping-pong `RGBA16F` pair (bindings 13/14), 59 MB at 1440p. 96 frames measure the same as 32: the ceiling is the rejection test, not the frame count |
 | `hwrtskybluenoise` | 1 (default) = the sky rays of the world pixels NRD denoises come from a 128×128 blue-noise tile (binding 25, two void-and-cluster masks, u1/u2) shifted every frame by the R2 sequence, the four rays of a pixel spread on a (1/2, 1/4) lattice. Same ray count, same estimator, same converged value; less grain into REBLUR. The skyage path (Sauer filter, models, NRD off) keeps the pcg hash. 0 = the hash everywhere. Not saved; a change reseeds the sky history |
@@ -379,12 +381,65 @@ config always wins.
 | `rtaoradius` | hemisphere ray length in Sauer world units (default 32) |
 | `rtaoscale` | 0 = overlay only; 0..1 multiplies AO onto the vanilla lightmapped frame |
 | `rtaobias` | origin offset along the reconstructed normal, so the ray does not self-hit |
-| `dlaa`, `dlss`, `dlssquality` | registered for later phases; they refuse to turn on and say why |
+| `hwrtngxmode` | saved upscaler choice: 0 Native, 1 DLAA, 2-4 DLSS Quality/Balanced/Performance, 5 FSR Native, 6-8 FSR Quality/Balanced/Performance. `hwrtngxstats` prints the state in force |
+| `hwrtdlssmipbias` | 0 (default since 2026-10-04) = scene textures keep mip bias 0 in DLAA/DLSS, as before the DLSS guide pass. 1 = the guide's bias log2(render/display) - 1 (DLAA -1, Quality -1.58, Performance -2) on world and model textures; sharper, but a tester saw aliasing/shimmer with it, even in DLAA. FSR and Native always 0. Not saved |
+| `hwrtdiffmip` | 2 (default since aliasing-rt). Which mip level the traced world diffuse is read at (primary hits and their blend layer). 0 = level 0 always (before 2026-10-04: magnified close up, but a far or grazing surface aliases and shimmers). 1 = old footprint experiment: `textureGrad` from the pixel footprint, isotropic, no bias (stable but soft, grazing floors blur). 2 (aliasing-rt) = footprint from the neighbour pixels' rays on the face plane (ray differentials, render resolution, same jittered matrix as the primary ray), scaled by 2^`hwrtdiffmipbias`, plus log2(render/display) with `hwrtdiffmipauto` when DLSS/FSR upscale, sampled through an anisotropic sampler (`hwrtdiffaniso`, binding 29, needs `samplerAnisotropy`). Close surfaces stay at level 0 (same image as 0), far and grazing ones get filtered. Reflections keep their own ray-cone level; models keep level 0. Not saved |
+| `hwrtdiffmipbias` | -0.5: lod bias of `hwrtdiffmip 2` (negative = sharper). -3..2. Not saved |
+| `hwrtdiffmipauto` | 1: add log2(render width / display width) to that bias while DLSS/FSR render below the display (DLSS Quality about -0.58). 0 = footprint of the render pixel only. Not saved |
+| `hwrtdiffaniso` | 1: anisotropic filtering (up to 16x, device limit) for `hwrtdiffmip 2`. 0 = isotropic `textureGrad`. Not saved |
+| `hwrtdifftexel` | 0: no floor. 1 = never read a layer finer than the texture's own texels (the world array stretches every layer to the largest texture with nearest, so a 512 texture is 2x2 blocks at level 0; `ShadeTri.x` bits 26-31 carry the level): GL-like bilinear close up, much softer than 0. 2 = one level finer than that. For comparison only. Not saved |
 | `hwrtavailable`, `hwrtrayquery`, `hwrtngx` | read-only capability flags |
 | `hwrtisavailable`, `hwrtraison` | 1 when RT can run; otherwise one short English line saying why (no Vulkan, driver too old, no hardware RT, failed to start). `data/menus.cfg` declares `settinglock hwrt 1 [hwrtraison]`, which greys out the "Ray tracing" radio, the settings search entry and makes the assistant refuse `hwrt 1` |
-| `SAUER_HWRT_SIMULATE` (environment) | diagnostic only, read at bring-up: `novulkan`, `driver`, `nort` or `failed` fakes an incompatible GPU through the real fallback path; `hwrtsimulated` returns the mode in force |
+| `SAUER_HWRT_SIMULATE` (environment) | diagnostic only, read at bring-up: `novulkan`, `driver`, `nort` or `failed` fakes an incompatible GPU through the real fallback path; `hang` makes the Vulkan probe process hang in `vkCreateInstance`, `crash` makes it crash there, `hanglate` lets the probe answer and makes the game's own start-up thread hang there; retry paths (probe only, real drivers and layers otherwise): `crashigpulayer` / `hangigpu` = the integrated GPU's driver layer (first AMD/Intel manifest, else a made-up AMD one) crashes / hangs unless switched off, `crashigpu` = only leaving out the whole driver helps, `crashigpuold` = the same with the loader reported as 1.3.200 (`VK_ICD_FILENAMES` path), `crashoverlay` / `hangoverlay` = the first tool layer installed crashes (traced to its DLL) / hangs unless switched off, `crashsearch` = a crash reported in `amdxc64.dll` that only switching off the last tool layer stops; `hwrtsimulated` returns the mode in force |
+| `hwrtvktimeout` | seconds (3-120, default 15) the Vulkan probe, then the game's own Vulkan start-up, may take before Vulkan is given up for the run (classic lighting + Native AA, reason in the menus) |
+| `hwrtvkstall` | saved; 1 after a Vulkan timeout or crash: the next start does not start Vulkan by itself, choosing RT/DLAA/DLSS/FSR retries (and clears it on success) |
+| `hwrtvkskipdriver` | saved; what a probe retry had to leave out (see below), `;` separated: `fp:<hex>` (fingerprint of the implicit layers and display drivers; when it differs the value is dropped), `layer:<name>`, `layers:all`, `<driver manifest path>`. A value without a path separator is passed to `VK_LOADER_DRIVERS_DISABLE` as is (e.g. `*amd*`). `""` = leave nothing out (default) |
+| `hwrtvksearchms` | milliseconds (0-60000, default 10000) the search for the single culprit implicit layer may take after "every implicit layer off" worked; 0 = keep them all off |
+| `hwrtvknote` | read-only: the one line shown when something was left out, `""` otherwise |
 | `hwrtstalls` | read-only count of frames where the CPU had to wait on a Vulkan fence. Should stay 0 |
 | `hwrttimes` | 1 draws a HUD overlay of the last completed interop stage times in milliseconds (GL mask / depth / composite, Vulkan BLAS / TLAS / dispatch, plus CPU skin/gather). Samples lag by a few frames; the CPU does not wait on them. `hwrtstats` always prints the same numbers |
+
+**Vulkan start-up (since 2026-10-04).** `gl_init` no longer creates a Vulkan
+instance: `vkCreateInstance` loads every Vulkan driver and implicit layer of the
+machine (overlays, capture/monitoring tools, the driver's own), and one of them
+hanging or crashing froze or closed the game at every launch. Now Vulkan starts
+only when something needs it (`hwrt 1`, or `hwrtngxmode` 1-8), after config.cfg
+and autoexec.cfg (`hwrtprefsloaded`). First a probe process (`sauerbraten.exe
+-vkprobe <GL device UUID>`, no window) creates an instance and a device and logs
+the loader, the implicit layers (registry and loader), the GPUs and the time of
+each step (`hwrt vkprobe:` lines); it is killed after `hwrtvktimeout`. Only if it
+answered does the game create its own device, on a worker thread the main thread
+waits for with the same timeout (`hwrt vk:` lines, timed). Nothing needed: no
+Vulkan in the game; the probe runs 3 s after start in the background so the
+menus grey RT/DLSS/FSR with the right reason ("checking..." until then). A
+timed-out worker cannot be stopped: Vulkan stays off for the run, nothing touches
+its objects, and quitting ends the process with `TerminateProcess`.
+
+**When the probe crashes or hangs (since 2026-10-04, `vkplanretry`).** The probe
+also lists the Vulkan drivers (`icd vendor=0x.... manifest=...`, from the
+Khronos keys and the display drivers), every DLL it loads outside the Windows
+folder (`dll loaded`, driver files included) and, if it crashes, the module it
+crashed in (`unhandled 0x... at amdxc64.dll+0x... (path)`). Nothing is left out
+while the probe works. After a failure it is started again, narrowest first:
+(1) the implicit layers of the manifest the crash was traced to (a crash in
+`amdxc64.dll` is traced to the AMD driver's manifest, which also declares
+`VK_LAYER_AMD_switchable_graphics`: that layer loads the AMD driver into every
+Vulkan application even on the NVIDIA GPU, so `VK_LOADER_DRIVERS_DISABLE` alone
+does not keep it out), each by its `disable_environment` variable (any loader)
+and by name in `VK_LOADER_LAYERS_DISABLE` (loader 1.3.234+); (2) every implicit
+layer (plus `~implicit~`, loader 1.3.262+), then, if that works, each implicit
+layer alone, most suspect first, within `hwrtvksearchms`; (3) last, and only with
+a driver for the GPU the game runs on next to it, the integrated GPU's whole
+driver: `VK_LOADER_DRIVERS_DISABLE=<manifest file name>` (loader 1.3.234+), or
+`VK_ICD_FILENAMES` listing the drivers to keep for an older loader (ignored when
+the game runs elevated). Leaving a driver out also needs the GPU the game runs on
+to be a discrete one with ray query. The first step after which the probe
+answers stays in the process environment (the game's own Vulkan start-up reads
+it), is saved in `hwrtvkskipdriver` with the fingerprint, and one short line
+says what was left out and which driver or program to update; everything else
+goes to log.txt only. If nothing helps: classic lighting + Native AA with the
+reason, as before. The probe and the game ask `vkCreateInstance` for Vulkan 1.2
+(1.1 as a fallback), never 1.4.
 
 **Online, diagnostics are off.** On a remote server (or with other players on
 our own listen server; demo playback is left alone), `hwrtonlineguard()` runs
@@ -1009,12 +1064,10 @@ with the GL convention, so nothing flips on the way back, and the compute shader
 writes with the same convention. The shared depth image uses the same origin:
 `glCopyTexSubImage2D` from the window copies with the GL lower-left origin.
 
-**The colour image is `VK_FORMAT_R8G8B8A8_UNORM` / `GL_RGBA8`, optimal tiling, one
-mip, dedicated allocation.** The `rgba8` layout qualifier in the shader avoids
-needing `shaderStorageImageWriteWithoutFormat`. Depth is a second allocation,
-`VK_FORMAT_R32_SFLOAT` / `GL_R32F`, written by GL and read by the RTAO shader.
-HDR lighting later will want RGBA16F for colour, which is a format change on
-both sides plus a check that GL still accepts the import.
+**The colour image is `VK_FORMAT_R16G16B16A16_SFLOAT` / `GL_RGBA16F`, optimal tiling,
+one mip, dedicated allocation** (it was RGBA8 before the HDR work). Depth is a second
+allocation, `VK_FORMAT_R32_SFLOAT` / `GL_R32F`, written by GL and read by the RTAO
+shader. The DLAA/DLSS/FSR images are separate shared images owned by `dlaa.cpp`.
 
 **Queue family ownership is not transferred.** Both barriers use
 `VK_QUEUE_FAMILY_IGNORED` rather than releasing to and acquiring from

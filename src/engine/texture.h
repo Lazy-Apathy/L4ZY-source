@@ -560,10 +560,11 @@ struct Texture
     char *name;
     int type, w, h, xs, ys, bpp, clamp;
     bool mipmap, canreduce;
+    bool scene; // world slot texture or model skin: takes the DLSS LOD bias (setscenelodbias)
     GLuint id;
     uchar *alphamask;
 
-    Texture() : alphamask(NULL) {}
+    Texture() : scene(false), alphamask(NULL) {}
 };
 
 enum

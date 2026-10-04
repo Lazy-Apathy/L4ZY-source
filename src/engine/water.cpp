@@ -326,6 +326,170 @@ GLuint reflectionfb = 0, reflectiondb = 0;
 
 GLuint getwaterfalltex() { return waterfallrefraction.refracttex ? waterfallrefraction.refracttex : notexture->id; }
 
+// Traced water reflections (hwrtreflections, RT only). The lighting pass asks
+// for the planes GL will reflect this frame and traces them itself; a traced
+// plane then skips its 2^reflectsize planar render (drawreflections) and the
+// water shader reads the traced image (renderwater). Each plane goes with the
+// rectangles of its surfaces GL draws this frame (merged where they line up),
+// so the trace finds exactly the water GL draws. Only planes whose surfaces
+// really overlap one at another height stay on GL's pass: the trace keeps
+// the nearest surface along the ray, and that may not be the one GL shows.
+// (Testing the planes' whole bounding boxes made far apart pools of one
+// height cover a puddle below them, and the puddle fell back to the planar
+// render each time one of their surfaces came into view: haste.)
+// Planes of one height share a group, which is what the image records, so a
+// face where two of them meet matches either.
+static int rtreflframe = 0, rtreflgathered = -1;
+static int rtreflgroup[MAXREFLECTIONS];
+static float rtreflz[MAXREFLECTIONS];
+// Water vertices wave in z, so a pixel GL draws at the very edge of a plane
+// can meet the flat plane just outside a rectangle: the trace looks this far
+// beyond them when no rectangle holds the point (hitlight.comp REFL_MARGIN).
+static const float RTREFLMARGIN = 2.0f;
+static void cleanuptracedreflectionparticles();
+static GLuint tracedreflectiontex();
+
+struct rtreflrect { float x0, y0, x1, y1; };
+
+// Joins rectangles that share a whole edge: rows of equal y span that touch
+// in x, then columns of equal x span that touch in y, twice.
+static bool rtreflrowless(const rtreflrect &a, const rtreflrect &b)
+{
+    if(a.y0 != b.y0) return a.y0 < b.y0;
+    if(a.y1 != b.y1) return a.y1 < b.y1;
+    return a.x0 < b.x0;
+}
+static bool rtreflcolless(const rtreflrect &a, const rtreflrect &b)
+{
+    if(a.x0 != b.x0) return a.x0 < b.x0;
+    if(a.x1 != b.x1) return a.x1 < b.x1;
+    return a.y0 < b.y0;
+}
+static int mergertreflrects(rtreflrect *r, int n)
+{
+    loopk(4)
+    {
+        if(n < 2) break;
+        bool rows = !(k&1);
+        if(rows) quicksort(r, n, rtreflrowless);
+        else quicksort(r, n, rtreflcolless);
+        int m = 0;
+        loopi(n)
+        {
+            if(m)
+            {
+                rtreflrect &p = r[m-1];
+                if(rows ? p.y0 == r[i].y0 && p.y1 == r[i].y1 && r[i].x0 <= p.x1
+                        : p.x0 == r[i].x0 && p.x1 == r[i].x1 && r[i].y0 <= p.y1)
+                {
+                    if(rows) p.x1 = max(p.x1, r[i].x1);
+                    else p.y1 = max(p.y1, r[i].y1);
+                    continue;
+                }
+            }
+            r[m++] = r[i];
+        }
+        n = m;
+    }
+    return n;
+}
+
+// Largest first: most water pixels then stop at the first rectangle (hitlight.comp).
+static bool rtreflbigger(const rtreflrect &a, const rtreflrect &b)
+{
+    return (a.x1 - a.x0)*(a.y1 - a.y0) > (b.x1 - b.x0)*(b.y1 - b.y0);
+}
+
+static inline bool rtreflrectsoverlap(const rtreflrect &a, const rtreflrect &b)
+{
+    return a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
+}
+
+int hwrtgatherwaterplanes(float (*out)[8], int maxplanes, float (*rects)[4], int maxrects)
+{
+    rtreflgathered = rtreflframe;
+    memset(rtreflgroup, 0, sizeof(rtreflgroup));
+    if(!waterreflect || drawtex || (editmode && showmat)) return 0;
+    float offset = -WATER_OFFSET;
+    static vector<rtreflrect> pool;
+    pool.setsize(0);
+    int first[MAXREFLECTIONS], count[MAXREFLECTIONS];
+    rtreflrect box[MAXREFLECTIONS];
+    bool cand[MAXREFLECTIONS];
+    loopi(MAXREFLECTIONS)
+    {
+        Reflection &ref = reflections[i];
+        first[i] = pool.length();
+        count[i] = 0;
+        cand[i] = ref.height>=0 && !ref.age && !ref.matsurfs.empty() && camera1->o.z >= ref.height+offset;
+        if(!cand[i]) continue;
+        loopvj(ref.matsurfs)
+        {
+            const materialsurface &m = *ref.matsurfs[j];
+            rtreflrect &r = pool.add();
+            r.x0 = m.o.x; r.y0 = m.o.y;
+            r.x1 = m.o.x + m.rsize; r.y1 = m.o.y + m.csize;
+        }
+        count[i] = mergertreflrects(&pool[first[i]], ref.matsurfs.length());
+        pool.setsize(first[i] + count[i]);
+        quicksort(&pool[first[i]], count[i], rtreflbigger);
+        rtreflrect &b = box[i];
+        b = pool[first[i]];
+        for(int k = first[i]+1; k < first[i]+count[i]; k++)
+        {
+            const rtreflrect &r = pool[k];
+            b.x0 = min(b.x0, r.x0); b.y0 = min(b.y0, r.y0);
+            b.x1 = max(b.x1, r.x1); b.y1 = max(b.y1, r.y1);
+        }
+    }
+    bool clash[MAXREFLECTIONS];
+    loopi(MAXREFLECTIONS)
+    {
+        clash[i] = false;
+        if(!cand[i]) continue;
+        loopj(MAXREFLECTIONS)
+        {
+            if(j == i || !cand[j] || reflections[j].height == reflections[i].height || !rtreflrectsoverlap(box[i], box[j])) continue;
+            for(int a = first[i]; a < first[i]+count[i] && !clash[i]; a++)
+            {
+                if(!rtreflrectsoverlap(pool[a], box[j])) continue;
+                for(int b = first[j]; b < first[j]+count[j]; b++) if(rtreflrectsoverlap(pool[a], pool[b])) { clash[i] = true; break; }
+            }
+            if(clash[i]) break;
+        }
+    }
+    int n = 0, nr = 0;
+    loopi(MAXREFLECTIONS)
+    {
+        if(!cand[i] || clash[i] || n >= maxplanes || nr + count[i] > maxrects) continue;
+        int group = i + 1;
+        loopj(i) if(rtreflgroup[j] && reflections[j].height == reflections[i].height) { group = rtreflgroup[j]; break; }
+        rtreflgroup[i] = group;
+        rtreflz[i] = reflections[i].height + offset;
+        float *p = out[n++];
+        p[0] = box[i].x0 - RTREFLMARGIN; p[1] = box[i].y0 - RTREFLMARGIN;
+        p[2] = box[i].x1 + RTREFLMARGIN; p[3] = box[i].y1 + RTREFLMARGIN;
+        p[4] = rtreflz[i];
+        p[5] = float(group);
+        p[6] = float(nr);
+        p[7] = float(count[i]);
+        loopk(count[i])
+        {
+            const rtreflrect &r = pool[first[i]+k];
+            float *q = rects[nr++];
+            q[0] = r.x0; q[1] = r.y0; q[2] = r.x1; q[3] = r.y1;
+        }
+    }
+    return n;
+}
+
+// Group of plane i if the lighting pass traced it for this very frame, else 0.
+static int rtreflectedgroup(int i)
+{
+    if(rtreflgathered != rtreflframe || drawtex || !hwrtrefllive()) return 0;
+    return rtreflgroup[i];
+}
+
 VAR(oqwater, 0, 2, 2);
 VARFP(waterfade, 0, 1, 1, { cleanreflections(); preloadwatershaders(); });
 
@@ -342,6 +506,9 @@ void preloadwatershaders(bool force)
     else useshaderbyname(waterrefract ? (waterfade ? "waterfade" : "waterrefract") : (waterreflect ? "waterreflect" : "water"));
 
     useshaderbyname(waterrefract ? (waterfade ? "underwaterfade" : "underwaterrefract") : "underwater");
+    // The traced-reflection variants are only ever used with ray tracing on.
+    if(hwrt && hwrtreflections && waterreflect)
+        useshaderbyname(waterrefract ? (waterfade ? "waterfadert" : "waterrefractrt") : "waterreflectrt");
 
     extern int waterfallenv;
     useshaderbyname(waterfallenv ? "waterfallenv" : "waterfall");
@@ -414,6 +581,38 @@ void renderwater()
         else SETWATERSHADER(below, underwater);
     }
 
+    // Traced reflections: the traced image replaces the planar texture on the
+    // planes the lighting pass traced this frame.
+    bool rtrefl = !glaring && !drawtex && waterreflect && hwrtrefllive();
+    float rtinvw = 0, rtinvh = 0;
+    if(rtrefl)
+    {
+        int rw = 0, rh = 0;
+        hwrtresultsize(&rw, &rh);
+        if(rw > 0 && rh > 0) { rtinvw = 1.0f/rw; rtinvh = 1.0f/rh; }
+        else rtrefl = false;
+    }
+    // Unit 4 is left alone unless a plane reads it (classic lighting never does).
+    if(rtrefl)
+    {
+        glActiveTexture_(GL_TEXTURE4);
+        glBindTexture(GL_TEXTURE_2D, tracedreflectiontex());
+        glActiveTexture_(GL_TEXTURE0);
+    }
+    // Planes the RT traced this frame use the same shader reading the traced
+    // image instead of the planar texture (glsl.cfg, suffix "rt"); the
+    // shaders above are never touched, so classic lighting stays as it was.
+    // They are lazy shaders, compiled the first time a traced plane needs one.
+    Shader *rtshader = NULL;
+    if(rtrefl)
+    {
+        static Shader *rtshaders[3] = { NULL, NULL, NULL };
+        static const char * const rtnames[3] = { "waterfadert", "waterrefractrt", "waterreflectrt" };
+        int k = waterrefract ? (waterfade ? 0 : 1) : 2;
+        if(!rtshaders[k] || !rtshaders[k]->loaded()) rtshaders[k] = useshaderbyname(rtnames[k]);
+        if(rtshaders[k] && rtshaders[k]->loaded()) rtshader = rtshaders[k];
+    }
+
     vec ambient(max(skylightcolor[0], ambientcolor[0]), max(skylightcolor[1], ambientcolor[1]), max(skylightcolor[2], ambientcolor[2]));
     float offset = -WATER_OFFSET;
     loopi(MAXREFLECTIONS)
@@ -434,7 +633,16 @@ void renderwater()
             if(!belowshader) continue;
             belowshader->set();
         }
-        else aboveshader->set();
+        else
+        {
+            int rtgroup = rtrefl && rtshader ? rtreflectedgroup(i) : 0;
+            if(rtgroup)
+            {
+                rtshader->set();
+                LOCALPARAMF(rtrefl, 1.0f, float(rtgroup), rtinvw, rtinvh);
+            }
+            else aboveshader->set();
+        }
 
         if(!glaring && drawtex != DRAWTEX_MINIMAP)
         {
@@ -549,6 +757,7 @@ void cleanreflection(Reflection &ref)
 
 void cleanreflections()
 {
+    cleanuptracedreflectionparticles();
     loopi(MAXREFLECTIONS) cleanreflection(reflections[i]);
     cleanreflection(waterfallrefraction);
     if(reflectionfb)
@@ -740,6 +949,7 @@ void queryreflection(Reflection &ref, bool init)
 void queryreflections()
 {
     rplanes = 0;
+    if(!drawtex) rtreflframe++;
 
     static int lastsize = 0;
     int size = 1<<reflectsize;
@@ -950,7 +1160,8 @@ void drawreflections()
 
     if(waterreflect || waterrefract) loopi(MAXREFLECTIONS)
     {
-        Reflection &ref = reflections[++n%MAXREFLECTIONS];
+        int idx = ++n%MAXREFLECTIONS;
+        Reflection &ref = reflections[idx];
         if(ref.height<0 || ref.age || ref.matsurfs.empty()) continue;
         if(oqfrags && oqwater && ref.query && ref.query->owner==&ref)
         { 
@@ -959,6 +1170,10 @@ void drawreflections()
                 if(checkquery(ref.query)) continue;
             }
         }
+        // The RT traced this plane's reflection: no planar render for it, and
+        // nothing at all when there is no refraction to draw either.
+        bool traced = rtreflectedgroup(idx) != 0;
+        if(traced && !(waterrefract && ref.refracttex)) continue;
 
         if(!refs) 
         {
@@ -983,7 +1198,7 @@ void drawreflections()
         const bvec &wcol = getwatercolor(ref.material);
         int wfog = getwaterfog(ref.material);
 
-        if(waterreflect && ref.tex && camera1->o.z >= ref.height+offset)
+        if(waterreflect && ref.tex && camera1->o.z >= ref.height+offset && !traced)
         {
             glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, ref.tex, 0);
             if(scissor) glEnable(GL_SCISSOR_TEST);
@@ -1060,3 +1275,176 @@ nowaterfall:
     hwrtbindscenefb();
 }
 
+// Particles in the traced reflections. The traced image holds what each pixel
+// of a traced plane reflects, and how far along the reflected path that is
+// (hitlight.comp). GL never draws into that shared image: a copy of it goes to
+// a texture of our own, then for each group a full-screen pass turns the path
+// length into the depth the GL mirror camera would give the same point, and the
+// particles are drawn with that camera into the copy (alpha left alone). The
+// water shader then reads the copy. A particle behind what the reflection hits
+// fails the depth test; pixels of other groups keep depth 0.
+static GLuint rtpartfb = 0, rtpartdepthrb = 0, rtpartcolor = 0;
+static int rtpartw = 0, rtparth = 0, rtpartframe = -1;
+
+static void cleanuptracedreflectionparticles()
+{
+    if(rtpartfb) { glDeleteFramebuffers_(1, &rtpartfb); rtpartfb = 0; }
+    if(rtpartdepthrb) { glDeleteRenderbuffers_(1, &rtpartdepthrb); rtpartdepthrb = 0; }
+    if(rtpartcolor) { glDeleteTextures(1, &rtpartcolor); rtpartcolor = 0; }
+    rtpartw = rtparth = 0;
+    rtpartframe = -1;
+}
+
+static bool setuptracedreflectionparticles(int w, int h)
+{
+    if(rtpartfb && rtpartw == w && rtparth == h) return true;
+    cleanuptracedreflectionparticles();
+    glGenTextures(1, &rtpartcolor);
+    glBindTexture(GL_TEXTURE_2D, rtpartcolor);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, w, h, 0, GL_RGBA, GL_FLOAT, NULL);
+    // Nearest, like the traced image: the alpha is an id and a length.
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    glGenRenderbuffers_(1, &rtpartdepthrb);
+    glBindRenderbuffer_(GL_RENDERBUFFER, rtpartdepthrb);
+    glRenderbufferStorage_(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, w, h);
+    glBindRenderbuffer_(GL_RENDERBUFFER, 0);
+
+    glGenFramebuffers_(1, &rtpartfb);
+    glBindFramebuffer_(GL_FRAMEBUFFER, rtpartfb);
+    glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, rtpartcolor, 0);
+    glFramebufferRenderbuffer_(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, rtpartdepthrb);
+    if(glCheckFramebufferStatus_(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+    {
+        cleanuptracedreflectionparticles();
+        conoutf(CON_WARN, "hwrt: no framebuffer for the particles of the traced reflections");
+        return false;
+    }
+    rtpartw = w;
+    rtparth = h;
+    return true;
+}
+
+// What the water shader samples for a traced plane this frame: the copy with
+// the particles when that pass ran, else the traced image itself.
+static GLuint tracedreflectiontex()
+{
+    if(rtpartcolor && rtpartframe == rtreflframe) return rtpartcolor;
+    return hwrtreflgltex();
+}
+
+void drawtracedreflectionparticles()
+{
+    if(glaring || drawtex || !hwrtrefllive() || rtreflgathered != rtreflframe) return;
+    if(!hasparticlework()) return;
+    int groups[MAXREFLECTIONS], ngroups = 0;
+    float groupz[MAXREFLECTIONS];
+    loopi(MAXREFLECTIONS)
+    {
+        int g = rtreflectedgroup(i);
+        if(!g) continue;
+        bool seen = false;
+        loopj(ngroups) if(groups[j] == g) { seen = true; break; }
+        if(seen) continue;
+        groups[ngroups] = g;
+        groupz[ngroups] = rtreflz[i];
+        ngroups++;
+    }
+    if(!ngroups) return;
+    int w = 0, h = 0;
+    hwrtresultsize(&w, &h);
+    GLuint tex = hwrtreflgltex();
+    if(w <= 0 || h <= 0 || !tex) return;
+
+    // Lazy shaders: useshaderbyname compiles them the first time.
+    static Shader *depthshader = NULL, *copyshader = NULL;
+    if(!depthshader || !depthshader->loaded()) depthshader = useshaderbyname("hwrtreflpartdepth");
+    if(!copyshader || !copyshader->loaded()) copyshader = useshaderbyname("hwrtreflpartcopy");
+    if(!depthshader || !copyshader || !depthshader->loaded() || !copyshader->loaded()) return;
+
+    // Everything this pass changes goes back exactly as it was: the frame
+    // keeps drawing water, grass and its own particles right after.
+    GLint prevdraw = 0, prevread = 0, prevviewport[4], prevdepthfunc = GL_LESS, prevactive = GL_TEXTURE0, prevtex = 0;
+    GLfloat prevclear = 1;
+    GLboolean prevdepthmask = GL_TRUE, prevcolormask[4];
+    GLboolean prevblend = glIsEnabled(GL_BLEND), prevcull = glIsEnabled(GL_CULL_FACE), prevdepthtest = glIsEnabled(GL_DEPTH_TEST);
+    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &prevdraw);
+    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &prevread);
+    glGetIntegerv(GL_VIEWPORT, prevviewport);
+    glGetIntegerv(GL_DEPTH_FUNC, &prevdepthfunc);
+    glGetFloatv(GL_DEPTH_CLEAR_VALUE, &prevclear);
+    glGetBooleanv(GL_DEPTH_WRITEMASK, &prevdepthmask);
+    glGetBooleanv(GL_COLOR_WRITEMASK, prevcolormask);
+    glGetIntegerv(GL_ACTIVE_TEXTURE, &prevactive);
+    glActiveTexture_(GL_TEXTURE0);
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &prevtex);
+
+    if(setuptracedreflectionparticles(w, h))
+    {
+        matrix4 maininvcamproj = invcamprojmatrix;
+        glBindFramebuffer_(GL_FRAMEBUFFER, rtpartfb);
+        glViewport(0, 0, w, h);
+        glDisable(GL_BLEND);
+        glDisable(GL_CULL_FACE);
+        glEnable(GL_DEPTH_TEST);
+        glActiveTexture_(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, tex);
+
+        // The copy: colour and alpha, every pixel.
+        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        glDepthMask(GL_FALSE);
+        glDepthFunc(GL_ALWAYS);
+        copyshader->set();
+        LOCALPARAMF(reflpart, 0, 0, 1.0f/w, 1.0f/h);
+        screenquad();
+
+        loopk(ngroups)
+        {
+            hwrtreflectcamera(groupz[k], true);
+
+            glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+            glDepthMask(GL_TRUE);
+            glClearDepth(0.0);
+            glClear(GL_DEPTH_BUFFER_BIT);
+            glDepthFunc(GL_ALWAYS);
+            glDisable(GL_BLEND);
+            glDisable(GL_CULL_FACE);
+            depthshader->set();
+            LOCALPARAM(reflinvcamproj, maininvcamproj);
+            LOCALPARAM(reflcamproj, camprojmatrix);
+            LOCALPARAMF(reflpart, float(groups[k]), groupz[k], 1.0f/w, 1.0f/h);
+            LOCALPARAM(reflcam, camera1->o);
+            glActiveTexture_(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, tex);
+            screenquad();
+
+            glDepthFunc(GL_LESS);
+            glEnable(GL_CULL_FACE);
+            glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
+            hwrthdrsetlin(true);
+            renderparticles();
+
+            hwrtreflectcamera(groupz[k], false);
+        }
+        rtpartframe = rtreflframe;
+    }
+
+    glBindFramebuffer_(GL_DRAW_FRAMEBUFFER, prevdraw);
+    glBindFramebuffer_(GL_READ_FRAMEBUFFER, prevread);
+    glViewport(prevviewport[0], prevviewport[1], prevviewport[2], prevviewport[3]);
+    glDepthFunc(prevdepthfunc);
+    glClearDepth(prevclear);
+    glDepthMask(prevdepthmask);
+    glColorMask(prevcolormask[0], prevcolormask[1], prevcolormask[2], prevcolormask[3]);
+    if(prevblend) glEnable(GL_BLEND); else glDisable(GL_BLEND);
+    if(prevcull) glEnable(GL_CULL_FACE); else glDisable(GL_CULL_FACE);
+    if(prevdepthtest) glEnable(GL_DEPTH_TEST); else glDisable(GL_DEPTH_TEST);
+    glActiveTexture_(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, prevtex);
+    glActiveTexture_(prevactive);
+    // Same value the scene pass runs with (linear only in an HDR frame).
+    hwrthdrsetlin(true);
+}
