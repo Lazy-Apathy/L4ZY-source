@@ -39,6 +39,8 @@ OUT = DISTRIB / "out"
 PINS = DISTRIB / "pins.json"
 sys.path.insert(0, str(DISTRIB / "service"))
 import updater as upd  # noqa: E402  (memes regles de chemins que le client)
+sys.path.insert(0, str(TOOLS))
+import check_personal  # noqa: E402  (refuse prenom / chemins personnels avant tout envoi)
 
 ZIP_DATE = (2020, 1, 1, 0, 0, 0)
 STORE_EXT = {".ogg", ".jpg", ".jpeg", ".png", ".gz", ".zip", ".wav", ".mp3", ".webp", ".dds", ".ogz"}
@@ -335,6 +337,12 @@ def cmd_release(args):
     tree = assemble(recipe, pins, work)
     log("  copie de l'arborescence...")
     tree.materialize()
+    log("  recherche de donnees personnelles...")
+    hits = check_personal.scan_path(tree.root)
+    if hits:
+        for h in hits[:40]:
+            log("    " + h)
+        die(f"{len(hits)} donnee(s) personnelle(s) dans la version : rien n'est construit ni publie.")
     table = file_table(tree)
     groups = {}
     for rel, meta in table.items():

@@ -66,13 +66,13 @@ Windows 10/11 64-bit with an up-to-date graphics driver. Vulkan is only started 
 
 ### Graphics cards
 
-| Graphics card | Classic lighting | Ray-traced lighting | DLAA / DLSS | Native HDR |
-|---|---|---|---|---|
-| **NVIDIA GeForce RTX 20, 30, 40, 50 series** (desktop and laptop) | yes | **yes** | **yes** | **yes** (with Windows HDR on) |
-| NVIDIA GeForce GTX (10, 16 series and older) | yes | no (no RT cores) | no | no |
-| AMD Radeon RX 6000 / 7000 / 9000 series | yes | not tested | no (DLSS is NVIDIA only) | no |
-| Intel Arc | yes | not tested | no | no |
-| Other GPUs, integrated graphics | yes, if Vulkan is available | no | no | no |
+| Graphics card | Classic lighting | Ray-traced lighting | DLAA / DLSS | AMD FSR | Native HDR |
+|---|---|---|---|---|---|
+| **NVIDIA GeForce RTX 20, 30, 40, 50 series** (desktop and laptop) | yes | **yes** | **yes** | **yes** | **yes** (with Windows HDR on) |
+| NVIDIA GeForce GTX (10, 16 series and older) | yes | no (no RT cores) | no | not tested | no |
+| AMD Radeon RX 6000 / 7000 / 9000 series | yes | not tested | no (DLSS is NVIDIA only) | not tested | no |
+| Intel Arc | yes | not tested | no | not tested | no |
+| Other GPUs, integrated graphics | yes, if Vulkan is available | no | no | not tested | no |
 
 - Only an **NVIDIA RTX 4070 Ti SUPER** has been tested. The other RTX cards meet the same requirements, but have not been tried.
 - **Ray tracing** needs hardware RT (Vulkan `ray_query`), plus OpenGL/Vulkan memory sharing (`GL_EXT_memory_object`, `GL_EXT_semaphore`).
@@ -119,6 +119,8 @@ L4ZY ships its own `menus.cfg`: a new main menu, and an Options hub with pages f
 | `hwrtreflections` | sharp RT reflections on water and on surfaces the map made reflective (*RT Reflections*) | `1` |
 | `hwrtspecular` | shine of lamps and the sun on glossy surfaces (*RT Specular*) | `1` |
 | `hwrtdiffupscale` | RT texture upscaling (Options → Graphics → *RT Textures*): `2` Bicubic, `3` Lanczos, `0` Nearest (old blocky look); `1` bilinear (console only) | `2` |
+| `hwrtdiffmipbias` | distant RT texture detail (Options → Graphics → *RT Textures*): `0` Stable (less shimmer in motion), `-0.5` Sharper | `0` |
+| `hwrtsmoothnormals` | smooth RT lighting across faceted floors, slopes and rocks, like classic lighting (Options → Graphics → *RT Normals*): `1` On, `0` Off (flat faces, old RT look) | `1` |
 
 Useful commands:
 
@@ -223,7 +225,6 @@ The game reads your mouse once the GPU has caught up, instead of queueing frames
 
 | Setting | What it does | Default |
 |---|---|---|
-| `lookao` | "Creases" (SSAO) | `1` |
 | `looktaa` | Temporal AA (otherwise FXAA in Native) | `0` |
 | `lookselfshadow` | your own body casts a sun shadow in first person (classic shadows) | `1` |
 | `gtao` | Ambient Occlusion, classic lighting only (Options → Graphics → *Lighting*): `0` off, `1` Low, `2` High. Slightly darker corners and wall bases; players are never darkened | `1` |
@@ -369,6 +370,32 @@ Tints your body, name, HUD gun and chat/kill-feed name. Click the player preview
 | `mycolor` | `-1` off, `0` green, `1` blue, `2` yellow, `3` red, `4` gray, `5` magenta, `6` orange, `7` white, `8` cyan, `9` rose | `9` |
 | `cyclemycolor` | next colour | |
 
+**Team colours (optional):** Options → HUD → *Team colours*. One colour for all teammates and one for all enemies (bots included), instead of blue and red. Off by default.
+
+| Setting | Values | Default |
+|---|---|---|
+| `teamcolorally` / `teamcolorenemy` | `-1` off (normal blue / red), `0`–`9` palette | `-1` |
+| `friendsfollowteamcolor` | friends take their side's colour instead of their friend colour (names keep the friend colour) | `0` |
+
+**Custom player model:** Options → Player Model → *Custom model*. Put your own model in the folder that *Open custom folder* opens (`Documents\My Games\L4ZY\packages\models\custom`, with optional `red` / `blue` subfolders; a README there explains it). Nothing is drawn over it: no player, friend or team colour. If the folder is empty, the picked model is used. It is drawn on you (and on everyone with *Force Matching Player Models*); nothing is sent to the server, so other players do not see it.
+
+### Weapon trail colours
+
+Pick the colour of each weapon's trail: for everyone (*All*), and if you want, differently for your own shots (*Me*) and everyone else's (*Others*). Nothing changes until you pick a colour. There is no team-based colour.
+
+**Menu:** Options → HUD → *Weapon Trails: Colours* → *Me*, *Others* or *All*, then one line per weapon (hex code, presets, *same as All* / *stock*).
+
+| Setting / command | What it does | Default |
+|---|---|---|
+| `trailcolor<weapon>` (*All*) | trail colour of that weapon for everyone, hex. Weapons: `shotgun`, `chaingun`, `pistol`, `rifle`, `rocketlauncher`, `grenadelauncher` | stock (`FFC864` or `404040`) |
+| `trailmycolor<weapon>` (*Me*) | your own trails of that weapon; `-1` = same as All | `-1` |
+| `trailothercolor<weapon>` (*Others*) | everyone else's trails of that weapon, any team; `-1` = same as All | `-1` |
+| `trailbrightness` | brightness of changed colours, in % (25–100) | `100` |
+| `settrailcolor [me\|others\|all] <weapon> <#RRGGBB\|stock\|same>` | set one colour | |
+| `trailcolorreset [me\|others\|all]` | back to the stock colours | |
+
+Idea from p1xbraten; written for L4ZY.
+
 ### Kill feed, react times and streaks
 
 - **Kill feed:** `killer [weapon] victim`, fading out, with an `xN` tag on your streaks.
@@ -467,7 +494,20 @@ Tints your body, name, HUD gun and chat/kill-feed name. Click the player preview
 
 Each release is listed on the [Releases](https://github.com/Lazy-Apathy/L4ZY/releases) page, newest first.
 
-### 2026.10.4.1 (test)
+### 2026.10.5.1 (test)
+
+- Ray tracing: lighting is now smooth across faceted floors, slopes and rocks, like classic lighting (Options → Graphics → *RT Normals*, On by default).
+- Ray tracing in edit mode: new or removed geometry and texture changes now show up in the ray-traced lighting, shortly after you stop editing (no cost outside edit mode).
+- Ray tracing: less shimmer on distant textures in motion with DLAA/DLSS. If you prefer the sharper look, choose *Sharper* in Options → Graphics → *RT Textures*.
+- Ray tracing: no more faint dark ring on the floor around you (the old *Creases* effect is no longer applied on top of ray tracing). The *Creases* checkbox is gone from the menu: Ambient Occlusion (Options → Graphics → *Lighting*) does that job in classic lighting.
+- Ray tracing: fixed a crash when the player model changes, or when switching between players while spectating, during a ray-traced game.
+- Weapon trail colours: pick a colour for each weapon's trail, separately for your own shots (*Me*), everyone else's (*Others*) and both (*All*), with hex codes or presets (Options → HUD → *Weapon Trails: Colours*). Stock colours by default; there is no team-based colour. Idea from p1xbraten.
+- Team colours (optional, off by default): one colour for all teammates and one for all enemies, and friends can follow them (Options → HUD → *Team colours*).
+- Custom player model: a *Custom model* choice and a button that opens the folder to drop your own model in; no colour is drawn over it.
+- Local games no longer show the clan client check or "Welcome".
+- The console only shows game information; technical lines go to `log.txt`. When ray tracing or an anti-aliasing mode cannot start, one short line says why.
+
+### 2026.10.4.1 (stable)
 
 - AMD FSR 3.1 upscaling, next to DLAA/DLSS: Options → Graphics → *Anti-Aliasing* (FSR Native, Quality, Balanced, Performance, with a sharpening slider). No frame generation.
 - Ray tracing: sharp reflections on water and on surfaces the map made reflective, and the shine of lamps and the sun on glossy surfaces. Both On; you can turn them off in Options → Graphics (*RT Reflections*, *RT Specular*).

@@ -69,6 +69,10 @@
 =personnage: model playermodel
 =arme: gun weapon hudgun
 =armes: guns weapons hudgun ammo
+=trainee: trail trails
+=trainees: trail trails
+=traine: trail trails
+=traines: trail trails
 =munitions: ammo ammobar
 =balles: ammo
 =kill: kill killfeed killstreak
@@ -134,6 +138,10 @@ crosshaircolour: couleur viseur hexadecimal hex teinte
 mycolor: couleur perso personnage joueur corps pseudo nom
 friendallycolor: couleur ami amis equipe allie coequipier
 friendenemycolor: couleur ami amis adversaire ennemi autre equipe
+teamcolorally: couleur equipe coequipier coequipiers allie allies bots corps
+teamcolorenemy: couleur ennemi ennemis adversaire adversaires bots corps autre equipe
+friendsfollowteamcolor: couleur amis aligner equipe allies ennemis
+customplayermodel: modele perso personnalise custom skin peau dossier
 teamcrosshair: equipe coequipier viseur couleur bleu
 hitcrosshair: touche hit viseur couleur rouge bleu amis
 crosshairreloaddim: grise gris rechargement recharge
@@ -142,6 +150,25 @@ forceplayermodels: meme modele joueurs identiques
 teamskins: equipe couleurs rouge bleu
 hudgun: arme main bras premiere personne
 hudgunsway: balancement arme
+trailcolorrifle: trainee trace traine fumee fusil rifle couleur tir rayon tous tout le monde
+trailcolorshotgun: trainee trace traine fusil pompe shotgun couleur tir tous tout le monde
+trailcolorchaingun: trainee trace traine mitrailleuse chaingun couleur tir tous tout le monde
+trailcolorrocketlauncher: trainee fumee roquette lance-roquettes couleur tous tout le monde
+trailcolorgrenadelauncher: trainee fumee grenade lance-grenades couleur tous tout le monde
+trailcolorpistol: trainee trace traine pistolet couleur tir tous tout le monde
+trailmycolorshotgun: trainee couleur moi mes tirs perso fusil pompe shotgun
+trailmycolorchaingun: trainee couleur moi mes tirs perso mitrailleuse chaingun
+trailmycolorrifle: trainee couleur moi mes tirs perso fusil rifle fumee
+trailmycolorrocketlauncher: trainee couleur moi mes tirs perso roquette lance-roquettes fumee
+trailmycolorgrenadelauncher: trainee couleur moi mes tirs perso grenade lance-grenades fumee
+trailmycolorpistol: trainee couleur moi mes tirs perso pistolet
+trailothercolorshotgun: trainee couleur autres adversaire ennemi allie joueurs bots fusil pompe shotgun
+trailothercolorchaingun: trainee couleur autres adversaire ennemi allie joueurs bots mitrailleuse chaingun
+trailothercolorrifle: trainee couleur autres adversaire ennemi allie joueurs bots fusil rifle fumee
+trailothercolorrocketlauncher: trainee couleur autres adversaire ennemi allie joueurs bots roquette lance-roquettes fumee
+trailothercolorgrenadelauncher: trainee couleur autres adversaire ennemi allie joueurs bots grenade lance-grenades fumee
+trailothercolorpistol: trainee couleur autres adversaire ennemi allie joueurs bots pistolet
+trailbrightness: trainee luminosite intensite couleur
 muzzleflash: flash tir
 muzzlelight: lumiere tir
 showfps: images par seconde compteur
@@ -174,6 +201,7 @@ hwrtfsrsharpness: fsr nettete sharpening rcas
 hwrtreflections: reflets eau miroir reflexion rt
 hwrtspecular: brillance speculaire reflet lampe soleil rt
 hwrtdiffupscale: textures lissage agrandissement bicubique lanczos pixels blocs escalier scintillement nettete rt
+hwrtsmoothnormals: normales lissees lissage eclairage facettes marches relief sol mur roche pente sable rt
 looktaa: anticrenelage temporel taa
 gtao: occlusion ambiante ao gtao ssao coins recoins relief ombres contact
 lookao: ombres occlusion ssao

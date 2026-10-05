@@ -230,9 +230,18 @@ void addnormals(cube &c, const ivec &o, int size)
 void calcnormals(bool lerptjoints)
 {
     if(!lerpangle) return;
-    usetnormals = lerptjoints; 
-    if(usetnormals) findtjoints();
-    lerpthreshold = cos(lerpangle*RAD) - 1e-5f; 
+    if(lerptjoints) findtjoints();
+    calcnormalskeeptjoints(lerptjoints);
+}
+
+// calcnormals() without searching the T-joints again: uses the ones the last
+// full octarender found (filltjoints). The RT world rebuild after an edit
+// calls this, since findtjoints() draws a progress screen.
+void calcnormalskeeptjoints(bool lerptjoints)
+{
+    if(!lerpangle) return;
+    usetnormals = lerptjoints;
+    lerpthreshold = cos(lerpangle*RAD) - 1e-5f;
     progress = 1;
     loopi(8) addnormals(worldroot[i], ivec(i, ivec(0, 0, 0), worldsize/2), worldsize/2);
 }

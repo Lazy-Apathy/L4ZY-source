@@ -1962,6 +1962,84 @@ static void packdifftexellevels(vector<hwrtshadetri> &tris, const vector<GLuint>
     }
 }
 
+// Edit rebuilds (hwrtpolleditrebuild) set the previous build's diffuse, glow
+// and normal+spec arrays aside instead of freeing them, and buildshade() takes
+// each one back when its source list is exactly the same GL textures (same
+// order, same upscale): the array is then a copy of the very same texture
+// files, and that copy (GL read-back, resample, mips) was most of the stall of
+// a rebuild. A list that differs (a new texture on the map, a different order)
+// is copied as at map load. Lightmaps are always copied again: calclight
+// replaces their content. Map loads and other full rebuilds set nothing aside.
+struct hwrtsparetex
+{
+    hwrttexarray arr;
+    vector<GLuint> ids;
+    int upscale;
+    bool valid;
+};
+static hwrtsparetex sparediff, spareglow, sparenorm;
+static vector<GLuint> worldglowids;
+static int sparehits = 0, sparestashed = 0;
+static bool seednormspecs = false;
+
+static void normspeckey(vector<GLuint> &key)
+{
+    key.setsize(0);
+    loopv(worldnormspecs) { key.add(worldnormspecs[i].normal); key.add(worldnormspecs[i].diffuse); }
+}
+
+static void dropspare(hwrtsparetex &s)
+{
+    if(s.valid) destroytex(s.arr);
+    memset(&s.arr, 0, sizeof(s.arr));
+    s.ids.setsize(0);
+    s.valid = false;
+}
+
+static void dropspares()
+{
+    dropspare(sparediff);
+    dropspare(spareglow);
+    dropspare(sparenorm);
+}
+
+static void stashspare(hwrtsparetex &s, hwrttexarray &t, const vector<GLuint> &ids, int upscale)
+{
+    dropspare(s);
+    if(!t.view || ids.empty()) return;
+    s.arr = t;
+    memset(&t, 0, sizeof(t));
+    loopv(ids) s.ids.add(ids[i]);
+    s.upscale = upscale;
+    s.valid = true;
+}
+
+static bool adoptspare(hwrtsparetex &s, hwrttexarray &t, const vector<GLuint> &ids, int upscale)
+{
+    if(!s.valid || s.upscale != upscale || s.ids.length() != ids.length()) return false;
+    loopv(ids) if(s.ids[i] != ids[i]) return false;
+    destroytex(t);
+    sparehits++;
+    t = s.arr;
+    memset(&s.arr, 0, sizeof(s.arr));
+    s.ids.setsize(0);
+    s.valid = false;
+    return true;
+}
+
+// Before an edit rebuild frees the world: the current arrays become the spares.
+static void stashshadetex()
+{
+    sparehits = sparestashed = 0;
+    if(!world.shadeok) { dropspares(); return; }
+    stashspare(sparediff, world.diff, worlddiffids, hwrtdiffupscale);
+    stashspare(spareglow, world.glow, worldglowids, 0);
+    vector<GLuint> key;
+    normspeckey(key);
+    stashspare(sparenorm, world.norm, key, 0);
+    sparestashed = int(sparediff.valid) + int(spareglow.valid) + int(sparenorm.valid);
+}
+
 static bool buildshade(const vector<hwrtshadevert> &sverts, const vector<uint> &indices,
                        const vector<hwrtshadetri> &stristin, const vector<GLuint> &diffids,
                        const vector<GLuint> &glowids)
@@ -2021,14 +2099,18 @@ static bool buildshade(const vector<hwrtshadevert> &sverts, const vector<uint> &
     // with mips on their own path and must not share this call.
     worlddiffids.setsize(0);
     loopv(diffs) worlddiffids.add(diffs[i]);
-    if(!uploadtexarray(lmids, world.lm) || !uploadtexarray(diffs, world.diff, true, hwrtdiffupscale))
+    if(!uploadtexarray(lmids, world.lm) ||
+       (!adoptspare(sparediff, world.diff, diffs, hwrtdiffupscale) && !uploadtexarray(diffs, world.diff, true, hwrtdiffupscale)))
     {
         destroyshade();
         return false;
     }
+    worldglowids.setsize(0);
+    loopv(glowids) worldglowids.add(glowids[i]);
     if(glowids.length())
     {
-        if(!uploadtexarray(glowids, world.glow))
+        if(adoptspare(spareglow, world.glow, glowids, 0)) hwrtshadeglow = world.glow.layers;
+        else if(!uploadtexarray(glowids, world.glow))
         {
             // Glow missing is not fatal: faces just stay unlit extras, not magenta.
             destroytex(world.glow);
@@ -2038,7 +2120,9 @@ static bool buildshade(const vector<hwrtshadevert> &sverts, const vector<uint> &
         else hwrtshadeglow = world.glow.layers;
     }
     else hwrtshadeglow = 0;
-    if(worldnormspecs.length() && !uploadnormalspecs(world.norm))
+    vector<GLuint> normkey;
+    normspeckey(normkey);
+    if(worldnormspecs.length() && !adoptspare(sparenorm, world.norm, normkey, 0) && !uploadnormalspecs(world.norm))
     {
         // Spec and envmap faces then keep the flat face normal.
         destroytex(world.norm);
@@ -2090,12 +2174,72 @@ static void destroyaslocked()
     hwrtbindtlas();
 }
 
+// Smooth normals (hwrtsmoothnormals): the lighting shader lights a world face
+// with the vertex normals the classic lightmap bake uses (calcnormals and
+// findnormal, the map's lerpangle) instead of the flat face normal, so faceted
+// floors, slopes and rocks shade smoothly as in classic lighting. Vertices
+// with no normal stored in the map carry +Z (octarender); they get the
+// normal calclight would give them here. Normals the map stores are kept.
+// A vertex shared by faces whose smoothed normals diverge keeps +Z and the
+// shader falls back to the flat face at that corner. Done on every world
+// build, edits included; the shader reads these normals only when the option
+// is on, so 0 renders exactly the flat lighting.
+VAR(hwrtsmoothnormalsms, 1, 0, 0); // read-only: last smoothing pass, ms
+
+static void smoothworldnormals(const vector<vec> &positions, vector<hwrtshadevert> &sverts, const vector<uint> &indices)
+{
+    extern int lerpangle, filltjoints;
+    if(!lerpangle || positions.empty()) return;
+    double t0 = hwrtnow();
+    // The T-joints of the last full octarender, as calclight sees them by
+    // default (lerptjoints 1); searching them again would draw a progress
+    // screen in the middle of an edit.
+    calcnormalskeeptjoints(filltjoints != 0);
+    vector<vec> acc;
+    vector<uchar> state;
+    acc.growbuf(sverts.length());
+    state.growbuf(sverts.length());
+    loopv(sverts) { acc.add(vec(0, 0, 0)); state.add(0); }
+    int placeholder = 0, set = 0, conflicts = 0;
+    for(int t = 0; t + 2 < indices.length(); t += 3)
+    {
+        uint ix[3] = { indices[t], indices[t+1], indices[t+2] };
+        if(ix[0] >= uint(sverts.length()) || ix[1] >= uint(sverts.length()) || ix[2] >= uint(sverts.length())) continue;
+        vec gn;
+        gn.cross(vec(positions[ix[1]]).sub(positions[ix[0]]), vec(positions[ix[2]]).sub(positions[ix[0]]));
+        if(gn.magnitude() < 1e-6f) continue;
+        gn.normalize();
+        loopk(3)
+        {
+            const hwrtshadevert &v = sverts[ix[k]];
+            if(fabs(v.n[0]) + fabs(v.n[1]) >= 0.02f || v.n[2] <= 0.99f) continue;
+            vec sn;
+            findnormal(positions[ix[k]], gn, sn);
+            if(state[ix[k]] == 0) { acc[ix[k]] = sn; state[ix[k]] = 1; placeholder++; }
+            else if(state[ix[k]] == 1 && acc[ix[k]].dot(sn) < 0.995f) { state[ix[k]] = 2; conflicts++; }
+        }
+    }
+    loopv(sverts) if(state[i] == 1)
+    {
+        sverts[i].n[0] = acc[i].x;
+        sverts[i].n[1] = acc[i].y;
+        sverts[i].n[2] = acc[i].z;
+        set++;
+    }
+    clearnormals();
+    hwrtsmoothnormalsms = int((hwrtnow() - t0) * 1000.0 + 0.5);
+    conoutf("hwrt: smooth normals: %d vertices without a stored normal, %d smoothed, %d shared by diverging faces (lerpangle %d), %.1f ms",
+            placeholder, set, conflicts, lerpangle, (hwrtnow() - t0) * 1000.0);
+}
+
 static bool gatherworld(vector<vec> &positions, vector<uint> &indices,
                         vector<hwrtshadevert> &sverts, vector<hwrtshadetri> &stris,
                         vector<GLuint> &diffids, int &diffoverflow,
                         vector<GLuint> &glowids, int &glowoflow, int &nblend)
 {
-    worldnormspecs.setsize(0);
+    // Edit rebuild: the previous normal+spec pairs keep their layers (new
+    // pairs go after them), so the spare array still matches.
+    if(!seednormspecs) worldnormspecs.setsize(0);
     worldnormoverflow = 0;
     glowclusters.setsize(0);
     hwrtglowomnicount = 0;
@@ -2271,6 +2415,7 @@ static bool gatherworld(vector<vec> &positions, vector<uint> &indices,
         delete[] vdata;
     }
     finalizeglowomnis();
+    smoothworldnormals(positions, sverts, indices);
     return indices.length() >= 3 && positions.length() >= 3;
 }
 
@@ -2346,15 +2491,73 @@ void hwrtdropworld()
     destroyaslocked();
 }
 
+// Edit mode (solo or coop, local or received): commitchanges() rebuilt the GL
+// vertex arrays, but the world BLAS, the hit-shade buffers and the glow lights
+// were only ever built by allchanged(). Without a rebuild, a new wall is not in
+// the traced image at all (no shadow, the models behind it show through), a
+// deleted one still is, and a retextured face keeps its old texture.
+// commitchanges() only notes the change; hwrtpolleditrebuild() (main loop,
+// before the frame is drawn) rebuilds once the edits have been quiet for
+// hwrteditdelay ms. Nothing here runs outside edits: the frame path tests one
+// bool. Entities (lights, mapmodels, pickups, teleporters) and water planes are
+// read every frame and need nothing.
+VAR(hwrteditrebuild, 0, 1, 1);
+VAR(hwrteditdelay, 0, 250, 5000);
+VAR(hwrteditrebuildms, 1, 0, 0);     // read-only: last edit rebuild, whole stall
+VAR(hwrteditrebuilds, 1, 0, 0);      // read-only: edit rebuilds since start
+static bool editdirty = false;
+static int editmillis = 0;
+
+void hwrtnoteworldedit()
+{
+    editdirty = true;
+    editmillis = totalmillis;
+}
+
+static void rebuildworld(bool keepdyn);
+
 void hwrtrebuildworld()
+{
+    rebuildworld(false);
+}
+
+void hwrtpolleditrebuild()
+{
+    if(!editdirty) return;
+    extern int hwrt, hwrtavailable;
+    if(!hwrteditrebuild || !hwrt || !hwrtavailable || hwrtfailed) return;
+    if(totalmillis - editmillis < hwrteditdelay) return;
+    editdirty = false;
+    double t0 = hwrtnow();
+    // The models keep their BLASes and skins: only the world changed, and
+    // rebuilding them would put the "preparing characters" screen up mid-edit.
+    rebuildworld(hwrthasworld() && hwrthasdynents());
+    hwrteditrebuildms = int((hwrtnow() - t0) * 1000.0 + 0.5);
+    hwrteditrebuilds++;
+}
+
+static void rebuildworldbody(bool keepdyn);
+
+static void rebuildworld(bool keepdyn)
+{
+    rebuildworldbody(keepdyn);
+    // Whatever buildshade() did not take back is freed here, on every path.
+    dropspares();
+}
+
+static void rebuildworldbody(bool keepdyn)
 {
     if(!hwrtdev.ok() || !hwrtdev.rayquery || !vkCreateAccelerationStructureKHR) return;
     // Nothing to rebuild on a device that is already gone, and touching it
     // again is what turns a reported loss into a killed process.
     if(hwrtfailed) return;
+    // Whatever was edited before is in the world built now.
+    editdirty = false;
+    double tstart = hwrtnow(), tgather = 0, tbuild = 0;
 
     if(!hwrtwaitidle("vkDeviceWaitIdle (before world rebuild)")) return;
-    hwrtdestroydynents();
+    if(!keepdyn) hwrtdestroydynents();
+    if(keepdyn) stashshadetex();
     destroyaslocked();
     hwrtnotelightsrebuild();
 
@@ -2365,11 +2568,19 @@ void hwrtrebuildworld()
     vector<GLuint> diffids;
     int diffoverflow = 0, glowoflow = 0, nblend = 0;
     vector<GLuint> glowids;
-    if(!gatherworld(positions, indices, sverts, stris, diffids, diffoverflow, glowids, glowoflow, nblend))
+    // Edit rebuild: every diffuse texture keeps the layer it had, and a new
+    // one is appended, so the spare diffuse array is taken back as long as no
+    // texture new to the map was used. Unused layers stay until the next load.
+    if(keepdyn && sparediff.valid) loopv(sparediff.ids) diffids.add(sparediff.ids[i]);
+    seednormspecs = keepdyn && sparenorm.valid;
+    bool gathered = gatherworld(positions, indices, sverts, stris, diffids, diffoverflow, glowids, glowoflow, nblend);
+    seednormspecs = false;
+    if(!gathered)
     {
         hwrtworldtris = hwrtworldverts = 0;
         return;
     }
+    tgather = hwrtnow();
 
     if(!ensurecmd()) { destroyaslocked(); return; }
 
@@ -2624,6 +2835,7 @@ void hwrtrebuildworld()
     hwrtworldverts = int(nverts);
     hwrtworldtris = int(ntris);
     hwrtbindtlas();
+    tbuild = hwrtnow();
     conoutf("hwrt: world BLAS %d triangles, %d verts", hwrtworldtris, hwrtworldverts);
     if(nblend) conoutf("hwrt: %d texlayer faces mixed from lightmap alpha", nblend);
 
@@ -2637,9 +2849,14 @@ void hwrtrebuildworld()
             conoutf(CON_WARN, "hwrt: %d glow textures over the %d cap, those faces have no glow", glowoflow, int(HWRT_MAX_DIFFUSE));
         buildshade(sverts, indices, stris, diffids, glowids);
     }
+    double tshade = hwrtnow();
     hwrtnotelightsrebuild();
     hwrtupdatelights();
-    hwrtrebuilddynents();
+    if(!keepdyn) hwrtrebuilddynents();
+    if(keepdyn)
+        conoutf("hwrt: edit rebuild %.1f ms (gather %.1f, BLAS %.1f, hit-shade %.1f, lights %.1f), texture arrays reused %d of %d",
+                (hwrtnow() - tstart) * 1000.0, (tgather - tstart) * 1000.0, (tbuild - tgather) * 1000.0,
+                (tshade - tbuild) * 1000.0, (hwrtnow() - tshade) * 1000.0, sparehits, sparestashed);
 }
 
 bool hwrthasshade()

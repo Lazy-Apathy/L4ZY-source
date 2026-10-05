@@ -1803,6 +1803,8 @@ int main(int argc, char **argv)
         hwrtonlineguard();
         // background Vulkan probe, lines printed by the start-up thread
         hwrtvkpoll();
+        // edit mode: rebuild the RT world after the last geometry change
+        hwrtpolleditrebuild();
 
         // Only trust "minimized" while SDL still reports the window iconic: a
         // stray MINIMIZED at startup (focus / HDR swapchain) otherwise froze the

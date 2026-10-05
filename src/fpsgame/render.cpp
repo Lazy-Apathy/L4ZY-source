@@ -77,10 +77,64 @@ namespace game
         return &playermodels[n];
     }
 
+    // "Custom" player model, off by default: the player's own model in
+    // packages/models/custom of his profile. custom/ holds the normal look;
+    // custom/blue and custom/red (optional) the team looks, with the same cfg
+    // files as the shipped models. Whoever wears your model (you, everyone
+    // with forceplayermodels) gets it; nothing changes for other players and
+    // nothing is sent to the server (playermodel stays the picked one, also
+    // used for arms, icons, armour and quad). No colour skin goes over it.
+    // Missing or broken files: the picked model, and one console line.
+    static int customstate = -1; // -1 not checked yet, 0 unusable, 1 usable
+    static bool customblue = false, customred = false, customwarned = false;
+
+    void changedplayermodel();
+    static void customchanged()
+    {
+        customstate = -1;
+        customwarned = false;
+        if(player1) changedplayermodel();
+    }
+    VARFP(customplayermodel, 0, 0, 1, customchanged());
+
+    static bool customusable()
+    {
+        if(!customplayermodel) return false;
+        if(customstate < 0)
+        {
+            customstate = loadmodel("custom", -1, false) ? 1 : 0;
+            customblue = customstate && loadmodel("custom/blue", -1, false);
+            customred = customstate && loadmodel("custom/red", -1, false);
+            if(!customstate && !customwarned)
+            {
+                customwarned = true;
+                conoutf("\f3Custom model: folder empty or incomplete, using the picked model.");
+            }
+        }
+        return customstate > 0;
+    }
+
+    static bool iscustommodel(const playermodelinfo &mdl)
+    {
+        return mdl.ffa && !strcmp(mdl.ffa, "custom");
+    }
+
+    static const playermodelinfo &custommodelinfo(const playermodelinfo &base)
+    {
+        static playermodelinfo m;
+        m = base;
+        m.ffa = "custom";
+        m.blueteam = customblue ? "custom/blue" : "custom";
+        m.redteam = customred ? "custom/red" : "custom";
+        m.ragdoll = true; // used only when the model defines a ragdoll
+        return m;
+    }
+
     const playermodelinfo &getplayermodelinfo(fpsent *d)
     {
         const playermodelinfo *mdl = getplayermodelinfo(d==player1 || forceplayermodels ? playermodel : d->playermodel);
         if(!mdl) mdl = getplayermodelinfo(playermodel);
+        if((d==player1 || forceplayermodels) && customusable()) return custommodelinfo(*mdl);
         return *mdl;
     }
 
@@ -132,6 +186,11 @@ namespace game
             if(mdl->quad) preloadmodel(mdl->quad);
             loopj(3) if(mdl->armour[j]) preloadmodel(mdl->armour[j]);
             if(i == playermodel) loopj(NUMFRIENDCOLORS) hasfriendskin(i, j);
+        }
+        if(customplayermodel)
+        {
+            customstate = -1; // the player may have filled the folder since
+            customusable();
         }
     }
 
@@ -240,6 +299,56 @@ namespace game
     enum { PV_IDLE = 0, PV_TAUNT, PV_WIN, PV_LOSE, PV_PAIN, PV_SHOOT, PV_LAG };
 
     static fpsent *previewent = NULL;
+
+    extern int playerpreviewtint;
+
+    // Team colours, off by default (-1): one palette colour (c0..c9) for every
+    // teammate / every enemy, bots included. With the team look (team game,
+    // teamskins, team demo) they replace blue / red; without it every other
+    // player is an enemy. Your own body keeps "My colour".
+    VARP(teamcolorally, -1, -1, 9);
+    VARP(teamcolorenemy, -1, -1, 9);
+    // 1: friends wear the colour of their side instead of the friend colours
+    // (only while that side has a colour). Names keep the friend colours.
+    VARP(friendsfollowteamcolor, 0, 0, 1);
+
+    // Colour skin index for d, or -1 for the normal skin. The one rule for
+    // bodies (classic and RT) and first-person arms.
+    // team: 0 ffa look, 1 blue (your side), 2 red (the other side).
+    static int colorskinidx(fpsent *d, int team)
+    {
+        if(!d || d->type != ENT_PLAYER) return -1;
+        if(isselfplayer(d)) return selfhascolor() ? selfcolorindex() : -1;
+        int side = team==1 ? teamcolorally : teamcolorenemy;
+        if(isfriend(d) && friendhascolor(isfriendally(d)) && !(side >= 0 && friendsfollowteamcolor))
+            return friendcolorindex(isfriendally(d));
+        return side;
+    }
+
+    // The one place that picks a player's body model: classic rendering
+    // (renderplayer) and RT (dynentmdlname) must show the same skin.
+    // team: 0 ffa, 1 blue (your team), 2 red, as computed by the callers.
+    static const char *playerbodymdl(fpsent *d, const playermodelinfo &mdl, int team)
+    {
+        if(testteam) team = testteam-1;
+        const char *mdlname = mdl.ffa;
+        switch(team)
+        {
+            case 1: mdlname = mdl.blueteam; break;
+            case 2: mdlname = mdl.redteam; break;
+        }
+        if(iscustommodel(mdl)) return mdlname; // the player's own files, nothing on top
+        int pmi = playermodel;
+        loopi(5) if(&playermodels[i]==&mdl) { pmi = i; break; }
+        int cidx = d==previewent ? playerpreviewtint : colorskinidx(d, team);
+        if(cidx>=0)
+        {
+            const char *fs = friendskinmdl(pmi, cidx);
+            if(fs) mdlname = fs;
+        }
+        return mdlname;
+    }
+
     static int pvmodel = -1, pvkind = PV_IDLE, pvstart = 0, pvdur = 0, pvlastms = 0;
     static bool pvintro = true, pvmanual = false, pvhold = false;
     static float pvyaw = 210;
@@ -409,26 +518,7 @@ namespace game
             d->muzzle = vec(-1, -1, -1);
             a[ai++] = modelattach("tag_muzzle", &d->muzzle);
         }
-        const char *mdlname = mdl.ffa;
-        switch(testteam ? testteam-1 : team)
-        {
-            case 1: mdlname = mdl.blueteam; break;
-            case 2: mdlname = mdl.redteam; break;
-        }
-        int pmi = playermodel, cidx = -1;
-        loopi(5) if(&playermodels[i]==&mdl) { pmi = i; break; }
-        if(d==previewent && playerpreviewtint>=0) cidx = playerpreviewtint;
-        else if(d->type==ENT_PLAYER)
-        {
-            fpsent *p = (fpsent *)d;
-            if(isselfplayer(p) && selfhascolor()) cidx = selfcolorindex();
-            else if(isfriend(p)) cidx = friendcolorindex(isfriendally(p));
-        }
-        if(cidx>=0)
-        {
-            const char *fs = friendskinmdl(pmi, cidx);
-            if(fs) mdlname = fs;
-        }
+        const char *mdlname = playerbodymdl(d, mdl, team);
         renderclient(d, mdlname, a[0].tag ? a : NULL, hold, attack, delay, lastaction, intermission && d->state!=CS_DEAD ? 0 : d->lastpain, fade, ragdoll && mdl.ragdoll);
 #if 0
         if(d->state!=CS_DEAD && d->quadmillis) 
@@ -449,22 +539,7 @@ namespace game
         const playermodelinfo &mdl = getplayermodelinfo(p);
         int team = demohd::visteam(p);
         if(!team && (teamskins || m_teammode)) team = isteam(player1->team, p->team) ? 1 : 2;
-        const char *mdlname = mdl.ffa;
-        switch(testteam ? testteam-1 : team)
-        {
-            case 1: mdlname = mdl.blueteam; break;
-            case 2: mdlname = mdl.redteam; break;
-        }
-        int pmi = playermodel, cidx = -1;
-        loopi(5) if(&playermodels[i]==&mdl) { pmi = i; break; }
-        if(isselfplayer(p) && selfhascolor()) cidx = selfcolorindex();
-        else if(isfriend(p)) cidx = friendcolorindex(isfriendally(p));
-        if(cidx>=0)
-        {
-            const char *fs = friendskinmdl(pmi, cidx);
-            if(fs) mdlname = fs;
-        }
-        return mdlname;
+        return playerbodymdl(p, mdl, team);
     }
 
     VARP(teamskins, 0, 0, 1);
@@ -713,10 +788,17 @@ namespace game
 #endif
         const playermodelinfo &mdl = getplayermodelinfo(d);
         defformatstring(gunname, "%s/%s", hudgunsdir[0] ? hudgunsdir : mdl.hudguns, guns[d->gunselect].file);
-        // first-person arm follows the body tint: you, or the friend you spectate / watch in a demo
+        // first-person arm follows the body tint (same rule, colorskinidx):
+        // you, or the player you spectate / watch in a demo. None for a
+        // custom model.
         int hcidx = -1;
-        if(isselfplayer(d) && selfhascolor()) hcidx = selfcolorindex();
-        else if(isfriend(d) && friendhascolor(isfriendally(d))) hcidx = friendcolorindex(isfriendally(d));
+        if(!iscustommodel(mdl))
+        {
+            int armteam = demohd::visteam(d);
+            if(!armteam && (m_teammode || teamskins)) armteam = d==player1 || isteam(d->team, player1->team) ? 1 : 2;
+            if(testteam) armteam = testteam-1;
+            hcidx = colorskinidx(d, armteam);
+        }
         if(hcidx >= 0)
         {
             string fallback;
@@ -796,6 +878,11 @@ namespace game
         previewent->light.color = vec(1, 1, 1);
         previewent->light.millis = -1;
         const playermodelinfo *mdlinfo = getplayermodelinfo(model);
+        if(model == 5) // menu: your custom model, or the picked one
+        {
+            mdlinfo = getplayermodelinfo(playermodel);
+            if(mdlinfo && customusable()) mdlinfo = &custommodelinfo(*mdlinfo);
+        }
         if(!mdlinfo) return;
         renderplayer(previewent, *mdlinfo, team >= 0 && team <= 2 ? team : 0, 1, false);
     }
@@ -836,7 +923,7 @@ namespace game
             const char *file = guns[i].file;
             if(!file) continue;
             string fname;
-            if(selfhascolor())
+            if(selfhascolor() && !iscustommodel(mdl))
             {
                 formatstring(fname, "%s/%s/c%d", hudgunsdir[0] ? hudgunsdir : mdl.hudguns, file, selfcolorindex());
                 preloadmodel(fname);
@@ -889,6 +976,12 @@ namespace game
             if(mdl->vwep) hwrtpreloadmodel(mdl->vwep);
             if(mdl->quad) hwrtpreloadmodel(mdl->quad);
             loopj(3) if(mdl->armour[j]) hwrtpreloadmodel(mdl->armour[j]);
+        }
+        if(customusable())
+        {
+            hwrtpreloadmodel("custom");
+            if(customblue) hwrtpreloadmodel("custom/blue");
+            if(customred) hwrtpreloadmodel("custom/red");
         }
         static const char * const vweps[] = { "vwep/fist", "vwep/shotg", "vwep/chaing", "vwep/rocket", "vwep/rifle", "vwep/gl", "vwep/pistol" };
         loopi(int(sizeof(vweps)/sizeof(vweps[0]))) hwrtpreloadmodel(vweps[i]);

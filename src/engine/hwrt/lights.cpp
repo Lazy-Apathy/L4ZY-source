@@ -44,8 +44,13 @@ extern int farplane;
 // close but is much softer. Only the primary world diffuse (and its blend
 // layer) changes; reflections already pick their level from a ray cone, models
 // keep level 0. Not saved.
+// Bias 0 by default since 2026-10-05 (was -0.5): in motion under DLAA the
+// shimmer of a textured surface grows with its high frequencies, and -0.5
+// kept half a level more of them than the footprint; close surfaces are
+// magnified and stay at level 0 either way. The bias alone is saved and
+// offered in Graphics > RT Textures (Stable 0 / Sharper -0.5).
 VAR(hwrtdiffmip, 0, 2, 2);
-FVAR(hwrtdiffmipbias, -3, -0.5f, 2);
+FVARP(hwrtdiffmipbias, -3, 0, 2);
 VAR(hwrtdiffmipauto, 0, 1, 1);
 VAR(hwrtdiffaniso, 0, 1, 1);
 VAR(hwrtdifftexel, 0, 0, 2);
@@ -100,6 +105,14 @@ VAR(hwrtskyvisdbg, 0, 0, 3);
 // Default on. A change reseeds the history so neither mode inherits the
 // other's running average. 0 is the old hash everywhere, kept for A/B.
 VARF(hwrtskybluenoise, 0, 1, 1, hwrtinvalidateskyhistory());
+// Smooth normals (Options > Graphics > RT Normals, saved). 1 (default): world
+// faces are lit with the smoothed vertex normals of the classic lightmap bake
+// (as.cpp, smoothworldnormals), so faceted floors, slopes and rocks lose their
+// light steps. 0: the flat face normal, the RT lighting before the option.
+// Diffuse light and sky rays only; textures, specular, reflections and the
+// shadow ray offset keep the flat face. Sky rays follow the normal, so a
+// change reseeds the sky history and the temporal filters.
+VARFP(hwrtsmoothnormals, 0, 1, 1, { hwrtinvalidateskyhistory(); if(!initing) hwrttemporalreset("smooth normals"); });
 // Retry four subpixel directions when the pixel-centre world hit is hiddenbygl.
 // Default on. Console witness only; not persisted, no menu or key.
 VAR(hwrthiddenretry, 0, 1, 1);
@@ -131,7 +144,7 @@ struct hwrtlightenv
     float diffFilter;   // hwrtdiffmip: 0 lod0, 1 textureGrad
     float diffVis;      // hwrtdiffvis: 0 play, 1 albedo, 2 lighting, 3 lod heat
     float skyStable;    // hwrtskystable: 0 pixel+frame RNG, 1 pixel only
-    float diffPad1;     // bit0 hold, bit1 bilinear hist, bits2-3 visdbg, bit4 age, bit5 nrd
+    float diffPad1;     // bit0 hold, bit1 bilinear hist, bits2-3 visdbg, bit4 age, bit5 nrd, bit14 smooth normals
                         // bits6-9 nrddbg, bit12 hidden-retry
     float nrdWorldToView[16];
     float nrdWorldToViewPrev[16];
@@ -582,7 +595,7 @@ void hwrtupdatelights()
     packed.env.diffFilter = diffmipfilter();
     packed.env.diffVis = float(hwrtdiffvis);
     packed.env.skyStable = hwrtskystable ? 1.0f : 0.0f;
-        packed.env.diffPad1 = float(hwrtskyhold + (hwrtskyhistfilter ? 2 : 0) + ((hwrtskyvisdbg & 3) << 2) + (hwrtskyage ? 16 : 0) + (hwrtnrdsession() ? 32 : 0) + ((hwrtnrddbg & 15) << 6) + (hwrthiddenretry ? 4096 : 0) + (hwrtskybluenoise && hwrtskybluenoiseready() ? 8192 : 0));
+        packed.env.diffPad1 = float(hwrtskyhold + (hwrtskyhistfilter ? 2 : 0) + ((hwrtskyvisdbg & 3) << 2) + (hwrtskyage ? 16 : 0) + (hwrtnrdsession() ? 32 : 0) + ((hwrtnrddbg & 15) << 6) + (hwrthiddenretry ? 4096 : 0) + (hwrtskybluenoise && hwrtskybluenoiseready() ? 8192 : 0) + (hwrtsmoothnormals ? 16384 : 0));
     {
         matrix4 w2v, v2c;
         hwrtnrdcameramats(w2v, v2c);

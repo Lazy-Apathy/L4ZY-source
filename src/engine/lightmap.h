@@ -117,6 +117,7 @@ struct lerpbounds
 };
 
 extern void calcnormals(bool lerptjoints = false);
+extern void calcnormalskeeptjoints(bool lerptjoints);
 extern void clearnormals();
 extern void findnormal(const vec &key, const vec &surface, vec &v);
 extern void calclerpverts(const vec2 *c, const vec *n, lerpvert *lv, int &numv);

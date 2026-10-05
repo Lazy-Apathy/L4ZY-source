@@ -776,6 +776,13 @@ int skyPackFlags()
     return int(lights.env.diffPad1 + 0.5);
 }
 
+// Smooth normals (hwrtsmoothnormals, bit 14). gFlatN keeps the flat face
+// normal of a world hit whose lighting normal was smoothed; the sky rays use
+// it to stay above the face.
+bool smoothNormalsOn() { return (skyPackFlags() & 16384) != 0; }
+vec3 gFlatN = vec3(0.0, 0.0, 1.0);
+bool gSmoothed = false;
+
 bool skyHistGeomOk(vec4 h, vec3 hp, vec3 n, float hitdist)
 {
     if(h.w < 0.0) return false;
@@ -1524,6 +1531,29 @@ void shadePixel()
             vec3 gcol = vec3(float((t.w >> 8u) & 255u), float((t.w >> 16u) & 255u), float((t.w >> 24u) & 255u)) * (1.0 / 255.0);
             emit = colorTex(texture(glows, vec3(tc, float(glayer))).rgb) * colorTex(gcol);
         }
+        // Smooth normals: the per-vertex normals of the classic lightmap bake
+        // (as.cpp, smoothworldnormals). A vertex with no stored normal carries
+        // +Z (octarender) and takes the flat face normal. Only the diffuse
+        // light and the sky change; UVs, specular, reflections and the shadow
+        // ray offset (noffset) keep the flat face.
+        if(smoothNormalsOn())
+        {
+            vec3 vn0 = verts.v[i0].n, vn1 = verts.v[i1].n, vn2 = verts.v[i2].n;
+            bool flatz = abs(n.z) > 0.999;
+            if(!flatz && abs(vn0.x) + abs(vn0.y) < 0.02 && vn0.z > 0.99) vn0 = n;
+            if(!flatz && abs(vn1.x) + abs(vn1.y) < 0.02 && vn1.z > 0.99) vn1 = n;
+            if(!flatz && abs(vn2.x) + abs(vn2.y) < 0.02 && vn2.z > 0.99) vn2 = n;
+            if(dot(vn0, n) < 0.0) vn0 = -vn0;
+            if(dot(vn1, n) < 0.0) vn1 = -vn1;
+            if(dot(vn2, n) < 0.0) vn2 = -vn2;
+            vec3 sn = vn0 * a + vn1 * b + vn2 * c;
+            float sl = length(sn);
+            if(sl > 1e-4)
+            {
+                sn /= sl;
+                if(dot(sn, n) > 0.3) { gFlatN = n; gSmoothed = true; n = sn; }
+            }
+        }
     }
     else
     {
@@ -1794,6 +1824,8 @@ void shadePixel()
         {
             if(s >= nsky) break;
             vec3 sdir = bluenoise ? skyBlueNoiseDir(n, bnbase, s) : cosineHemi(n, seed);
+            // Smooth normals: a ray that leaves under the flat face is mirrored.
+            if(gSmoothed && dot(sdir, gFlatN) < 0.0) sdir = reflect(sdir, gFlatN);
             if(nrdOn)
             {
                 float t = occludedT(sorigin, sdir, tmax, skymask, skipInst);

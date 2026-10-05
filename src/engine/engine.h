@@ -369,6 +369,8 @@ extern void hwrtrender();
 extern void hwrtdrawtimes(int conw, int conh);
 extern void hwrtrebuildworld();
 extern void hwrtdropworld();
+extern void hwrtnoteworldedit();   // commitchanges(): the RT world is stale
+extern void hwrtpolleditrebuild(); // main loop: rebuild it once the edits are quiet
 extern bool hwrtalignsundisk();
 extern bool hwrtnobake();
 extern void hwrtsnapworlddepth();

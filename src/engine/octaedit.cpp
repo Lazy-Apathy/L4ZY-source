@@ -605,6 +605,9 @@ void commitchanges(bool force)
     invalidatepostfx();
     updatevabbs();
     resetblobs();
+    // The traced world is built from these vertex arrays; it is rebuilt a
+    // moment later, once, not on every commit (hwrtpolleditrebuild).
+    hwrtnoteworldedit();
 }
 
 void changed(const block3 &sel, bool commit = true)

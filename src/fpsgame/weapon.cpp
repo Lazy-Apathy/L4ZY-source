@@ -227,7 +227,185 @@ namespace game
         b->bounces++;
         adddecal(DECAL_BLOOD, vec(b->o).sub(vec(surface).mul(b->radius)), surface, 2.96f/b->bounces, bvec(0x60, 0xFF, 0xFF), rnd(4));
     }
-        
+
+    // Weapon trail colours. Local look only: nothing is sent, sizes and
+    // lifetimes are the stock ones, trails stay depth tested like before.
+    // Three sets of six per-weapon colours: All (trailcolor<weapon>, defaults
+    // are the stock values), Me (trailmycolor<weapon>, your own shots) and
+    // Others (trailothercolor<weapon>, every other player, bot and monster,
+    // whatever the team). Me and Others default to -1 = same as All, so the
+    // picture is unchanged until one is set. Trails are particles drawn after
+    // the RT composite in both lighting modes; they are not RT light sources.
+    // Note: the RT smoke shadow (hwrtsmokeshadow) recognises stock grey
+    // smoke only, so a recoloured smoke trail casts no RT shadow.
+    enum { TRAIL_SG = 0, TRAIL_CG, TRAIL_RL, TRAIL_RI, TRAIL_GL, TRAIL_PI, NUMTRAILS };
+    enum { TRAILSET_ALL = 0, TRAILSET_ME, TRAILSET_OTHERS, NUMTRAILSETS };
+    static const int stocktrailcolor[NUMTRAILS] = { 0xFFC864, 0xFFC864, 0x404040, 0x404040, 0x404040, 0xFFC864 };
+    HVARP(trailcolorshotgun, 0, 0xFFC864, 0xFFFFFF);
+    HVARP(trailcolorchaingun, 0, 0xFFC864, 0xFFFFFF);
+    HVARP(trailcolorrocketlauncher, 0, 0x404040, 0xFFFFFF);
+    HVARP(trailcolorrifle, 0, 0x404040, 0xFFFFFF);
+    HVARP(trailcolorgrenadelauncher, 0, 0x404040, 0xFFFFFF);
+    HVARP(trailcolorpistol, 0, 0xFFC864, 0xFFFFFF);
+    // -1 = same as All, else 0xRRGGBB (saved in decimal)
+    VARP(trailmycolorshotgun, -1, -1, 0xFFFFFF);
+    VARP(trailmycolorchaingun, -1, -1, 0xFFFFFF);
+    VARP(trailmycolorrocketlauncher, -1, -1, 0xFFFFFF);
+    VARP(trailmycolorrifle, -1, -1, 0xFFFFFF);
+    VARP(trailmycolorgrenadelauncher, -1, -1, 0xFFFFFF);
+    VARP(trailmycolorpistol, -1, -1, 0xFFFFFF);
+    VARP(trailothercolorshotgun, -1, -1, 0xFFFFFF);
+    VARP(trailothercolorchaingun, -1, -1, 0xFFFFFF);
+    VARP(trailothercolorrocketlauncher, -1, -1, 0xFFFFFF);
+    VARP(trailothercolorrifle, -1, -1, 0xFFFFFF);
+    VARP(trailothercolorgrenadelauncher, -1, -1, 0xFFFFFF);
+    VARP(trailothercolorpistol, -1, -1, 0xFFFFFF);
+    VARP(trailbrightness, 25, 100, 100); // percent, applied to non-stock colours only
+
+    static const char * const trailsetnames[NUMTRAILSETS] = { "trailcolor", "trailmycolor", "trailothercolor" };
+    static const char * const trailweaponnames[NUMTRAILS] = { "shotgun", "chaingun", "rocketlauncher", "rifle", "grenadelauncher", "pistol" };
+
+    static int &trailcolorvar(int set, int slot)
+    {
+        static int * const vars[NUMTRAILSETS][NUMTRAILS] =
+        {
+            { &trailcolorshotgun, &trailcolorchaingun, &trailcolorrocketlauncher, &trailcolorrifle, &trailcolorgrenadelauncher, &trailcolorpistol },
+            { &trailmycolorshotgun, &trailmycolorchaingun, &trailmycolorrocketlauncher, &trailmycolorrifle, &trailmycolorgrenadelauncher, &trailmycolorpistol },
+            { &trailothercolorshotgun, &trailothercolorchaingun, &trailothercolorrocketlauncher, &trailothercolorrifle, &trailothercolorgrenadelauncher, &trailothercolorpistol }
+        };
+        return *vars[clamp(set, 0, NUMTRAILSETS-1)][clamp(slot, 0, NUMTRAILS-1)];
+    }
+
+    static int trailslot(int gun)
+    {
+        switch(gun)
+        {
+            case GUN_SG: return TRAIL_SG;
+            case GUN_CG: return TRAIL_CG;
+            case GUN_RL: return TRAIL_RL;
+            case GUN_RIFLE: return TRAIL_RI;
+            case GUN_GL: return TRAIL_GL;
+            case GUN_PISTOL: return TRAIL_PI;
+            default: return -1;
+        }
+    }
+
+    // colour actually used for a set: Me / Others fall back to All
+    static int trailcolorshown(int set, int slot)
+    {
+        int c = trailcolorvar(set, slot);
+        return c >= 0 ? c : trailcolorvar(TRAILSET_ALL, slot);
+    }
+
+    // colour of the trail of a shot of gun fired by d (d may be NULL = All)
+    static int trailcolor(int gun, fpsent *d)
+    {
+        int slot = trailslot(gun);
+        if(slot < 0) return 0x404040;
+        int set = !d ? TRAILSET_ALL : (isselfplayer(d) ? TRAILSET_ME : TRAILSET_OTHERS);
+        int c = trailcolorshown(set, slot);
+        if(c != stocktrailcolor[slot] && trailbrightness < 100)
+        {
+            int r = ((c>>16)&0xFF)*trailbrightness/100, g = ((c>>8)&0xFF)*trailbrightness/100, b = (c&0xFF)*trailbrightness/100;
+            c = (r<<16) | (g<<8) | b;
+        }
+        return c;
+    }
+
+    static bool parsetrailhex(const char *s, int &c)
+    {
+        const char *p = s;
+        while(*p==' ' || *p=='#') p++;
+        if(p[0]=='0' && (p[1]=='x' || p[1]=='X')) p += 2;
+        char *end = NULL;
+        long v = strtol(p, &end, 16);
+        if(end != p + 6 || *end) return false;
+        c = int(v);
+        return true;
+    }
+
+    static int trailsetname(const char *name)
+    {
+        if(!strcasecmp(name, "all")) return TRAILSET_ALL;
+        if(!strcasecmp(name, "me")) return TRAILSET_ME;
+        if(!strcasecmp(name, "others") || !strcasecmp(name, "other")) return TRAILSET_OTHERS;
+        return -1;
+    }
+
+    // a full variable name (trailmycolorrifle...) gives both the set and the weapon
+    static bool trailvarname(const char *name, int &set, int &slot)
+    {
+        loopi(NUMTRAILSETS) loopj(NUMTRAILS)
+        {
+            defformatstring(v, "%s%s", trailsetnames[i], trailweaponnames[j]);
+            if(!strcasecmp(name, v)) { set = i; slot = j; return true; }
+        }
+        return false;
+    }
+
+    // reads [me|others|all] WEAPON or VARIABLE; returns the index of the next argument
+    static int trailtarget(const char *a, const char *b, int &set, int &slot)
+    {
+        set = TRAILSET_ALL;
+        slot = -1;
+        if(trailvarname(a, set, slot)) return 1;
+        int s = trailsetname(a);
+        if(s >= 0) { set = s; slot = b[0] ? trailslot(getweapon(b)) : -1; return 2; }
+        slot = a[0] ? trailslot(getweapon(a)) : -1;
+        return 1;
+    }
+
+    // settrailcolor [me|others|all] SG|CG|RL|RI|GL|PI ["#RRGGBB"|stock|same]
+    // (or settrailcolor VARIABLE [colour]). "same" = same as All (Me / Others;
+    // stock for All). Returns the stored value: "RRGGBB", or "same".
+    ICOMMAND(settrailcolor, "sss", (char *a, char *b, char *c),
+    {
+        int set = 0;
+        int slot = -1;
+        const char *col = trailtarget(a, b, set, slot) == 2 ? c : b;
+        if(slot < 0) { conoutf(CON_ERROR, "\f4trail colour: [me|others|all] then SG, CG, RL, RI, GL or PI"); return; }
+        if(col[0])
+        {
+            int v;
+            if(!strcasecmp(col, "stock")) trailcolorvar(set, slot) = stocktrailcolor[slot];
+            else if(!strcasecmp(col, "same")) trailcolorvar(set, slot) = set == TRAILSET_ALL ? stocktrailcolor[slot] : -1;
+            else if(parsetrailhex(col, v)) trailcolorvar(set, slot) = v;
+            else conoutf(CON_ERROR, "\f4trail colour: 6 hex digits, e.g. #00C0FF, or stock / same");
+        }
+        int cur = trailcolorvar(set, slot);
+        if(cur < 0) { result("same"); return; }
+        defformatstring(hex, "%06X", cur);
+        result(hex);
+    });
+
+    // gettrailcolor [me|others|all] WEAPON (or VARIABLE): the colour really used, "RRGGBB"
+    ICOMMAND(gettrailcolor, "ss", (char *a, char *b),
+    {
+        int set = 0;
+        int slot = -1;
+        trailtarget(a, b, set, slot);
+        if(slot < 0) { result(""); return; }
+        defformatstring(hex, "%06X", trailcolorshown(set, slot));
+        result(hex);
+    });
+
+    // trailcolorvalue [me|others|all] WEAPON (or VARIABLE): same colour as an integer (menu preview)
+    ICOMMAND(trailcolorvalue, "ss", (char *a, char *b),
+    {
+        int set = 0;
+        int slot = -1;
+        trailtarget(a, b, set, slot);
+        intret(slot < 0 ? 0 : trailcolorshown(set, slot));
+    });
+
+    // trailcolorreset [me|others|all]: back to stock / same as All (no argument: everything)
+    ICOMMAND(trailcolorreset, "s", (char *a),
+    {
+        int only = a[0] ? trailsetname(a) : -1;
+        loopi(NUMTRAILSETS) if(only < 0 || only == i) loopj(NUMTRAILS) trailcolorvar(i, j) = i == TRAILSET_ALL ? stocktrailcolor[j] : -1;
+        if(!a[0]) trailbrightness = 100;
+    });
+
     void updatebouncers(int time)
     {
         loopv(bouncers)
@@ -236,7 +414,7 @@ namespace game
             if(bnc.bouncetype==BNC_GRENADE && bnc.vel.magnitude() > 50.0f)
             {
                 vec pos = bnc.offsetpos();
-                regular_particle_splash(PART_SMOKE, 1, 150, pos, 0x404040, 2.4f, 50, -20);
+                regular_particle_splash(PART_SMOKE, 1, 150, pos, trailcolor(GUN_GL, bnc.owner), 2.4f, 50, -20);
             }
             vec old(bnc.o);
             bool stopped = false;
@@ -572,7 +750,7 @@ namespace game
                          }
                          particle_splash(guns[p.gun].part, 1, 1, pos, color, 4.8f, 150, 20);
                     }
-                    else regular_particle_splash(PART_SMOKE, 2, 300, pos, 0x404040, 2.4f, 50, -20);
+                    else regular_particle_splash(PART_SMOKE, 2, 300, pos, p.gun==GUN_RL ? trailcolor(GUN_RL, p.owner) : 0x404040, 2.4f, 50, -20);
                 }
             }
             if(exploded)
@@ -608,7 +786,7 @@ namespace game
                 loopi(guns[gun].rays)
                 {
                     particle_splash(PART_SPARK, 20, 250, rays[i], 0xB49B4B, 0.24f);
-                    particle_flare(hudgunorigin(gun, from, rays[i], d), rays[i], 300, PART_STREAK, 0xFFC864, 0.28f);
+                    particle_flare(hudgunorigin(gun, from, rays[i], d), rays[i], 300, PART_STREAK, trailcolor(gun, d), 0.28f);
                     if(!local) adddecal(DECAL_BULLET, rays[i], vec(from).sub(rays[i]).safenormalize(), 2.0f);
                 }
                 if(muzzlelight) adddynlight(hudgunorigin(gun, d->o, to, d), 30, vec(0.5f, 0.375f, 0.25f), 100, 100, DL_FLASH, 0, vec(0, 0, 0), d);
@@ -619,7 +797,7 @@ namespace game
             case GUN_PISTOL:
             {
                 particle_splash(PART_SPARK, 200, 250, to, 0xB49B4B, 0.24f);
-                particle_flare(hudgunorigin(gun, from, to, d), to, 600, PART_STREAK, 0xFFC864, 0.28f);
+                particle_flare(hudgunorigin(gun, from, to, d), to, 600, PART_STREAK, trailcolor(gun, d), 0.28f);
                 if(muzzleflash && d->muzzle.x >= 0)
                     particle_flare(d->muzzle, d->muzzle, gun==GUN_CG ? 100 : 200, PART_MUZZLE_FLASH1, 0xFFFFFF, gun==GUN_CG ? 2.25f : 1.25f, d);
                 if(!local) adddecal(DECAL_BULLET, to, vec(from).sub(to).safenormalize(), 2.0f);
@@ -652,7 +830,7 @@ namespace game
 
             case GUN_RIFLE:
                 particle_splash(PART_SPARK, 200, 250, to, 0xB49B4B, 0.24f);
-                particle_trail(PART_SMOKE, 500, hudgunorigin(gun, from, to, d), to, 0x404040, 0.6f, 20);
+                particle_trail(PART_SMOKE, 500, hudgunorigin(gun, from, to, d), to, trailcolor(gun, d), 0.6f, 20);
                 if(muzzleflash && d->muzzle.x >= 0)
                     particle_flare(d->muzzle, d->muzzle, 150, PART_MUZZLE_FLASH3, 0xFFFFFF, 1.25f, d);
                 if(!local) adddecal(DECAL_BULLET, to, vec(from).sub(to).safenormalize(), 3.0f);

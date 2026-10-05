@@ -17,6 +17,8 @@ cmd bind KEY ACTION | put an action on a key (while playing) | touche touches cl
 cmd specbind KEY ACTION | put an action on a key (while spectating) | touche spectateur spec clavier
 cmd showgui PAGE | open a settings page | ouvrir menu page afficher
 cmd cyclemycolor | change my own name colour to the next one | couleur nom pseudo
+cmd settrailcolor WORD WORD WORD? | set a weapon trail colour: optional me / others / all (default all), then SG CG RL RI GL PI, then 6 hex digits (60F0FF), stock, or same (same as All) | trainee traine couleur arme fusil rifle tir moi autres
+cmd trailcolorreset WORD? | put the weapon trail colours back to stock: all of them, or only me / others / all | trainee traine couleur defaut reinitialiser
 cmd mixreset | put all sound mix sliders back to default | son mix defaut reinitialiser
 cmd clearconsole | empty the console | console effacer vider
 cmd hudedit | open the HUD editor: every part of the HUD gets a frame the player drags with the mouse (right click puts one back, Esc when done) | hud deplacer placer disposition glisser bouger interface ecran position

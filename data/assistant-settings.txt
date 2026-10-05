@@ -10,6 +10,10 @@ mycolor: colour of my own body and name. -1 none, 0 green, 1 blue, 2 yellow, 3 r
 friendallycolor: colour of my friends who are on my team (name and body). -1 none, 0 green, 1 blue, 2 yellow, 3 red, 4 grey, 5 magenta, 6 orange, 7 white, 8 cyan, 9 pink
 friendenemycolor: colour of my friends who are on the other team or in free for all (name and body). -1 none, 0 green, 1 blue, 2 yellow, 3 red, 4 grey, 5 magenta, 6 orange, 7 white, 8 cyan, 9 pink
 friendcolor: -
+teamcolorally: colour of every teammate's body, bots included (team games; replaces blue). -1 none (blue), 0 green, 1 blue, 2 yellow, 3 red, 4 grey, 5 magenta, 6 orange, 7 white, 8 cyan, 9 pink
+teamcolorenemy: colour of every enemy's body, bots included (replaces red in team games; everyone else in free for all). -1 none, 0 green, 1 blue, 2 yellow, 3 red, 4 grey, 5 magenta, 6 orange, 7 white, 8 cyan, 9 pink
+friendsfollowteamcolor: 1 = friends' bodies take the teammate / enemy colour instead of the friend colours (names keep them)
+customplayermodel: 1 = use my own model from packages/models/custom in my profile (no colour skin on it; the picked model if the folder is empty)
 clantag: my clan tag, used to recognise clan mates as friends (text)
 playermodel: my player model. 0 Mr Fixit, 1 Snout X10K, 2 Ogro, 3 Inky, 4 Captain Cannon
 forceplayermodels: 1 = everyone is shown with my player model
@@ -19,6 +23,27 @@ teamcolorfrags: team colours in frag messages
 teamcolortext: team colours for player names in the console
 teamcolorchat: team colours for names in the chat
 teamsounds: different sounds for teammates
+
+# --- weapon trails (local look only) ---
+trailcolorshotgun: All - colour used for every shot unless Me / Others has its own: colour of the shotgun trails as a hex RGB value, e.g. trailcolorshotgun 0x60F0FF (stock 0xFFC864). Also: settrailcolor SG "#60F0FF", settrailcolor SG stock
+trailcolorchaingun: All - colour used for every shot unless Me / Others has its own: colour of the chaingun trails as a hex RGB value (stock 0xFFC864). Also: settrailcolor CG "#RRGGBB"
+trailcolorrifle: All - colour used for every shot unless Me / Others has its own: colour of the rifle smoke trail as a hex RGB value (stock 0x404040 dark grey). Also: settrailcolor RI "#RRGGBB"
+trailcolorrocketlauncher: All - colour used for every shot unless Me / Others has its own: colour of the smoke behind rockets as a hex RGB value (stock 0x404040). Also: settrailcolor RL "#RRGGBB"
+trailcolorgrenadelauncher: All - colour used for every shot unless Me / Others has its own: colour of the smoke behind grenades as a hex RGB value (stock 0x404040). Also: settrailcolor GL "#RRGGBB"
+trailcolorpistol: All - colour used for every shot unless Me / Others has its own: colour of the pistol trails as a hex RGB value (stock 0xFFC864). Also: settrailcolor PI "#RRGGBB"
+trailmycolorshotgun: colour of the shotgun trails of MY shots as a hex RGB value; -1 = same as All (trailcolorshotgun). Also: settrailcolor me SG "#RRGGBB" / same
+trailmycolorchaingun: colour of the chaingun trails of MY shots as a hex RGB value; -1 = same as All (trailcolorchaingun). Also: settrailcolor me CG "#RRGGBB" / same
+trailmycolorrifle: colour of the rifle trails of MY shots as a hex RGB value; -1 = same as All (trailcolorrifle). Also: settrailcolor me RI "#RRGGBB" / same
+trailmycolorrocketlauncher: colour of the rocket trails of MY shots as a hex RGB value; -1 = same as All (trailcolorrocketlauncher). Also: settrailcolor me RL "#RRGGBB" / same
+trailmycolorgrenadelauncher: colour of the grenade trails of MY shots as a hex RGB value; -1 = same as All (trailcolorgrenadelauncher). Also: settrailcolor me GL "#RRGGBB" / same
+trailmycolorpistol: colour of the pistol trails of MY shots as a hex RGB value; -1 = same as All (trailcolorpistol). Also: settrailcolor me PI "#RRGGBB" / same
+trailothercolorshotgun: colour of the shotgun trails of EVERY OTHER player and bot (any team, no team distinction) as a hex RGB value; -1 = same as All (trailcolorshotgun). Also: settrailcolor others SG "#RRGGBB" / same
+trailothercolorchaingun: colour of the chaingun trails of EVERY OTHER player and bot (any team, no team distinction) as a hex RGB value; -1 = same as All (trailcolorchaingun). Also: settrailcolor others CG "#RRGGBB" / same
+trailothercolorrifle: colour of the rifle trails of EVERY OTHER player and bot (any team, no team distinction) as a hex RGB value; -1 = same as All (trailcolorrifle). Also: settrailcolor others RI "#RRGGBB" / same
+trailothercolorrocketlauncher: colour of the rocket trails of EVERY OTHER player and bot (any team, no team distinction) as a hex RGB value; -1 = same as All (trailcolorrocketlauncher). Also: settrailcolor others RL "#RRGGBB" / same
+trailothercolorgrenadelauncher: colour of the grenade trails of EVERY OTHER player and bot (any team, no team distinction) as a hex RGB value; -1 = same as All (trailcolorgrenadelauncher). Also: settrailcolor others GL "#RRGGBB" / same
+trailothercolorpistol: colour of the pistol trails of EVERY OTHER player and bot (any team, no team distinction) as a hex RGB value; -1 = same as All (trailcolorpistol). Also: settrailcolor others PI "#RRGGBB" / same
+trailbrightness: brightness of the custom trail colours in percent (25 to 100); stock colours are never changed
 
 # --- crosshair ---
 crosshairsize: size of the crosshair, 0 = hidden
@@ -205,6 +230,7 @@ hwrtnrd: denoiser for ray traced lighting
 hwrtreflections: sharp ray traced reflections on water and reflective surfaces (ray tracing). 1 on, 0 off
 hwrtspecular: shine of lamps and sun on glossy surfaces (ray tracing). 1 on, 0 off
 hwrtdiffupscale: how small wall and floor textures are enlarged with ray tracing (blocky, shimmering steps up close otherwise). 2 bicubic (default), 3 Lanczos (a little sharper, slower map load), 0 nearest (old blocky look), 1 bilinear (softer)
+hwrtsmoothnormals: smooth lighting across faceted floors, slopes and rocks with ray tracing, like classic lighting (no light steps between faces). 1 on (default), 0 off (flat faces, the old RT look)
 hwrtshadowself: which lights cast my own shadow with ray tracing. 0 none, 1 the sun, 2 + small lights, 3 + nearest lamps, 4 + sky
 hwrtteleportlight: teleporters glow and light the room (ray tracing)
 hwrtjumppadlight: jump pads glow and light the room (ray tracing)

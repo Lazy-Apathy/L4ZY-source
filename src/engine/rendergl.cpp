@@ -2612,7 +2612,9 @@ void gl_drawframe()
     else
     {
         addmotionblur();
-        if(!gtaoapplied) addlookao();
+        // RT traces the sky occlusion itself; lookao on top of it darkened every flat floor and wall seen
+        // at a slant, most at 45-130 units, a ring that follows the player (rt-cercle-joueur).
+        if(!gtaoapplied && !hwrtnobake()) addlookao();
         addlooktaa();
     }
     // Colour gun after the velocity image (which now includes the hudgun

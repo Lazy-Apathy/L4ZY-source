@@ -1214,6 +1214,11 @@ static bool hwrtfillas(animmodel::part *p, dynent *d, animmodel::animstate *as)
         if(interp<0 || interp>=MAXANIMPARTS) continue;
         animinterpinfo &ai = d->animinterp[interp];
         if(ai.cur.range < 1) continue;
+        // Frames recorded for another skeleton (the player model changed and
+        // this dynent was not drawn by the rasteriser since, e.g. your own
+        // body in first person) would index past this skeleton's frames.
+        // Leave this part in its bind pose until the next raster draw.
+        if(ai.lastmodel != (p->meshes ? p->meshes->animkey() : NULL)) continue;
         as[i].cur.setframes(ai.cur);
         if(ai.prev.range>0)
         {

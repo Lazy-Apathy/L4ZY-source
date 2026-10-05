@@ -903,6 +903,37 @@ ICOMMAND(openfolder, "s", (char *which),
         if(homedir[0]) formatstring(dir, "%srecordings", homedir);
         else copystring(dir, "recordings");
     }
+    else if(!strcmp(which, "playermodel"))
+    {
+        // the "Custom" player model folder, in the profile: created with a
+        // short README the first time
+        formatstring(dir, "%spackages/models/custom", homedir);
+        static const char * const readme =
+            "Custom player model (menu: Player Model > Custom model)\n"
+            "\n"
+            "Put your own model here, like the shipped ones in packages/models\n"
+            "(mrfixit, snoutx10k...):\n"
+            "  custom/md5.cfg (or iqm.cfg) + its files : normal look (needed)\n"
+            "  custom/blue/md5.cfg                     : your team (optional)\n"
+            "  custom/red/md5.cfg                      : other team (optional)\n"
+            "Without blue/red, the normal look is used in team games.\n"
+            "In blue/red cfg files, md5dir \"custom\" reuses the files of custom/.\n"
+            "\n"
+            "You see it on yourself, and on everyone with Force Matching Player\n"
+            "Models. Other players still see the model you picked. No colour\n"
+            "skin is put over it. Arms, icons, armour and quad come from the\n"
+            "picked model. Empty or broken folder: the picked model is used.\n"
+            "New files: load a map again. Changed files: restart the game.\n";
+        folderensure(dir);
+        string rm;
+        formatstring(rm, "%s/README.txt", dir);
+        if(!fileexists(rm, "r"))
+        {
+            // relative name: openrawfile() puts it in the profile itself
+            stream *f = openrawfile("packages/models/custom/README.txt", "w");
+            if(f) { f->write(readme, strlen(readme)); delete f; }
+        }
+    }
     else if(!strcmp(which, "models") || !strcmp(which, "custom"))
     {
         // L4ZY.exe donne le dossier personnel des modeles (hors installation).
@@ -1110,7 +1141,7 @@ static const char *settingtoken(const char *p, char *out, int len)
 static bool settingpageok(const char *page)
 {
     static const char * const pages[] = { "hud", "scoreboard", "gfx", "display", "audio", "mouse", "keys", "console", "record",
-        "ammobar", "gameclock", "hudscore", "killfeed", "killstreak", "traduction", "crosshair", "friends", "playermodel" };
+        "ammobar", "gameclock", "hudscore", "killfeed", "killstreak", "traduction", "crosshair", "friends", "playermodel", "trails", "trailsme", "trailsothers", "trailsall" };
     loopi(sizeof(pages)/sizeof(pages[0])) if(!strcmp(page, pages[i])) return true;
     return false;
 }
@@ -1132,6 +1163,10 @@ static const char *settingroute(const char *page)
         { "killfeed", "Options > HUD > Adjust (next to Kill Feed)" },
         { "killstreak", "Options > HUD > Adjust (next to Kill Streak)" },
         { "playermodel", "main menu: the colour dots under your player" },
+        { "trails", "Options > HUD > Colours (next to Weapon Trails)" },
+        { "trailsme", "Options > HUD > Colours (next to Weapon Trails) > Me" },
+        { "trailsothers", "Options > HUD > Colours (next to Weapon Trails) > Others" },
+        { "trailsall", "Options > HUD > Colours (next to Weapon Trails) > All" },
     };
     loopi(sizeof(routes)/sizeof(routes[0])) if(!strcmp(page, routes[i][0])) return routes[i][1];
     return NULL;
@@ -1211,7 +1246,7 @@ static void indexsettingsfile(const char *file)
             }
             // colour pickers are menu aliases, found anywhere on the line:
             // friendcolorpicks VAR "Label"
-            static const char * const pickers[] = { "friendcolorpicks", "crosshaircolourpicks" };
+            static const char * const pickers[] = { "friendcolorpicks", "crosshaircolourpicks", "trailcolourpicks" };
             loopi(sizeof(pickers)/sizeof(pickers[0]))
             {
                 const char *at = strstr(line, pickers[i]);

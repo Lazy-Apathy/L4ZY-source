@@ -1581,6 +1581,10 @@ template<class MDL, class MESH> struct modelcommands
     {
         loopskins(meshname, s,
             s.tex = textureload(makerelpath(MDL::dir, tex), 0, true, false);
+            // A missing skin silently becomes the magenta "TEXTURE ERROR"
+            // picture (custom skins copied without their images): name the
+            // file in log.txt when the model loads. Log only.
+            if(s.tex == notexture && *tex) logoutf("model skin not found: %s", makerelpath(MDL::dir, tex));
             markscenetexture(s.tex);
             if(*masks)
             {
