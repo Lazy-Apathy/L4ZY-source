@@ -2,6 +2,10 @@
 // is largely backwards compatible with the quake console language.
 
 #include "engine.h"
+#ifndef WIN32
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 
 hashnameset<ident> idents; // contains ALL vars/commands/aliases
 vector<ident *> identmap;
@@ -2436,10 +2440,133 @@ bool validateblock(const char *s)
 }
 
 #ifndef STANDALONE
+// Set at start-up when config.cfg exists but could not be read (locked by an
+// antivirus or a sync tool, offline cloud file, no permission). The settings
+// in memory are then the defaults: config.cfg must not be overwritten with them.
+bool savedconfigunreadable = false;
+
+static const char CFG_END_MARK[] = "// end of settings";
+
+// Size of a file as the game would open it, -1 if absent.
+long long cfgfilesize(const char *name)
+{
+    const char *found = findfile(path(name, true), "rb");
+    if(!found) return -1;
+#ifdef WIN32
+    WIN32_FILE_ATTRIBUTE_DATA fa;
+    if(!GetFileAttributesExA(found, GetFileExInfoStandard, &fa) || (fa.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) return -1;
+    return ((long long)fa.nFileSizeHigh << 32) | fa.nFileSizeLow;
+#else
+    struct stat st;
+    if(stat(found, &st) || !S_ISREG(st.st_mode)) return -1;
+    return st.st_size;
+#endif
+}
+
+// A settings file is complete when its last line is the end mark.
+static bool cfgfilecomplete(const char *fullpath)
+{
+    FILE *f = fopen(fullpath, "rb");
+    if(!f) return false;
+    bool ok = false;
+    char buf[64];
+    if(!fseek(f, 0, SEEK_END))
+    {
+        long len = ftell(f);
+        long n = min(len, (long)sizeof(buf));
+        if(n > 0 && !fseek(f, len - n, SEEK_SET) && (long)fread(buf, 1, n, f) == n)
+        {
+            while(n > 0 && (buf[n-1] == '\n' || buf[n-1] == '\r')) n--;
+            long marklen = (long)strlen(CFG_END_MARK);
+            ok = n >= marklen && !memcmp(&buf[n - marklen], CFG_END_MARK, marklen);
+        }
+    }
+    fclose(f);
+    return ok;
+}
+
+static void cfgsync(const char *fullpath)
+{
+#ifdef WIN32
+    HANDLE h = CreateFileA(fullpath, GENERIC_WRITE, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if(h != INVALID_HANDLE_VALUE) { FlushFileBuffers(h); CloseHandle(h); }
+#endif
+}
+
+static bool cfgreplace(const char *from, const char *to)
+{
+#ifdef WIN32
+    // A scanner or sync tool may hold the old file for a moment.
+    for(int tries = 0; tries < 8; tries++)
+    {
+        if(MoveFileExA(from, to, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) return true;
+        Sleep(250);
+    }
+    return false;
+#else
+    return rename(from, to) == 0;
+#endif
+}
+
+static bool cfgcopy(const char *from, const char *to)
+{
+#ifdef WIN32
+    return CopyFileA(from, to, FALSE) != 0;
+#else
+    FILE *in = fopen(from, "rb");
+    if(!in) return false;
+    FILE *out = fopen(to, "wb");
+    if(!out) { fclose(in); return false; }
+    char buf[4096];
+    size_t n;
+    bool ok = true;
+    while((n = fread(buf, 1, sizeof(buf), in)) > 0) if(fwrite(buf, 1, n, out) != n) { ok = false; break; }
+    fclose(in);
+    if(fclose(out)) ok = false;
+    return ok;
+#endif
+}
+
+#ifdef L4ZY_TESTHOOKS
+// Test builds only: stop the process in the middle of writing, like a power cut.
+static void cfgtestcrash(const char *stage)
+{
+    const char *v = getenv("L4ZY_TEST_WRITECFG_CRASH");
+    if(!v || strcmp(v, stage)) return;
+    logoutf("TEST: simulated crash while writing settings (%s)", stage);
+    closelogfile();
+#ifdef WIN32
+    TerminateProcess(GetCurrentProcess(), 99);
+#endif
+    _exit(99);
+}
+#else
+#define cfgtestcrash(stage)
+#endif
+
 void writecfg(const char *name)
 {
-    stream *f = openutf8file(path(name && name[0] ? name : game::savedconfig(), true), "w");
-    if(!f) return;
+    string target;
+    copystring(target, name && name[0] ? name : game::savedconfig());
+    path(target);
+    bool mainconfig = !strcmp(target, game::savedconfig());
+    if(mainconfig && savedconfigunreadable)
+    {
+        conoutf(CON_ERROR, "\f3%s could not be read at start-up: it is NOT overwritten, settings changed in this session are not saved", target);
+        return;
+    }
+    // Written next to the target, then swapped in: a crash or a full disk
+    // leaves the previous file untouched.
+    defformatstring(tmpname, "%s.tmp", target);
+    string fulltarget, fulltmp;
+    copystring(fulltarget, findfile(target, "w"));
+    copystring(fulltmp, findfile(tmpname, "w"));
+    stream *f = openutf8file(tmpname, "w");
+    if(!f)
+    {
+        conoutf(CON_ERROR, "could not write %s", tmpname);
+        return;
+    }
     f->printf("// automatically written on exit, DO NOT MODIFY\n// delete this file to have %s overwrite these settings\n// modify settings in game, or put settings in %s to override anything\n\n", game::defaultconfig(), game::autoexec());
     game::writeclientinfo(f);
     f->printf("\n");
@@ -2458,6 +2585,7 @@ void writecfg(const char *name)
         }
     }
     f->printf("\n");
+    cfgtestcrash("middle");
     writebinds(f);
     f->printf("\n");
     loopv(ids)
@@ -2475,7 +2603,28 @@ void writecfg(const char *name)
     }
     f->printf("\n");
     writecompletions(f);
+    f->printf("%s\n", CFG_END_MARK);
+    bool flushed = f->flush();
     delete f;
+    if(!flushed || !cfgfilecomplete(fulltmp))
+    {
+        remove(fulltmp);
+        conoutf(CON_ERROR, "could not write %s completely (disk full?): previous file kept", target);
+        return;
+    }
+    cfgsync(fulltmp);
+    cfgtestcrash("beforeswap");
+    // Previous version kept as <name>.bak (main settings file only).
+    if(mainconfig && cfgfilesize(target) > 0)
+    {
+        defformatstring(fullbak, "%s.bak", fulltarget);
+        if(!cfgcopy(fulltarget, fullbak)) conoutf(CON_WARN, "could not keep a backup of %s", target);
+    }
+    if(!cfgreplace(fulltmp, fulltarget))
+    {
+        conoutf(CON_ERROR, "could not replace %s (in use?): this session's settings are in %s", target, tmpname);
+        return;
+    }
 }
 
 COMMAND(writecfg, "s");

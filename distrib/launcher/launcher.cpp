@@ -12,6 +12,11 @@
 //   --recover  termine ou annule une application interrompue (journal)
 //   --rollback revient a la version precedente (derniere sauvegarde)
 //
+// Normal mode options:
+//   --import-only         settings import only, the game is not started
+//   --import-from <dir>   imports the settings of another client (config.cfg,
+//                         servers.cfg, friends.cfg; previous ones kept as *.before-import.bak)
+//
 // Aucun Python, aucune DLL de l'installation n'est necessaire pour appliquer :
 // le helper est un binaire statique qui vit hors des fichiers remplaces.
 
@@ -42,6 +47,7 @@ using std::vector;
 static const int LAUNCHER_API = 1;
 static wstring g_root, g_state, g_logpath;
 static bool g_importonly = false;
+static wstring g_importfrom;
 
 // ---------------------------------------------------------------- utilitaires
 
@@ -381,7 +387,7 @@ static bool noreparse(const wstring &root, const string &rel)
     return true;
 }
 
-static bool readplan(const wstring &dir, string &version, vector<planop> &ops, string &err)
+static bool readplan(const wstring &dir, string &version, vector<planop> &ops, string &err, string *from = NULL)
 {
     string data;
     if(!readfile(join(dir, L"plan.txt"), data)) { err = "plan missing"; return false; }
@@ -394,7 +400,7 @@ static bool readplan(const wstring &dir, string &version, vector<planop> &ops, s
         if(l.empty()) continue;
         if(l == "END") { ended = true; break; }
         if(l.compare(0, 8, "version ") == 0) { version = l.substr(8); continue; }
-        if(l.compare(0, 5, "from ") == 0) continue;
+        if(l.compare(0, 5, "from ") == 0) { if(from) *from = l.substr(5); continue; }
         vector<string> f;
         size_t a = 0;
         while(a <= l.size())
@@ -519,7 +525,20 @@ static bool applyplan(string &version, string &err)
     wstring stage = join(upd, L"stage");
     wstring journal = join(upd, L"journal.txt");
     vector<planop> ops;
-    if(!readplan(stage, version, ops, err)) return false;
+    string from;
+    if(!readplan(stage, version, ops, err, &from)) return false;
+    // A plan only fits the version it was prepared from: after "go back to
+    // the previous version" (or a reinstall), an older staged update would
+    // leave a mix of two versions recorded as up to date.
+    string cur = iniget(readini(join(g_state, L"installed.ini")), "version", "");
+    if(from.empty() || from != cur)
+    {
+        err = "prepared update was made for version " + (from.empty() ? string("?") : from) +
+              ", installed is " + (cur.empty() ? string("?") : cur) + "; it was discarded, check for updates again";
+        logf("apply refused: %s", err.c_str());
+        deltree(stage);
+        return false;
+    }
     string ready;
     readfile(join(stage, L"READY"), ready);
     if(trim(ready) != version) { err = "staged update is not complete"; return false; }
@@ -625,6 +644,9 @@ static bool rollbacklast(string &version, string &err)
     // Les fichiers "nouveaux" sont ranges dans rollback\files puis supprimes.
     if(!rollbackdir(rb, ops)) { err = "previous version could not be fully restored"; return false; }
     deltree(rb);
+    // An update prepared for the version just left no longer fits.
+    wstring stage = join(join(g_state, L"update"), L"stage");
+    if(exists(stage)) { deltree(stage); logf("rollback: staged update discarded"); }
     return true;
 }
 
@@ -863,87 +885,347 @@ static wstring buildenv(const std::map<wstring, wstring> &set, bool dropython)
 
 // ------------------------------------------------ reprise des reglages existants
 
+// Documents folder of the player. Empty when Windows cannot give it (broken
+// redirection, offline network share): the caller then says so clearly
+// instead of falling back to a folder inside the installation.
+static wstring documentsdir()
+{
+#ifdef L4ZY_TESTHOOKS
+    // Test builds only: a fake Documents folder, or "-" for "not available".
+    const wchar_t *fake = _wgetenv(L"L4ZY_TEST_DOCUMENTS");
+    if(fake && fake[0]) return wstring(fake) == L"-" ? wstring() : wstring(fake);
+#endif
+    return knownfolder(FOLDERID_Documents);
+}
+
 static bool filetime(const wstring &p, ULONGLONG &t)
 {
     WIN32_FILE_ATTRIBUTE_DATA fa;
     if(!GetFileAttributesExW(p.c_str(), GetFileExInfoStandard, &fa)) return false;
+    if(fa.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) return false;
     t = ((ULONGLONG)fa.ftLastWriteTime.dwHighDateTime << 32) | fa.ftLastWriteTime.dwLowDateTime;
     return true;
 }
 
-static void copytree_missing(const wstring &src, const wstring &dst, int &n)
+static string timetext(ULONGLONG t)
+{
+    FILETIME ft, lt;
+    ft.dwLowDateTime = (DWORD)t;
+    ft.dwHighDateTime = (DWORD)(t >> 32);
+    SYSTEMTIME st;
+    if(!FileTimeToLocalFileTime(&ft, &lt) || !FileTimeToSystemTime(&lt, &st)) return "?";
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%04d-%02d-%02d %02d:%02d", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute);
+    return buf;
+}
+
+// Identity of a file or folder (volume + file index), whatever the spelling
+// of its path: 8.3 names, other case, trailing slash, junctions and links
+// (they are followed) all give the same identity as the real folder.
+static bool fileident(const wstring &p, DWORD &vol, ULONGLONG &idx)
+{
+    HANDLE h = CreateFileW(p.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                           NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+    if(h == INVALID_HANDLE_VALUE) return false;
+    BY_HANDLE_FILE_INFORMATION bi;
+    bool ok = GetFileInformationByHandle(h, &bi) != 0;
+    CloseHandle(h);
+    if(!ok) return false;
+    vol = bi.dwVolumeSerialNumber;
+    idx = ((ULONGLONG)bi.nFileIndexHigh << 32) | bi.nFileIndexLow;
+    return true;
+}
+
+static wstring fullpathlower(const wstring &p)
+{
+    wchar_t buf[MAX_PATH * 4];
+    DWORD n = GetFullPathNameW(p.c_str(), MAX_PATH * 4, buf, NULL);
+    wstring out = (n > 0 && n < MAX_PATH * 4) ? wstring(buf, n) : p;
+    while(out.size() > 3 && (out[out.size()-1] == L'\\' || out[out.size()-1] == L'/')) out.erase(out.size()-1);
+    for(size_t i = 0; i < out.size(); i++) out[i] = towlower(out[i] == L'/' ? L'\\' : out[i]);
+    return out;
+}
+
+// Same folder? By identity when both exist, else by normalised full path.
+static bool samefolder(const wstring &a, const wstring &b)
+{
+    DWORD va, vb;
+    ULONGLONG ia, ib;
+    bool ha = fileident(a, va, ia), hb = fileident(b, vb, ib);
+    if(ha && hb) return va == vb && ia == ib;
+    if(ha != hb) return false;
+    return fullpathlower(a) == fullpathlower(b);
+}
+
+static bool copytree_missing(const wstring &src, const wstring &dst, int &n)
 {
     WIN32_FIND_DATAW fd;
     HANDLE h = FindFirstFileW(join(src, L"*").c_str(), &fd);
-    if(h == INVALID_HANDLE_VALUE) return;
+    if(h == INVALID_HANDLE_VALUE) return true;
     mkdirs(dst);
+    bool ok = true;
     do
     {
         wstring nm = fd.cFileName;
         if(nm == L"." || nm == L"..") continue;
         if(fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) continue;
         wstring s = join(src, nm), d = join(dst, nm);
-        if(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) copytree_missing(s, d, n);
-        else if(!exists(d) && CopyFileW(s.c_str(), d.c_str(), TRUE)) n++;
+        if(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) { if(!copytree_missing(s, d, n)) ok = false; }
+        else if(!exists(d))
+        {
+            if(CopyFileW(s.c_str(), d.c_str(), TRUE)) n++;
+            else ok = false;
+        }
     } while(FindNextFileW(h, &fd));
     FindClose(h);
+    return ok;
 }
 
-// Premier lancement d'un profil L4ZY : reprend les reglages du client utilise
-// le plus recemment (Sauer-RT, ancien client de traduction, Sauerbraten
-// d'origine) : touches, pseudo, options, serveurs, amis, cartes telechargees.
-// Une seule fois (marqueur). Les profils d'origine ne sont que lus.
-static void importsettings(const wstring &profile)
+// Other clients whose settings can be taken. Their folders are only read.
+static const wchar_t *IMPORT_CANDS[] = { L"Sauer-RT", L"Sauerbraten-traduction", L"Sauerbraten", L"p1xbraten", NULL };
+
+struct importcand { wstring name, dir; ULONGLONG t; };
+
+// Candidates that hold a config.cfg and are not the L4ZY profile itself
+// (a junction or another spelling of the same folder is the same folder).
+static vector<importcand> listcandidates(const wstring &games, const wstring &profile, bool verbose)
+{
+    vector<importcand> out;
+    if(games.empty()) return out;
+    for(int i = 0; IMPORT_CANDS[i]; i++)
+    {
+        importcand c;
+        c.name = IMPORT_CANDS[i];
+        c.dir = join(games, IMPORT_CANDS[i]);
+        if(!isdir(c.dir)) continue;
+        if(samefolder(c.dir, profile))
+        {
+            logf("settings import: %s is the L4ZY profile folder itself, skipped", narrow(c.name).c_str());
+            continue;
+        }
+        if(!filetime(join(c.dir, L"config.cfg"), c.t))
+        {
+            if(verbose) logf("settings import: candidate %s has no config.cfg (%s)", narrow(c.name).c_str(), narrow(c.dir).c_str());
+            continue;
+        }
+        if(verbose) logf("settings import: candidate %s, config.cfg of %s (%s)", narrow(c.name).c_str(), timetext(c.t).c_str(), narrow(c.dir).c_str());
+        out.push_back(c);
+    }
+    return out;
+}
+
+// Name of the other client whose folder IS the L4ZY profile (junction,
+// [paths] profile pointing at it...), empty if none. Nothing of the import
+// is then ever written there.
+static wstring profileisotherclient(const wstring &games, const wstring &profile)
+{
+    if(games.empty()) return wstring();
+    for(int i = 0; IMPORT_CANDS[i]; i++)
+    {
+        wstring d = join(games, IMPORT_CANDS[i]);
+        if(isdir(d) && samefolder(d, profile)) return IMPORT_CANDS[i];
+    }
+    return wstring();
+}
+
+#ifdef L4ZY_TESTHOOKS
+// Test builds only: make the copy of one file fail, like a locked file.
+static bool testfailcopy(const wchar_t *name)
+{
+    const wchar_t *v = _wgetenv(L"L4ZY_TEST_IMPORT_FAIL");
+    return v && !lstrcmpiW(v, name);
+}
+#else
+static bool testfailcopy(const wchar_t *) { return false; }
+#endif
+
+// Copies the settings of another client into the profile.
+// replace = the player asked for it (menu, --import-from): config.cfg,
+// servers.cfg and friends.cfg of the profile are replaced, each one first
+// saved as <name>.before-import.bak. Otherwise (first start) only missing
+// files are written. Any failure puts the profile back as it was.
+static bool importfrom(const wstring &src, const wstring &profile, bool replace, int &nfiles, string &err)
+{
+    nfiles = 0;
+    if(!isdir(src)) { err = "folder not found: " + narrow(src); return false; }
+    if(!exists(join(src, L"config.cfg"))) { err = "no config.cfg in " + narrow(src); return false; }
+    if(samefolder(src, profile)) { err = "this is the L4ZY settings folder itself"; return false; }
+    mkdirs(profile);
+
+    static const wchar_t *files[] = { L"config.cfg", L"servers.cfg", L"friends.cfg", L"init.cfg", L"autoexec.cfg", NULL };
+    static const bool replaceable[] = { true, true, true, false, false };
+    struct done { wstring dst, bak; bool created; };
+    vector<done> undo;
+    bool ok = true;
+    for(int i = 0; files[i] && ok; i++)
+    {
+        wstring s = join(src, files[i]), d = join(profile, files[i]);
+        if(!exists(s)) continue;
+        bool had = exists(d);
+        if(had && !(replace && replaceable[i])) continue;
+        done u;
+        u.dst = d;
+        u.created = !had;
+        if(had)
+        {
+            u.bak = d + L".before-import.bak";
+            if(!CopyFileW(d.c_str(), u.bak.c_str(), FALSE))
+            { ok = false; err = "cannot save the current " + narrow(files[i]); break; }
+        }
+        // Copied next to the target, then swapped in: never half a file.
+        wstring tmp = d + L".import-tmp";
+        if(testfailcopy(files[i]) || !CopyFileW(s.c_str(), tmp.c_str(), FALSE))
+        {
+            DeleteFileW(tmp.c_str());
+            ok = false;
+            err = "cannot read " + narrow(s) + " (in use, offline or protected?)";
+            break;
+        }
+        SetFileAttributesW(tmp.c_str(), FILE_ATTRIBUTE_NORMAL);
+        undo.push_back(u);
+        if(!MoveFileExW(tmp.c_str(), d.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+        {
+            DeleteFileW(tmp.c_str());
+            ok = false;
+            err = "cannot write " + narrow(d);
+            break;
+        }
+        nfiles++;
+    }
+    if(ok && !exists(join(profile, L"config.cfg"))) { ok = false; err = "config.cfg was not copied"; }
+    if(!ok)
+    {
+        // Put back exactly what was there.
+        for(size_t k = undo.size(); k-- > 0;)
+        {
+            if(undo[k].created) DeleteFileW(undo[k].dst.c_str());
+            else if(!CopyFileW(undo[k].bak.c_str(), undo[k].dst.c_str(), FALSE))
+                logf("settings import: could not restore %s (copy kept in %s)", narrow(undo[k].dst).c_str(), narrow(undo[k].bak).c_str());
+        }
+        nfiles = 0;
+        return false;
+    }
+    // The chat translation menu must stay loaded by the player's autoexec.
+    wstring ae = join(profile, L"autoexec.cfg");
+    string aetext;
+    if(readfile(ae, aetext) && aetext.find("traduction.cfg") == string::npos)
+        appendline_durable(ae, "\r\n// L4ZY : menu de traduction du chat\r\nexec \"traduction.cfg\"\r");
+    return true;
+}
+
+static void writeimportlist(const wstring &games, const wstring &profile)
+{
+    vector<importcand> c = listcandidates(games, profile, false);
+    string s = "# Other clients found by L4ZY.exe at start (Options > Import settings).\n";
+    for(size_t i = 0; i < c.size(); i++)
+        s += "source\t" + narrow(c[i].name) + "\t" + timetext(c[i].t) + "\t" + narrow(c[i].dir) + "\n";
+    if(!writefile_durable(join(profile, L"l4zy-import-sources.txt"), s)) logf("settings import: cannot write the list of other clients");
+}
+
+// First start of a profile: takes the settings of the client used most
+// recently (Sauer-RT, older translation client, Sauerbraten, p1xbraten), but
+// only when the profile has no config.cfg yet. Once (marker l4zy-import.txt,
+// written only when the copy succeeded).
+static void importsettings(const wstring &profile, const wstring &games)
 {
     wstring marker = join(profile, L"l4zy-import.txt");
     if(exists(marker)) return;
-    wstring games = join(knownfolder(FOLDERID_Documents), L"My Games");
-    static const wchar_t *cands[] = { L"Sauer-RT", L"Sauerbraten-traduction", L"Sauerbraten", NULL };
-    wstring best, bestname;
-    ULONGLONG bestt = 0;
-    for(int i = 0; cands[i]; i++)
+    if(exists(join(profile, L"config.cfg")))
     {
-        wstring d = join(games, cands[i]);
-        if(lstrcmpiW(d.c_str(), profile.c_str()) == 0) continue;
-        ULONGLONG t;
-        if(filetime(join(d, L"config.cfg"), t) && t > bestt) { bestt = t; best = d; bestname = cands[i]; }
+        writefile_durable(marker, "kept the L4ZY settings already there (config.cfg present), nothing imported\n");
+        logf("settings import: profile already has a config.cfg, nothing imported");
+        return;
     }
+    if(games.empty()) { logf("settings import: Documents folder unknown, nothing imported"); return; }
+    vector<importcand> c = listcandidates(games, profile, true);
+    int best = -1;
+    for(size_t i = 0; i < c.size(); i++) if(best < 0 || c[i].t > c[best].t) best = (int)i;
     string note = "none found";
-    if(!best.empty())
+    if(best >= 0)
     {
-        mkdirs(profile);
-        // Un config.cfg deja cree par L4ZY est garde a cote, pas perdu.
-        wstring cur = join(profile, L"config.cfg");
-        if(exists(cur)) MoveFileExW(cur.c_str(), join(profile, L"config.cfg.l4zy-avant-import").c_str(), MOVEFILE_REPLACE_EXISTING);
-        static const wchar_t *files[] = { L"config.cfg", L"autoexec.cfg", L"init.cfg", L"servers.cfg", L"friends.cfg", NULL };
         int n = 0;
-        for(int i = 0; files[i]; i++)
+        string err;
+        logf("settings import: chosen %s (most recent config.cfg, %s)", narrow(c[best].name).c_str(), narrow(c[best].dir).c_str());
+        if(!importfrom(c[best].dir, profile, false, n, err))
         {
-            wstring s = join(best, files[i]), d = join(profile, files[i]);
-            if(!exists(s)) continue;
-            if(lstrcmpW(files[i], L"config.cfg") != 0 && exists(d)) continue;
-            if(CopyFileW(s.c_str(), d.c_str(), FALSE)) n++;
+            logf("settings import: FAILED from %s: %s; profile left as it was, will try again next start", narrow(c[best].name).c_str(), err.c_str());
+            return;
         }
-        // Le menu de traduction doit rester charge par l'autoexec du joueur.
-        wstring ae = join(profile, L"autoexec.cfg");
-        string aetext;
-        if(readfile(ae, aetext) && aetext.find("traduction.cfg") == string::npos)
-        {
-            FILE *f = _wfopen(ae.c_str(), L"ab");
-            if(f) { fputs("\r\n// L4ZY : menu de traduction du chat\r\nexec \"traduction.cfg\"\r\n", f); fclose(f); }
-        }
-        // Cartes telechargees depuis les serveurs : tous les profils, sans ecraser.
         int maps = 0;
-        for(int i = 0; cands[i]; i++) copytree_missing(join(join(games, cands[i]), L"packages"), join(profile, L"packages"), maps);
-        note = "from " + narrow(bestname) + " (" + std::to_string(n) + " files, " + std::to_string(maps) + " map files)";
+        for(size_t i = 0; i < c.size(); i++)
+            if(!copytree_missing(join(c[i].dir, L"packages"), join(profile, L"packages"), maps))
+                logf("settings import: some map files of %s could not be copied", narrow(c[i].name).c_str());
+        note = "from " + narrow(c[best].name) + " (" + std::to_string(n) + " files, " + std::to_string(maps) + " map files) " +
+               timetext(c[best].t) + " " + narrow(c[best].dir);
     }
     writefile_durable(marker, "imported settings: " + note + "\n");
     logf("settings import: %s", note.c_str());
 }
 
-static int normalmain(const vector<wstring> &passthrough)
+// Import asked by the player: menu (request file left by the game) or
+// --import-from. Replaces the L4ZY settings, keeping the old ones in .bak.
+static bool importexplicit(const wstring &src, const wstring &label, const wstring &profile)
 {
-    if(!takelock(1500))
+    int n = 0, maps = 0;
+    string err;
+    logf("settings import: requested from %s (%s)", narrow(label).c_str(), narrow(src).c_str());
+    if(!importfrom(src, profile, true, n, err))
+    {
+        logf("settings import: FAILED: %s; L4ZY settings left as they were", err.c_str());
+        wstring w = L"L'import des réglages a échoué. Tes réglages L4ZY n'ont pas changé.\n\n"
+                    L"Importing settings failed. Your L4ZY settings were not changed.\n\n" + widen(err);
+        message(w.c_str(), MB_ICONWARNING);
+        return false;
+    }
+    if(!copytree_missing(join(src, L"packages"), join(profile, L"packages"), maps))
+        logf("settings import: some map files could not be copied");
+    ULONGLONG t = 0;
+    filetime(join(src, L"config.cfg"), t);
+    string note = "imported settings: from " + narrow(label) + " (" + std::to_string(n) + " files, " + std::to_string(maps) +
+                  " map files) " + timetext(t) + " " + narrow(src) + "; previous L4ZY settings in *.before-import.bak";
+    writefile_durable(join(profile, L"l4zy-import.txt"), note + "\n");
+    logf("settings import: %s", note.c_str());
+    return true;
+}
+
+// Request left by the game (Options > Import settings). Read once, removed
+// before anything is copied, so a bad request never repeats.
+static void importrequest(const wstring &profile, const wstring &games)
+{
+    wstring req = join(profile, L"l4zy-import-request.txt");
+    string data;
+    if(!readfile(req, data)) return;
+    DeleteFileW(req.c_str());
+    if(data.size() >= 3 && (unsigned char)data[0] == 0xEF) data = data.substr(3);
+    vector<string> lines = splitlines(data);
+    string name, folder;
+    bool head = !lines.empty() && trim(lines[0]) == "l4zy-import-request 1", ended = false;
+    for(size_t i = 1; i < lines.size(); i++)
+    {
+        string l = trim(lines[i]);
+        if(l == "end") { ended = true; break; }
+        if(l.compare(0, 5, "name=") == 0) name = l.substr(5);
+        else if(l.compare(0, 7, "folder=") == 0) folder = l.substr(7);
+    }
+    if(!head || !ended || (name.empty() == folder.empty())) { logf("settings import: unreadable request ignored"); return; }
+    if(!name.empty())
+    {
+        for(int i = 0; IMPORT_CANDS[i]; i++)
+            if(narrow(IMPORT_CANDS[i]) == name && !games.empty()) { importexplicit(join(games, IMPORT_CANDS[i]), IMPORT_CANDS[i], profile); return; }
+        logf("settings import: unknown client in request: %s", name.c_str());
+        return;
+    }
+    importexplicit(widen(folder), L"folder", profile);
+}
+static int normalmain(const vector<wstring> &passthrough, DWORD waitpid)
+{
+    // Restart asked by the previous launcher (settings import from the menu).
+    if(waitpid)
+    {
+        HANDLE p = OpenProcess(SYNCHRONIZE, FALSE, waitpid);
+        if(p) { WaitForSingleObject(p, 60000); CloseHandle(p); }
+    }
+    if(!takelock(waitpid ? 15000 : 1500))
     {
         message(L"L4ZY est déjà ouvert depuis ce dossier (ou une mise à jour est en cours).\n\n"
                 L"L4ZY is already running from this folder (or an update is being installed).");
@@ -964,6 +1246,8 @@ static int normalmain(const vector<wstring> &passthrough)
     string version = iniget(inst, "version", "?");
     bool portable = iniget(ini, "paths.portable", "0") == "1";
     wstring profile = widen(iniget(ini, "paths.profile")), userdata = widen(iniget(ini, "paths.userdata"));
+    wstring docs = documentsdir();
+    wstring games = docs.empty() ? wstring() : join(docs, L"My Games");
     if(portable)
     {
         if(profile.empty()) profile = join(join(g_root, L"userdata"), L"profile");
@@ -971,8 +1255,34 @@ static int normalmain(const vector<wstring> &passthrough)
     }
     else
     {
-        if(profile.empty()) profile = join(join(knownfolder(FOLDERID_Documents), L"My Games"), L"L4ZY");
-        if(userdata.empty()) userdata = join(knownfolder(FOLDERID_LocalAppData), L"L4ZY");
+        if(profile.empty() && games.empty())
+        {
+            // Never a silent profile inside the installation: the player
+            // would find all settings gone.
+            logf("start: Documents folder not available, not starting");
+            message(L"L4ZY ne trouve pas ton dossier Documents (déplacé, sur un lecteur réseau ou OneDrive hors ligne ?). "
+                    L"Tes réglages y sont rangés : le jeu ne démarre pas sans lui.\n"
+                    L"Rebranche ou reconnecte ce dossier puis relance L4ZY, ou indique un dossier dans l4zy.ini ([paths] profile = ...).\n\n"
+                    L"L4ZY cannot find your Documents folder (moved, on a network drive, or OneDrive offline?). "
+                    L"Your settings are kept there, so the game does not start without it.\n"
+                    L"Reconnect that folder and start L4ZY again, or set a folder in l4zy.ini ([paths] profile = ...).", MB_ICONERROR);
+            droplock();
+            return 1;
+        }
+        if(profile.empty()) profile = join(games, L"L4ZY");
+        if(userdata.empty())
+        {
+            wstring lad = knownfolder(FOLDERID_LocalAppData);
+            if(lad.empty())
+            {
+                logf("start: LocalAppData folder not available, not starting");
+                message(L"L4ZY ne trouve pas le dossier AppData\\Local de Windows. Indique un dossier dans l4zy.ini ([paths] userdata = ...).\n\n"
+                        L"L4ZY cannot find the Windows AppData\\Local folder. Set a folder in l4zy.ini ([paths] userdata = ...).", MB_ICONERROR);
+                droplock();
+                return 1;
+            }
+            userdata = join(lad, L"L4ZY");
+        }
     }
     if(profile.size() < 2 || profile[1] != L':') profile = join(g_root, profile);
     if(userdata.size() < 2 || userdata[1] != L':') userdata = join(g_root, userdata);
@@ -1005,8 +1315,24 @@ static int normalmain(const vector<wstring> &passthrough)
         else extra.push_back(a);
     }
     mkdirs(profile);
-    // Profil impose en argument (outil, laboratoire) : pas de reprise.
-    if(!customprofile) importsettings(profile);
+    wstring otherclient = profileisotherclient(games, profile);
+    if(!otherclient.empty())
+    {
+        // The profile is another client's folder (junction, [paths] profile):
+        // the import writes nothing there.
+        logf("settings import: WARNING the L4ZY profile is the folder of %s, import disabled", narrow(otherclient).c_str());
+        if(!g_importfrom.empty()) message(L"Le dossier de réglages L4ZY est celui d'un autre client : import refusé.\n\n"
+                                          L"The L4ZY settings folder is another client's folder: import refused.", MB_ICONWARNING);
+    }
+    else
+    {
+        // Asked by the player first; then, if the profile is new, the automatic one.
+        if(!g_importfrom.empty()) importexplicit(g_importfrom, L"folder", profile);
+        importrequest(profile, games);
+        // Profile given on the command line (tools, lab): no automatic import.
+        if(!customprofile) importsettings(profile, games);
+        writeimportlist(games, profile);
+    }
     if(g_importonly) { droplock(); return 0; }
     vector<wstring> gargs;
     gargs.push_back(L"-q" + ansisafe(profile));
@@ -1134,8 +1460,10 @@ static int normalmain(const vector<wstring> &passthrough)
     WSACleanup();
 
     wstring stage = join(upd, L"stage");
+    bool importasked = exists(join(profile, L"l4zy-import-request.txt"));
     if(exists(join(stage, L"READY")) && exists(join(stage, L"APPLY")))
     {
+        // An import asked at the same time is done at the start that follows.
         bool restart = fileshas(join(stage, L"APPLY"), "restart=1");
         logf("update requested, handing over to helper (restart=%d)", restart ? 1 : 0);
         droplock();
@@ -1145,6 +1473,30 @@ static int normalmain(const vector<wstring> &passthrough)
         return 0;
     }
     droplock();
+    if(importasked)
+    {
+        // Settings import asked from the menu: a new launcher does it before
+        // the game starts again (this one has finished with the profile).
+        wchar_t self[MAX_PATH * 4];
+        GetModuleFileNameW(NULL, self, MAX_PATH * 4);
+        vector<wstring> a;
+        a.push_back(self);
+        a.insert(a.end(), passthrough.begin(), passthrough.end());
+        a.push_back(L"--wait-pid");
+        wchar_t pid[32];
+        swprintf(pid, 32, L"%lu", GetCurrentProcessId());
+        a.push_back(pid);
+        wstring c = cmdline(a);
+        STARTUPINFOW si = { sizeof(si) };
+        PROCESS_INFORMATION pi;
+        if(CreateProcessW(self, &c[0], NULL, NULL, FALSE, 0, NULL, g_root.c_str(), &si, &pi))
+        {
+            CloseHandle(pi.hThread);
+            CloseHandle(pi.hProcess);
+            logf("settings import asked: restarting");
+        }
+        else logf("settings import asked, restart failed (%lu): done at next start", GetLastError());
+    }
     return 0;
 }
 
@@ -1169,6 +1521,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
         else if(a == L"--relaunch") relaunchafter = true;
         else if(a == L"--after-update") {}
         else if(a == L"--import-only") g_importonly = true;
+        else if(a == L"--import-from" && i + 1 < argc) g_importfrom = argv[++i];
         else if(a == L"--version")
         {
             message(L"L4ZY launcher API 1");
@@ -1198,7 +1551,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
         rc = spawnhelper(L"--rollback", false) ? 0 : 1;
     }
     else if(!mode.empty()) rc = helpermain(mode, waitpid, relaunchafter);
-    else rc = normalmain(passthrough);
+    else rc = normalmain(passthrough, waitpid);
     LocalFree(argv);
     return rc;
 }

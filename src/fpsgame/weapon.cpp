@@ -312,6 +312,96 @@ namespace game
         return c;
     }
 
+    // the custom trail colour of gun for d as the tint of its RT weapon lights
+    // (adddynlight rtcolor; only the hue is used), -1 = stock colour, stock lights
+    static int traillight(int gun, fpsent *d)
+    {
+        int slot = trailslot(gun);
+        if(slot < 0) return -1;
+        int set = !d ? TRAILSET_ALL : (isselfplayer(d) ? TRAILSET_ME : TRAILSET_OTHERS);
+        int c = trailcolorshown(set, slot);
+        return c != stocktrailcolor[slot] ? c : -1;
+    }
+
+    // Projectile and explosion colours of rockets and grenades, apart from their
+    // smoke trail. Local look only. Same three sets as the trails: All
+    // (projcolor<weapon>), Me (projmycolor<weapon>), Others (projothercolor<weapon>);
+    // -1 = stock look (rocket / grenade model, orange / cyan fireball, stock
+    // lights); Me / Others -1 = same as All. A colour adds a glow of that colour
+    // to the projectile in flight and recolours its explosion fireball; with the
+    // RT weapon lights, the light of the projectile and of its explosion takes it
+    // (never the smoke trail's colour).
+    enum { PROJSET_ALL = NUMTRAILSETS, PROJSET_ME, PROJSET_OTHERS, NUMPROJSETS };
+    VARP(projcolorrocketlauncher, -1, -1, 0xFFFFFF);
+    VARP(projcolorgrenadelauncher, -1, -1, 0xFFFFFF);
+    VARP(projmycolorrocketlauncher, -1, -1, 0xFFFFFF);
+    VARP(projmycolorgrenadelauncher, -1, -1, 0xFFFFFF);
+    VARP(projothercolorrocketlauncher, -1, -1, 0xFFFFFF);
+    VARP(projothercolorgrenadelauncher, -1, -1, 0xFFFFFF);
+    static const char * const projsetnames[3] = { "projcolor", "projmycolor", "projothercolor" };
+
+    static bool projslot(int slot) { return slot == TRAIL_RL || slot == TRAIL_GL; }
+    // shown in the menu for the stock look: the stock fireball colour
+    static int stockprojcolor(int slot) { return slot == TRAIL_GL ? 0x80FFFF : 0xFF8080; }
+
+    static int &projcolorvar(int set, int slot)
+    {
+        static int * const vars[3][2] =
+        {
+            { &projcolorrocketlauncher, &projcolorgrenadelauncher },
+            { &projmycolorrocketlauncher, &projmycolorgrenadelauncher },
+            { &projothercolorrocketlauncher, &projothercolorgrenadelauncher }
+        };
+        return *vars[clamp(set - PROJSET_ALL, 0, 2)][slot == TRAIL_GL ? 1 : 0];
+    }
+
+    // colour of a set (Me / Others fall back to All), -1 = stock look
+    static int projcolorset(int set, int slot)
+    {
+        int c = projcolorvar(set, slot);
+        return c >= 0 ? c : projcolorvar(PROJSET_ALL, slot);
+    }
+
+    // custom projectile colour of a rocket or grenade fired by d, -1 = stock
+    static int projcolor(int gun, fpsent *d)
+    {
+        int slot = trailslot(gun);
+        if(slot < 0 || !projslot(slot)) return -1;
+        return projcolorset(!d ? PROJSET_ALL : (isselfplayer(d) ? PROJSET_ME : PROJSET_OTHERS), slot);
+    }
+
+    // The fireball multiplies its colour by its texture (explosion.png orange,
+    // plasma.png blue; alpha-weighted means below). For a custom colour, take the
+    // texture that keeps that hue brightest and divide the texture out, so the
+    // sphere shows the hue (and its RT light, read from the sphere, follows).
+    static void projfireball(int c, int &type, int &color)
+    {
+        static const vec texmean[2] = { vec(0.726f, 0.412f, 0.172f), vec(0.329f, 0.626f, 1.0f) };
+        vec h = vec::hexcolor(c);
+        float hm = max(h.x, max(h.y, h.z));
+        if(hm < 0.03f) h = vec(1, 1, 1); else h.div(hm);
+        int best = 0;
+        float bestlum = -1;
+        vec bestcol(1, 1, 1);
+        loopk(2)
+        {
+            vec m = vec(h).div(texmean[k]);
+            float mm = max(m.x, max(m.y, m.z));
+            m.div(mm);
+            // what the sphere shows: m * texmean = h / mm
+            float lum = 1.0f/mm;
+            if(lum > bestlum) { bestlum = lum; best = k; bestcol = m; }
+        }
+        type = best ? PART_EXPLOSION_BLUE : PART_EXPLOSION;
+        color = bestcol.tohexcolor();
+    }
+
+    // the light tint of a rocket or grenade: its projectile colour (not its smoke)
+    static int projlight(int gun, fpsent *d)
+    {
+        return projcolor(gun, d);
+    }
+
     static bool parsetrailhex(const char *s, int &c)
     {
         const char *p = s;
@@ -343,26 +433,97 @@ namespace game
         return false;
     }
 
+    // a projectile colour variable (projmycolorrocketlauncher...): set PROJSET_*
+    static bool projvarname(const char *name, int &set, int &slot)
+    {
+        loopi(3) loopj(NUMTRAILS) if(projslot(j))
+        {
+            defformatstring(v, "%s%s", projsetnames[i], trailweaponnames[j]);
+            if(!strcasecmp(name, v)) { set = PROJSET_ALL + i; slot = j; return true; }
+        }
+        return false;
+    }
+
     // reads [me|others|all] WEAPON or VARIABLE; returns the index of the next argument
     static int trailtarget(const char *a, const char *b, int &set, int &slot)
     {
         set = TRAILSET_ALL;
         slot = -1;
-        if(trailvarname(a, set, slot)) return 1;
+        if(trailvarname(a, set, slot) || projvarname(a, set, slot)) return 1;
         int s = trailsetname(a);
         if(s >= 0) { set = s; slot = b[0] ? trailslot(getweapon(b)) : -1; return 2; }
         slot = a[0] ? trailslot(getweapon(a)) : -1;
         return 1;
     }
 
+    // set / read a projectile colour (set PROJSET_*); returns the stored value
+    static void projcolorcmd(int set, int slot, const char *col)
+    {
+        if(col[0])
+        {
+            int v;
+            if(!strcasecmp(col, "stock") || !strcasecmp(col, "same")) projcolorvar(set, slot) = -1;
+            else if(parsetrailhex(col, v)) projcolorvar(set, slot) = v;
+            else conoutf(CON_ERROR, "\f4projectile colour: 6 hex digits, e.g. #00C0FF, or stock / same");
+        }
+        int cur = projcolorvar(set, slot);
+        if(cur < 0) { result(set == PROJSET_ALL ? "stock" : "same"); return; }
+        defformatstring(hex, "%06X", cur);
+        result(hex);
+    }
+
+    // shown colour of a trail or projectile set (menu preview, gettrailcolor)
+    static int colourshown(int set, int slot)
+    {
+        if(set >= PROJSET_ALL) { int c = projcolorset(set, slot); return c >= 0 ? c : stockprojcolor(slot); }
+        return trailcolorshown(set, slot);
+    }
+
+    // setprojcolor [me|others|all] RL|GL ["#RRGGBB"|stock|same] (or VARIABLE [colour]):
+    // projectile and explosion colour of rockets / grenades. stock (All) = the
+    // stock look; same (Me / Others) = as All. Returns "RRGGBB", "stock" or "same".
+    ICOMMAND(setprojcolor, "sss", (char *a, char *b, char *c),
+    {
+        int set = 0;
+        int slot = -1;
+        int next = trailtarget(a, b, set, slot);
+        if(set < PROJSET_ALL) set += PROJSET_ALL;
+        if(slot < 0 || !projslot(slot)) { conoutf(CON_ERROR, "\f4projectile colour: [me|others|all] then RL or GL"); return; }
+        projcolorcmd(set, slot, next == 2 ? c : b);
+    });
+
+    // getprojcolor [me|others|all] RL|GL: the colour really used ("RRGGBB"), "stock" for the stock look
+    ICOMMAND(getprojcolor, "ss", (char *a, char *b),
+    {
+        int set = 0;
+        int slot = -1;
+        trailtarget(a, b, set, slot);
+        if(set < PROJSET_ALL) set += PROJSET_ALL;
+        if(slot < 0 || !projslot(slot)) { result(""); return; }
+        int c = projcolorset(set, slot);
+        if(c < 0) { result("stock"); return; }
+        defformatstring(hex, "%06X", c);
+        result(hex);
+    });
+
+    // projcolorreset [me|others|all]: back to the stock look / same as All (no argument: everything)
+    ICOMMAND(projcolorreset, "s", (char *a),
+    {
+        int only = a[0] ? trailsetname(a) : -1;
+        if(a[0] && only < 0) { conoutf(CON_ERROR, "\f4usage: projcolorreset [me|others|all]"); return; }
+        loopi(3) if(only < 0 || only == i) loopj(NUMTRAILS) if(projslot(j)) projcolorvar(PROJSET_ALL + i, j) = -1;
+    });
+
     // settrailcolor [me|others|all] SG|CG|RL|RI|GL|PI ["#RRGGBB"|stock|same]
-    // (or settrailcolor VARIABLE [colour]). "same" = same as All (Me / Others;
-    // stock for All). Returns the stored value: "RRGGBB", or "same".
+    // (or settrailcolor VARIABLE [colour], projectile colour variables too).
+    // "same" = same as All (Me / Others; stock for All). Returns the stored
+    // value: "RRGGBB", or "same".
     ICOMMAND(settrailcolor, "sss", (char *a, char *b, char *c),
     {
         int set = 0;
         int slot = -1;
         const char *col = trailtarget(a, b, set, slot) == 2 ? c : b;
+        if(set >= PROJSET_ALL && slot >= 0) { projcolorcmd(set, slot, col); return; }
         if(slot < 0) { conoutf(CON_ERROR, "\f4trail colour: [me|others|all] then SG, CG, RL, RI, GL or PI"); return; }
         if(col[0])
         {
@@ -385,7 +546,7 @@ namespace game
         int slot = -1;
         trailtarget(a, b, set, slot);
         if(slot < 0) { result(""); return; }
-        defformatstring(hex, "%06X", trailcolorshown(set, slot));
+        defformatstring(hex, "%06X", colourshown(set, slot));
         result(hex);
     });
 
@@ -395,13 +556,14 @@ namespace game
         int set = 0;
         int slot = -1;
         trailtarget(a, b, set, slot);
-        intret(slot < 0 ? 0 : trailcolorshown(set, slot));
+        intret(slot < 0 ? 0 : colourshown(set, slot));
     });
 
     // trailcolorreset [me|others|all]: back to stock / same as All (no argument: everything)
     ICOMMAND(trailcolorreset, "s", (char *a),
     {
         int only = a[0] ? trailsetname(a) : -1;
+        if(a[0] && only < 0) { conoutf(CON_ERROR, "\f4usage: trailcolorreset [me|others|all]"); return; }
         loopi(NUMTRAILSETS) if(only < 0 || only == i) loopj(NUMTRAILS) trailcolorvar(i, j) = i == TRAILSET_ALL ? stocktrailcolor[j] : -1;
         if(!a[0]) trailbrightness = 100;
     });
@@ -414,7 +576,14 @@ namespace game
             if(bnc.bouncetype==BNC_GRENADE && bnc.vel.magnitude() > 50.0f)
             {
                 vec pos = bnc.offsetpos();
+                particletag = PTAG_WEAPONSMOKE;
                 regular_particle_splash(PART_SMOKE, 1, 150, pos, trailcolor(GUN_GL, bnc.owner), 2.4f, 50, -20);
+                particletag = PTAG_NONE;
+            }
+            if(bnc.bouncetype==BNC_GRENADE)
+            {
+                int pc = projcolor(GUN_GL, bnc.owner);
+                if(pc >= 0) particle_splash(PART_FIREBALL1, 1, 1, bnc.offsetpos(), pc, 1.6f, 150, 20);
             }
             vec old(bnc.o);
             bool stopped = false;
@@ -609,11 +778,15 @@ namespace game
     {
         particle_splash(PART_SPARK, 200, 300, v, 0xB49B4B, 0.24f);
         playsound(gun!=GUN_GL ? S_RLHIT : S_FEXPLODE, &v);
-        int color = gun!=GUN_GL ? 0xFF8080 : 0x80FFFF;
+        int color = gun!=GUN_GL ? 0xFF8080 : 0x80FFFF, parttype = gun!=GUN_GL ? PART_EXPLOSION : PART_EXPLOSION_BLUE;
+        int pc = projcolor(gun, owner);
+        if(pc >= 0) projfireball(pc, parttype, color);
         if((gun==GUN_RL || gun==GUN_GL) && explodebright < 1) color = vec::hexcolor(color).mul(explodebright).tohexcolor();
-        particle_fireball(v, guns[gun].exprad, gun!=GUN_GL ? PART_EXPLOSION : PART_EXPLOSION_BLUE, gun!=GUN_GL ? -1 : int((guns[gun].exprad-4.0f)*15), color, 4.0f);
-        if(gun==GUN_RL) adddynlight(v, 1.15f*guns[gun].exprad, vec(2, 1.5f, 1), 700, 100, 0, guns[gun].exprad/2, vec(1, 0.75f, 0.5f));
-        else if(gun==GUN_GL) adddynlight(v, 1.15f*guns[gun].exprad, vec(0.5f, 1.5f, 2), 600, 100, 0, 8, vec(0.25f, 1, 1));
+        particle_fireball(v, guns[gun].exprad, parttype, gun!=GUN_GL ? -1 : int((guns[gun].exprad-4.0f)*15), color, 4.0f);
+        // RT weapon lights: an explosion's light follows its fireball (dynlight.cpp),
+        // in the projectile colour when one is chosen
+        if(gun==GUN_RL) adddynlight(v, 1.15f*guns[gun].exprad, vec(2, 1.5f, 1), 700, 100, 0, guns[gun].exprad/2, vec(1, 0.75f, 0.5f), NULL, pc);
+        else if(gun==GUN_GL) adddynlight(v, 1.15f*guns[gun].exprad, vec(0.5f, 1.5f, 2), 600, 100, 0, 8, vec(0.25f, 1, 1), NULL, pc);
         else adddynlight(v, 1.15f*guns[gun].exprad, vec(2, 1.5f, 1), 700, 100);
         int numdebris = gun==GUN_BARREL ? rnd(max(maxbarreldebris-5, 1))+5 : rnd(maxdebris-5)+5;
         vec debrisvel = vec(owner->o).sub(v).safenormalize(), debrisorigin(v);
@@ -742,7 +915,9 @@ namespace game
                     pos.add(vec(p.offset).mul(p.offsetmillis/float(OFFSETMILLIS)));
                     if(guns[p.gun].part)
                     {
+                         particletag = PTAG_WEAPONSMOKE;
                          regular_particle_splash(PART_SMOKE, 2, 300, pos, 0x404040, 0.6f, 150, -20);
+                         particletag = PTAG_NONE;
                          int color = 0xFFFFFF;
                          switch(guns[p.gun].part)
                          {
@@ -750,7 +925,14 @@ namespace game
                          }
                          particle_splash(guns[p.gun].part, 1, 1, pos, color, 4.8f, 150, 20);
                     }
-                    else regular_particle_splash(PART_SMOKE, 2, 300, pos, p.gun==GUN_RL ? trailcolor(GUN_RL, p.owner) : 0x404040, 2.4f, 50, -20);
+                    else
+                    {
+                        particletag = PTAG_WEAPONSMOKE;
+                        regular_particle_splash(PART_SMOKE, 2, 300, pos, p.gun==GUN_RL ? trailcolor(GUN_RL, p.owner) : 0x404040, 2.4f, 50, -20);
+                        particletag = PTAG_NONE;
+                        int pc = p.gun==GUN_RL ? projcolor(GUN_RL, p.owner) : -1;
+                        if(pc >= 0) particle_splash(PART_FIREBALL1, 1, 1, pos, pc, 2.2f, 150, 20);
+                    }
                 }
             }
             if(exploded)
@@ -768,6 +950,27 @@ namespace game
 
     VARP(muzzleflash, 0, 1, 1);
     VARP(muzzlelight, 0, 1, 1);
+    // Muzzle flash light per weapon, for every shooter (me and the others): 0 =
+    // the flash of that weapon no longer lights walls, floor, players and the
+    // gun (classic and RT); the flash sprite at the barrel stays. The rocket
+    // launcher and the fist have no flash light.
+    VARP(muzzlelightshotgun, 0, 1, 1);
+    VARP(muzzlelightchaingun, 0, 1, 1);
+    VARP(muzzlelightrifle, 0, 1, 1);
+    VARP(muzzlelightgrenadelauncher, 0, 1, 1);
+    VARP(muzzlelightpistol, 0, 1, 1);
+    static bool gunlight(int gun)
+    {
+        switch(gun)
+        {
+            case GUN_SG: return muzzlelightshotgun != 0;
+            case GUN_CG: return muzzlelightchaingun != 0;
+            case GUN_RIFLE: return muzzlelightrifle != 0;
+            case GUN_GL: return muzzlelightgrenadelauncher != 0;
+            case GUN_PISTOL: return muzzlelightpistol != 0;
+            default: return true;
+        }
+    }
 
     void shoteffects(int gun, const vec &from, const vec &to, fpsent *d, bool local, int id, int prevaction)     // create visual effect from a shot
     {
@@ -789,7 +992,7 @@ namespace game
                     particle_flare(hudgunorigin(gun, from, rays[i], d), rays[i], 300, PART_STREAK, trailcolor(gun, d), 0.28f);
                     if(!local) adddecal(DECAL_BULLET, rays[i], vec(from).sub(rays[i]).safenormalize(), 2.0f);
                 }
-                if(muzzlelight) adddynlight(hudgunorigin(gun, d->o, to, d), 30, vec(0.5f, 0.375f, 0.25f), 100, 100, DL_FLASH, 0, vec(0, 0, 0), d);
+                if(muzzlelight && gunlight(gun)) adddynlight(hudgunorigin(gun, d->o, to, d), 30, vec(0.5f, 0.375f, 0.25f), 100, 100, DL_FLASH, 0, vec(0, 0, 0), d, traillight(gun, d));
                 break;
             }
 
@@ -801,7 +1004,7 @@ namespace game
                 if(muzzleflash && d->muzzle.x >= 0)
                     particle_flare(d->muzzle, d->muzzle, gun==GUN_CG ? 100 : 200, PART_MUZZLE_FLASH1, 0xFFFFFF, gun==GUN_CG ? 2.25f : 1.25f, d);
                 if(!local) adddecal(DECAL_BULLET, to, vec(from).sub(to).safenormalize(), 2.0f);
-                if(muzzlelight) adddynlight(hudgunorigin(gun, d->o, to, d), gun==GUN_CG ? 30 : 15, vec(0.5f, 0.375f, 0.25f), gun==GUN_CG ? 50 : 100, gun==GUN_CG ? 50 : 100, DL_FLASH, 0, vec(0, 0, 0), d);
+                if(muzzlelight && gunlight(gun)) adddynlight(hudgunorigin(gun, d->o, to, d), gun==GUN_CG ? 30 : 15, vec(0.5f, 0.375f, 0.25f), gun==GUN_CG ? 50 : 100, gun==GUN_CG ? 50 : 100, DL_FLASH, 0, vec(0, 0, 0), d, traillight(gun, d));
                 break;
             }
 
@@ -823,18 +1026,24 @@ namespace game
                 up.z += dist/8;
                 if(muzzleflash && d->muzzle.x >= 0)
                     particle_flare(d->muzzle, d->muzzle, 200, PART_MUZZLE_FLASH2, 0xFFFFFF, 1.5f, d);
-                if(muzzlelight) adddynlight(hudgunorigin(gun, d->o, to, d), 20, vec(0.5f, 0.375f, 0.25f), 100, 100, DL_FLASH, 0, vec(0, 0, 0), d);
+                if(muzzlelight && gunlight(gun))
+                {
+                    int tint = projlight(gun, d);
+                    adddynlight(hudgunorigin(gun, d->o, to, d), 20, vec(0.5f, 0.375f, 0.25f), 100, 100, DL_FLASH, 0, vec(0, 0, 0), d, tint >= 0 ? tint : traillight(gun, d));
+                }
                 newbouncer(from, up, local, id, d, BNC_GRENADE, guns[gun].ttl, guns[gun].projspeed);
                 break;
             }
 
             case GUN_RIFLE:
                 particle_splash(PART_SPARK, 200, 250, to, 0xB49B4B, 0.24f);
+                particletag = PTAG_WEAPONSMOKE;
                 particle_trail(PART_SMOKE, 500, hudgunorigin(gun, from, to, d), to, trailcolor(gun, d), 0.6f, 20);
+                particletag = PTAG_NONE;
                 if(muzzleflash && d->muzzle.x >= 0)
                     particle_flare(d->muzzle, d->muzzle, 150, PART_MUZZLE_FLASH3, 0xFFFFFF, 1.25f, d);
                 if(!local) adddecal(DECAL_BULLET, to, vec(from).sub(to).safenormalize(), 3.0f);
-                if(muzzlelight) adddynlight(hudgunorigin(gun, d->o, to, d), 25, vec(0.5f, 0.375f, 0.25f), 75, 75, DL_FLASH, 0, vec(0, 0, 0), d);
+                if(muzzlelight && gunlight(gun)) adddynlight(hudgunorigin(gun, d->o, to, d), 25, vec(0.5f, 0.375f, 0.25f), 75, 75, DL_FLASH|DL_SHARP, 0, vec(0, 0, 0), d, traillight(gun, d));
                 break;
         }
 
@@ -1018,14 +1227,14 @@ namespace game
             if(p.gun!=GUN_RL) continue;
             vec pos(p.o);
             pos.add(vec(p.offset).mul(p.offsetmillis/float(OFFSETMILLIS)));
-            adddynlight(pos, 20, vec(1, 0.75f, 0.5f));
+            adddynlight(pos, 20, vec(1, 0.75f, 0.5f), 0, 0, 0, 0, vec(0, 0, 0), NULL, projlight(GUN_RL, p.owner));
         }
         loopv(bouncers)
         {
             bouncer &bnc = *bouncers[i];
             if(bnc.bouncetype!=BNC_GRENADE) continue;
             vec pos = bnc.offsetpos();
-            adddynlight(pos, 8, vec(0.25f, 1, 1));
+            adddynlight(pos, 8, vec(0.25f, 1, 1), 0, 0, 0, 0, vec(0, 0, 0), NULL, projlight(GUN_GL, bnc.owner));
         }
     }
 

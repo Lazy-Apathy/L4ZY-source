@@ -251,6 +251,21 @@ enum
 // Killer → server → victim only: "l4zy/fragrt/v1 <cn> <fovms> <xhairms>".
 // Client→server cn = victim. Server→victim cn = killer. Never HD aim.
 #define FRAGRT_CMD "l4zy/fragrt/v1"
+// Server -> every other modded client (players and spectators), only when the
+// killer sent his fragrt: "l4zy/fragrtall/v1 <killer cn> <victim cn> <fovms> <xhairms>".
+// Must not start with FRAGRT_CMD (prefix compare), so older clients ignore it.
+#define FRAGRTALL_CMD "l4zy/fragrtall/v1"
+// Client -> server once after CLANMOD_ACK: "l4zy/hdchunks/v1" = can join a
+// .dmohd sent in parts. Server -> client on channel 2, before the parts:
+// "l4zy/hdchunks/v1 <tag> <total bytes> <parts>", then that many N_SENDDEMOHD.
+#define HDCHUNKS_CMD "l4zy/hdchunks/v1"
+// Client -> server once after CLANMOD_ACK, only while the local demo is
+// recorded (demohdrecord): "l4zy/autodemo/v1" = tell me when a demo is stored.
+// Server -> those clients when a demo is stored (start of the intermission):
+// "l4zy/demoready/v1 <num> <map> <mode> <hd 0|1>". The client asks for it
+// itself (N_GETDEMO num), once; the server never sends a demo unasked.
+#define AUTODEMO_CMD "l4zy/autodemo/v1"
+#define DEMOREADY_CMD "l4zy/demoready/v1"
 
 static const int msgsizes[] =               // size inclusive message token, 0 for variable or not-checked sizes
 {
@@ -770,6 +785,11 @@ namespace game
     extern void damaged(int damage, fpsent *d, fpsent *actor, bool local = true);
     extern void killed(fpsent *d, fpsent *actor);
     extern void applyfragrt(int actor, int fovms, int xhms);
+    extern void applyfragrtall(int actor, int victim, int fovms, int xhms);
+    extern void updatespecqueue();
+    extern void clearspecqueue();
+    extern int specviewdelay();
+    extern bool specpacketqueued();
     extern void notefragreacthit(fpsent *target);
     extern void fragreactspawned(fpsent *d);
     extern void timeupdate(int timeremain);
@@ -814,6 +834,7 @@ namespace game
     extern const char *translatelangsof(fpsent *d);
     extern int clanmod;
     extern bool clanmodactive();
+    extern void announceautodemo();
 
     // friends (nicks + one clan tag, never IPs)
     enum { NUMFRIENDCOLORS = 10 };
@@ -942,6 +963,8 @@ namespace demohd
     const char *hudstatus();
     bool hastrack(int cn);
     bool hdaim(fpsent *d);
+    int livedelay();
+    bool livecompatible();
     int recordercn();
     bool isrecorder(fpsent *d);
     bool ally(fpsent *d);
@@ -951,6 +974,8 @@ namespace demohd
     void drawhud(int w, int h);
     bool barkey(int code, bool isdown);
     void installsidecar(const char *dmoname, const uchar *data, int len);
+    bool autodemolocal(const char *map, int mode, char *stem, int stemlen, int &elapsed);
+    bool autodemoreplace(const char *stem, const char *map, int mode, int cn, int elapsed, const uchar *dmodata, int dmolen, const uchar *hddata, int hdlen);
     void stoprecording();
     void prune();
     void flushtoServer();

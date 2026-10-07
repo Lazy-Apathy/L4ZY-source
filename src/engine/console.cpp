@@ -629,9 +629,11 @@ int renderconsole(int w, int h, int abovehud)                   // render buffer
     {
         int mw = (miniconwidth*(w - 2*(conpad + conoff)))/100, mh = min(FONTH*miniconsize, abovehud - y);
         hudbegin("chat", "Chat");
-        int top = drawconlines(miniconskip, miniconfade, mw, mh, conpad+conoff, miniconfilter, abovehud, -1);
-        if(hudeditactive()) top = abovehud - mh;
-        hudrect(conpad+conoff, top, mw, abovehud - top);
+        drawconlines(miniconskip, miniconfade, mw, mh, conpad+conoff, miniconfilter, abovehud, -1);
+        // the whole chat area, lines or not (as in the HUD editor): a moved or
+        // resized chat then keeps its place while lines come and fade, the
+        // newest line staying at the bottom
+        hudrect(conpad+conoff, abovehud - mh, mw, mh);
         hudend();
     }
     return fullconsole ? conheight + 2*(conpad + conoff) : y;

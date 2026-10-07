@@ -23,6 +23,7 @@ cmd mixreset | put all sound mix sliders back to default | son mix defaut reinit
 cmd clearconsole | empty the console | console effacer vider
 cmd hudedit | open the HUD editor: every part of the HUD gets a frame the player drags with the mouse (right click puts one back, Esc when done) | hud deplacer placer disposition glisser bouger interface ecran position
 cmd hudlayoutreset | put every HUD part back in its original place | hud reinitialiser remettre position origine
+cmd importsettingsmenu | open the page that imports keys, name, options, servers and friends from another client (Sauerbraten, p1xbraten, an older L4ZY client or any folder); the import itself is only done by the player | importer import reglages parametres ancien client sauerbraten vanilla recuperer copier reprendre touches perdus
 
 action forward | move forward | avancer avant deplacement
 action backward | move backward | reculer arriere deplacement

@@ -41,6 +41,8 @@ sys.path.insert(0, str(DISTRIB / "service"))
 import updater as upd  # noqa: E402  (memes regles de chemins que le client)
 sys.path.insert(0, str(TOOLS))
 import check_personal  # noqa: E402  (refuse prenom / chemins personnels avant tout envoi)
+import menus_plan  # noqa: E402  (plan des menus pour l'assistant, regenere a chaque version)
+import check_settings_coverage  # noqa: E402  (refuse un reglage des menus inconnu de l'assistant)
 
 ZIP_DATE = (2020, 1, 1, 0, 0, 0)
 STORE_EXT = {".ogg", ".jpg", ".jpeg", ".png", ".gz", ".zip", ".wav", ".mp3", ".webp", ".dds", ".ogz"}
@@ -322,6 +324,36 @@ def load_reuse(path):
     return out
 
 
+def menus_for_assistant(recipe):
+    """Avant tout : plan des menus de CETTE version pour l'assistant
+    (data/assistant-menus.txt, regenere a chaque fois : il suit toute
+    modification des menus), puis refus si un reglage des menus est inconnu
+    de l'assistant ou de la recherche (check_settings_coverage.py)."""
+    files = {}
+    for item in recipe.get("files", []):
+        if item["dest"] in menus_plan.MENU_FILES:
+            files[item["dest"]] = src_path(item["src"])
+    log("  plan des menus pour l'assistant...")
+    out = REPO / menus_plan.OUT_REL
+    old = out.read_text(encoding="utf-8") if out.is_file() else None
+    menus = menus_plan.build(REPO, files=files)
+    text = menus_plan.render(menus)
+    if text != old:
+        out.write_text(text, encoding="utf-8", newline="\n")
+        log(f"    {menus_plan.OUT_REL} mis a jour (les menus ont change) : a committer avec la recette")
+    log("  reglages des menus connus de l'assistant...")
+    r = check_settings_coverage.check(REPO, files=files)
+    lines = []
+    problems = check_settings_coverage.report(r, out=lines.append)
+    if not problems:
+        log("    " + lines[-1].strip())
+    if problems:
+        for line in lines:
+            log("    " + line)
+        die("des reglages des menus manquent dans data/assistant-settings.txt ou data/settings-keywords.txt "
+            "(liste ci-dessus) : rien n'est construit ni publie.")
+
+
 def cmd_release(args):
     pins = cmd_fetch(args)
     recipe_path = Path(args.recipe).resolve()
@@ -334,6 +366,7 @@ def cmd_release(args):
     if (site / "releases" / version / "manifest.json").exists() and not args.force:
         die(f"{version} existe deja dans {work}. Une version publiee est immuable : choisis un nouveau numero.")
     log(f"L4ZY {version} ({recipe['channel']})")
+    menus_for_assistant(recipe)
     tree = assemble(recipe, pins, work)
     log("  copie de l'arborescence...")
     tree.materialize()

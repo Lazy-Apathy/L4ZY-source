@@ -28,6 +28,7 @@ struct hudpart
     float fx0, fy0, fx1, fy1; // rect gathered during the current frame (on screen)
     float sxused, syused;   // factors applied this frame (1 until its place is known)
     float oxused, oyused;   // offset applied this frame, in pixels (kept on the screen)
+    float axused, ayused;   // point the size grows from this frame (top left of the last rect), in pixels
     bool gathering;
 };
 static vector<hudpart *> hudparts;
@@ -77,7 +78,11 @@ static void loadhudboxes()
         for(char *c = label; *c; c++) if(*c == '_') *c = ' ';
         hudpart *h = findhudpart(id);
         if(!h) h = newhudpart(id, label);
-        if(h->drawn < 0) { h->x0 = v[0]*screenw; h->y0 = v[1]*screenh; h->x1 = v[2]*screenw; h->y1 = v[3]*screenh; }
+        // a box far off the screen (saved by an older client whose resized
+        // parts drifted away) is not a place: the part's first draw sets it
+        bool sane = true;
+        loopi(4) if(!(v[i] >= -1 && v[i] <= 2)) sane = false;
+        if(sane && h->drawn < 0) { h->x0 = v[0]*screenw; h->y0 = v[1]*screenh; h->x1 = v[2]*screenw; h->y1 = v[3]*screenh; }
     }
 }
 
@@ -183,6 +188,7 @@ static hudpart *newhudpart(const char *id, const char *label)
     p->drawn = -1;
     p->sxused = p->syused = 1;
     p->oxused = p->oyused = 0;
+    p->axused = p->ayused = 0;
     p->gathering = false;
     return p;
 }
@@ -199,6 +205,18 @@ static void hudoffset(const hudpart *p, float sx, float sy, float &ox, float &oy
     oy = clamp(oy, -p->y0, max(screenh - h - p->y0, -p->y0));
 }
 
+// the size factors drawn: the chosen ones, but a part never grows wider or
+// taller than the screen (it could not be kept on it; its text would be cut)
+static void hudfactors(const hudpart *p, float &sx, float &sy)
+{
+    sx = p->sx;
+    sy = p->sy;
+    if(p->x1 <= p->x0) { sx = sy = 1; return; }
+    float w = p->x1 - p->x0, h = p->y1 - p->y0;
+    if(w*sx > screenw) sx = max(screenw/w, min(sx, 1.0f));
+    if(h*sy > screenh) sy = max(screenh/h, min(sy, 1.0f));
+}
+
 void hudbegin(const char *id, const char *label)
 {
     if(hudnesting++) return;
@@ -208,20 +226,24 @@ void hudbegin(const char *id, const char *label)
     loadhudlayout();
     curhudpart = p;
     // start a new rect on the first draw of this frame (a part may draw in several calls)
-    if(p->drawn != totalmillis || !p->gathering) { p->gathering = true; p->fx0 = p->fy0 = 1e9f; p->fx1 = p->fy1 = -1e9f; }
+    bool newframe = p->drawn != totalmillis || !p->gathering;
+    if(newframe) { p->gathering = true; p->fx0 = p->fy0 = 1e9f; p->fx1 = p->fy1 = -1e9f; }
     p->drawn = totalmillis;
     // move and size it in normalized device space, so it does not depend on
     // the scale the part draws with: the size grows from the part's top left
-    // corner (known from the last frame), then the offset moves it
-    bool known = p->x1 > p->x0;
-    float sx = known ? p->sx : 1, sy = known ? p->sy : 1;
-    p->sxused = sx;
-    p->syused = sy;
-    float ox, oy;
-    hudoffset(p, sx, sy, ox, oy);
-    p->oxused = ox;
-    p->oyused = oy;
-    float ax = 2*p->x0/screenw - 1, ay = 1 - 2*p->y0/screenh;
+    // corner (known from the last frame), then the offset moves it. The size,
+    // offset and corner are chosen once per frame, so every call of a part
+    // drawn in several calls gets the same transform (hudend inverts it).
+    if(newframe)
+    {
+        bool known = p->x1 > p->x0;
+        hudfactors(p, p->sxused, p->syused);
+        hudoffset(p, p->sxused, p->syused, p->oxused, p->oyused);
+        p->axused = known ? p->x0 : 0;
+        p->ayused = known ? p->y0 : 0;
+    }
+    float sx = p->sxused, sy = p->syused, ox = p->oxused, oy = p->oyused;
+    float ax = 2*p->axused/screenw - 1, ay = 1 - 2*p->ayused/screenh;
     float tx = ax*(1-sx) + 2*ox/screenw, ty = ay*(1-sy) - 2*oy/screenh;
     pushhudmatrix();
     vec4 *cols[4] = { &hudmatrix.a, &hudmatrix.b, &hudmatrix.c, &hudmatrix.d };
@@ -248,10 +270,16 @@ void hudend()
     hudpart *p = curhudpart;
     if(p->fx0 <= p->fx1)
     {
-        // keep the rect without the offset and size: the editor applies the current ones
-        float ox = p->oxused, oy = p->oyused;
-        float nx0 = p->fx0 - ox, ny0 = p->fy0 - oy;
-        float nx1 = nx0 + (p->fx1 - p->fx0)/p->sxused, ny1 = ny0 + (p->fy1 - p->fy0)/p->syused;
+        // keep the rect without the offset and size: the editor applies the
+        // current ones. On screen a point is corner + (point - corner)*size +
+        // offset, with the corner and size of this frame; undo exactly that.
+        // (Taking the screen top left as the new corner fed the size back into
+        // the next frame: a part whose top left moves - chat growing upwards,
+        // right-aligned or centred text - drifted, and ran off the screen for
+        // good at twice its size or more.)
+        float ax = p->axused, ay = p->ayused, sx = p->sxused, sy = p->syused;
+        float nx0 = ax + (p->fx0 - p->oxused - ax)/sx, ny0 = ay + (p->fy0 - p->oyused - ay)/sy;
+        float nx1 = ax + (p->fx1 - p->oxused - ax)/sx, ny1 = ay + (p->fy1 - p->oyused - ay)/sy;
         if(fabs(nx0 - p->x0) > 2 || fabs(ny0 - p->y0) > 2 || fabs(nx1 - p->x1) > 2 || fabs(ny1 - p->y1) > 2) hudboxesdirty = true;
         p->x0 = nx0; p->y0 = ny0;
         p->x1 = nx1; p->y1 = ny1;
@@ -291,12 +319,13 @@ static bool hudshownnow(hudpart *p) { return p->drawn >= 0 && totalmillis - p->d
 // the part on screen: moved and sized
 static void hudscreenrect(const hudpart *p, float &x0, float &y0, float &x1, float &y1)
 {
-    float ox, oy;
-    hudoffset(p, p->sx, p->sy, ox, oy);
+    float sx, sy, ox, oy;
+    hudfactors(p, sx, sy);
+    hudoffset(p, sx, sy, ox, oy);
     x0 = p->x0 + ox;
     y0 = p->y0 + oy;
-    x1 = x0 + (p->x1 - p->x0)*p->sx;
-    y1 = y0 + (p->y1 - p->y0)*p->sy;
+    x1 = x0 + (p->x1 - p->x0)*sx;
+    y1 = y0 + (p->y1 - p->y0)*sy;
 }
 
 static float hudhandle() { return max(10.0f, screenh/90.0f); }

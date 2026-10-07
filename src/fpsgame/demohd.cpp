@@ -27,7 +27,8 @@
 
 extern int mainmenu;
 
-VARP(demohdrecord, 0, 1, 1);
+// recording the local demo also asks clan servers for their copy (AUTODEMO_CMD)
+VARFP(demohdrecord, 0, 1, 1, game::announceautodemo());
 VARP(demohdplay, 0, 1, 1);
 static void hdprune();
 VARFP(demokeep, 1, 5, 30, { hdprune(); });
@@ -53,7 +54,10 @@ namespace demohd
     static string dmofile, hdfile, dmostem, curmap, lastmap;
     static bool active = false, committed = false, sessionmap = false, welcomed = false;
     static bool needplayersnap = false;
-    static int skippackets = 0, recstart = 0, lastsamplet = -1, rec_cn = -1;
+    static int skippackets = 0, recstart = 0, lastsamplet = -1, rec_cn = -1, recmode = 0;
+    // the server's copy of this match was asked for: the next map closes the
+    // file even when the same map is played again
+    static bool splitnext = false;
     static uint matchid = 0;
     static int waitstart = 0;
 
@@ -64,6 +68,10 @@ namespace demohd
     // track, or every modded client in a server demo. Other tracks of a local
     // recording are only the network aim seen by the recorder.
     static uchar playexact[256];
+    // first and last sample time of each track: a cut (truncated) file stops
+    // early, after it the normal network aim is used again
+    static int playfirst[256], playlast[256];
+    #define HD_TRACK_SLACK 500
     static int nexactcns = 0;
     static bool play_loaded = false, autofollowdone = false, hdzoomframe = false;
     static float hdzoomval = 0;
@@ -403,6 +411,8 @@ namespace demohd
         lilswap(&hdr.version, 2);
         dmo->write(&hdr, sizeof(hdr));
         rec_cn = game::player1 ? game::player1->clientnum : -1;
+        recmode = game::gamemode;
+        splitnext = false;
         matchid = uint(time(NULL));
         writehdheader();
         recstart = totalmillis ? totalmillis : 1;
@@ -454,6 +464,7 @@ namespace demohd
         }
         dmofile[0] = hdfile[0] = dmostem[0] = 0;
         committed = false;
+        splitnext = false;
     }
 
     static bool fileless(const fileitem &a, const fileitem &b) { return a.mtime < b.mtime; }
@@ -571,6 +582,8 @@ namespace demohd
         return lastt;
     }
 
+    static bool hdsampleless(const hdsample &a, const hdsample &b) { return a.t < b.t; }
+
     static bool loadtrack(const char *dmopath)
     {
         track.setsize(0);
@@ -592,13 +605,13 @@ namespace demohd
         }
         if(!f)
         {
-            conoutf(CON_WARN, "no HD aim file next to this demo");
+            logoutf("no HD aim file next to this demo");
             return false;
         }
         char magic[8];
         if(f->read(magic, 8) != 8 || memcmp(magic, DEMOHD_MAGIC, 7))
         {
-            conoutf(CON_WARN, "HD aim file is unreadable");
+            logoutf("HD aim file is unreadable");
             delete f;
             return false;
         }
@@ -614,7 +627,7 @@ namespace demohd
         f->read(skip, 64);
         if(version != DEMOHD_VERSION)
         {
-            conoutf(CON_WARN, "HD aim file is from another version");
+            logoutf("HD aim file is from another version");
             delete f;
             return false;
         }
@@ -622,6 +635,9 @@ namespace demohd
         hdsample s;
         while(readsample(f, s)) track.add(s);
         delete f;
+        // server tracks stamped with each player's own (spaced) sample times
+        // interleave slightly; playback walks one time-ordered list
+        insertionsort(track.getbuf(), track.length(), hdsampleless);
         play_loaded = track.length() > 0;
         play_idx = 0;
         nplaycns = nexactcns = 0;
@@ -631,12 +647,47 @@ namespace demohd
         {
             int c = track[i].cn;
             if(c < 0 || c > 255) continue;
-            if(!playhas[c]) { playhas[c] = 1; nplaycns++; }
+            if(!playhas[c]) { playhas[c] = 1; nplaycns++; playfirst[c] = track[i].t; }
+            playlast[c] = track[i].t;
             if((track[i].flags & HD_OWN) && !playexact[c]) { playexact[c] = 1; nexactcns++; }
         }
-        if(play_loaded) conoutf(nplaycns > 1 ? "HD aim tracks loaded (%d players)" : "HD aim track loaded", nplaycns);
-        else conoutf(CON_WARN, "HD aim file is empty");
+        if(play_loaded) logoutf("HD aim tracks loaded (%d players)", nplaycns);
+        else logoutf("HD aim file is empty");
         return play_loaded;
+    }
+
+    // Curved playback between samples (live and demo): cubic Hermite with
+    // monotone tangents (Fritsch-Carlson: mean of the neighbouring slopes,
+    // at most 3x the smaller one, zero when they change sign), so a sharp
+    // stop never overshoots. 0 = straight lines.
+    VAR(hdcurve, 0, 1, 1);
+
+    static float hdslope(float v0, float v1, int t0, int t1) { return t1 > t0 ? (v1 - v0)/float(t1 - t0) : 0.0f; }
+
+    static float hdtangent(float d0, float d1)
+    {
+        if(d0*d1 <= 0) return 0;
+        float m = (d0 + d1)/2, lim = 3*min(fabs(d0), fabs(d1));
+        return clamp(m, -lim, lim);
+    }
+
+    // value between v1 (time t1) and v2 (t2); v0/t0 and v3/t3 are the outer neighbours
+    // (t0 == t1 or t3 == t2 when there is none)
+    static float hdhermite(float v0, float v1, float v2, float v3, int t0, int t1, int t2, int t3, float k)
+    {
+        float h = float(t2 - t1), m = hdslope(v1, v2, t1, t2);
+        float m1 = t0 < t1 ? hdtangent(hdslope(v0, v1, t0, t1), m) : m;
+        float m2 = t3 > t2 ? hdtangent(m, hdslope(v2, v3, t2, t3)) : m;
+        float k2 = k*k, k3 = k2*k;
+        return (2*k3 - 3*k2 + 1)*v1 + (k3 - 2*k2 + k)*h*m1 + (-2*k3 + 3*k2)*v2 + (k3 - k2)*h*m2;
+    }
+
+    static float hdangle(float from, float to)
+    {
+        float d = to - from;
+        while(d > 180) d -= 360;
+        while(d < -180) d += 360;
+        return d;
     }
 
     static bool lerpsample(vector<hdsample> &src, int &idx, int t, int cn, hdsample &out)
@@ -668,6 +719,22 @@ namespace demohd
         out.o.z = sa.o.z + (sb.o.z - sa.o.z)*k;
         out.pad = uchar(clamp(int(sa.pad + (sb.pad - sa.pad)*k + 0.5f), 0, 255));
         if(k > 0.5f) out.flags = sb.flags;
+        if(hdcurve && sb.t > sa.t)
+        {
+            int p = a, n = b;
+            for(int j = a-1; j >= 0; j--) if(src[j].cn==sa.cn) { p = j; break; }
+            for(int j = b+1; j < src.length(); j++) if(src[j].cn==sb.cn) { n = j; break; }
+            const hdsample &sp = src[p], &sn = src[n];
+            // yaw unwrapped around sa (359 -> 0 is a 1 degree step)
+            float y0 = -hdangle(sp.yaw, sa.yaw), y2 = hdangle(sa.yaw, sb.yaw), y3 = y2 + hdangle(sb.yaw, sn.yaw);
+            float yaw = sa.yaw + hdhermite(y0, 0, y2, y3, sp.t, sa.t, sb.t, sn.t, k);
+            while(yaw < 0) yaw += 360;
+            while(yaw >= 360) yaw -= 360;
+            out.yaw = yaw;
+            #define HDCURVE(f) out.f = hdhermite(sp.f, sa.f, sb.f, sn.f, sp.t, sa.t, sb.t, sn.t, k)
+            HDCURVE(pitch); HDCURVE(roll); HDCURVE(o.x); HDCURVE(o.y); HDCURVE(o.z);
+            #undef HDCURVE
+        }
         return true;
     }
 
@@ -773,17 +840,118 @@ namespace demohd
         sendclientpacket(p.finalize(), 1);
     }
 
+    // Live spectating: a compatible server relays each player's samples with
+    // their own server time "t", correctly spaced. Local time of a sample =
+    // t + offset (per player); the view is drawn hdlivedelay ms in the past,
+    // the same delay for every player, so a packet (about 33 ms of samples)
+    // plays at its real pace and changing the followed player keeps the delay.
+    // The offset aims at the smallest delay seen (+1 ms per packet for clock
+    // drift, restart on a jump) and moves by 1 ms per packet at most, so the
+    // timeline never jumps. Packets whose t are all equal (older servers) or
+    // out of order keep the fixed 4 ms spacing and no delay, as before.
+    VARP(hdlivedelay, 0, 200, 1000);
+
+    struct liveclock { int off, offgoal, lastt, laststamp; bool timed; };
+    static liveclock liveclocks[256];
+
+    static void resetliveclock(liveclock &c) { c.off = c.offgoal = c.lastt = c.laststamp = 0; c.timed = false; }
+
+    // local time shown for this player: the spectator's replay delay (see
+    // game::updatespecqueue), which moves toward hdlivedelay
+    static int livetime(int cn)
+    {
+        return cn >= 0 && cn <= 255 && liveclocks[cn].timed ? lastmillis - game::specviewdelay() : lastmillis;
+    }
+
+    int livedelay() { return hdlivedelay; }
+
+    // the server has the clan extras (handshake done) and is not an older one
+    // that relays HD aim with one time per packet (seen and never timed)
+    static bool livetimedseen = false, liveoldseen = false;
+    bool livecompatible() { return game::clanmodactive() && (livetimedseen || !liveoldseen); }
+
+    static void clearliveclocks() { loopi(256) resetliveclock(liveclocks[i]); }
+
+    // drop samples of this player stamped at or after t (timeline restarts)
+    static void cutlive(int cn, int t)
+    {
+        loopvrev(live) if(live[i].cn==cn && live[i].t >= t) live.remove(i);
+    }
+
+    static void insertlive(const hdsample &s)
+    {
+        int at = live.length();
+        while(at > 0 && live[at-1].t > s.t) at--;
+        live.insert(at, s);
+        if(at <= live_idx && live_idx < live.length()-1) live_idx++;
+    }
+
     void parselive(ucharbuf &p)
     {
         int n = getint(p);
         if(n < 1 || n > 32) return;
+        hdsample in[32];
+        loopi(n) if(!getsamplemsg(p, in[i])) return;
+
+        int cn = in[0].cn;
+        bool onecn = cn >= 0 && cn <= 255, ordered = true, spaced = false;
         loopi(n)
         {
-            hdsample s;
-            if(!getsamplemsg(p, s)) return;
-            s.t = lastmillis - (n-1-i)*DEMOHD_MINDT;
-            live.add(s);
+            if(in[i].cn != cn) onecn = false;
+            if(i && in[i].t < in[i-1].t) ordered = false;
+            if(i && in[i].t - in[i-1].t > 1000) ordered = false;
+            if(i && in[i].t > in[i-1].t) spaced = true;
         }
+        bool timed = false;
+        if(onecn && ordered)
+        {
+            liveclock &c = liveclocks[cn];
+            if(n > 1) timed = spaced;
+            else timed = c.timed && in[0].t > c.lastt && in[0].t - c.lastt <= 1000;
+        }
+        if(!timed && n > 1) liveoldseen = true;
+        if(!timed)
+        {
+            if(onecn && liveclocks[cn].timed)
+            {
+                cutlive(cn, lastmillis - (n-1)*DEMOHD_MINDT);
+                resetliveclock(liveclocks[cn]);
+            }
+            loopi(n)
+            {
+                hdsample s = in[i];
+                s.t = lastmillis - (n-1-i)*DEMOHD_MINDT;
+                live.add(s);
+            }
+            prunelive();
+            return;
+        }
+
+        liveclock &c = liveclocks[cn];
+        int delay = lastmillis - in[n-1].t;
+        bool restart = !c.timed || in[0].t <= c.lastt || in[0].t - c.lastt > 1000;
+        if(restart) c.off = c.offgoal = delay;
+        else
+        {
+            c.offgoal = min(c.offgoal + 1, delay);
+            c.off += clamp(c.offgoal - c.off, -1, 1);
+        }
+        int first = in[0].t + c.off;
+        if(restart)
+        {
+            cutlive(cn, first);
+            c.laststamp = first - 1;
+        }
+        loopi(n)
+        {
+            hdsample s = in[i];
+            s.t = max(in[i].t + c.off, c.laststamp + 1);
+            c.laststamp = s.t;
+            insertlive(s);
+        }
+        c.lastt = in[n-1].t;
+        c.timed = true;
+        livetimedseen = true;
         prunelive();
     }
 
@@ -792,6 +960,7 @@ namespace demohd
         live.setsize(0);
         pending.setsize(0);
         live_idx = 0;
+        clearliveclocks();
     }
 
     void onstartgame(bool skip)
@@ -804,7 +973,7 @@ namespace demohd
             sessionmap = false;
             return;
         }
-        if(active && map[0] && lastmap[0] && !strcasecmp(map, lastmap))
+        if(active && !splitnext && map[0] && lastmap[0] && !strcasecmp(map, lastmap))
         {
             committed = committed || game::player1->state != CS_SPECTATOR;
             return;
@@ -830,6 +999,7 @@ namespace demohd
 
     void ondisconnect()
     {
+        livetimedseen = liveoldseen = false;
         clearlive();
         finish(true);
         sessionmap = false;
@@ -916,8 +1086,10 @@ namespace demohd
     {
         if(!play_loaded) return false;
         if(cn < 0) return play_cn >= 0;
-        if(cn > 255) return false;
-        return playhas[cn] != 0;
+        if(cn > 255 || !playhas[cn]) return false;
+        if(!game::demoplayback) return true;
+        int t = server::demotime();
+        return t >= playfirst[cn] - HD_TRACK_SLACK && t <= playlast[cn] + HD_TRACK_SLACK;
     }
 
     // exact aim known for this player: HD track in the demo, or live HD
@@ -925,7 +1097,7 @@ namespace demohd
     bool hdaim(fpsent *d)
     {
         if(!d || d->clientnum < 0) return false;
-        if(game::demoplayback) return play_loaded && d->clientnum <= 255 && playexact[d->clientnum];
+        if(game::demoplayback) return play_loaded && d->clientnum <= 255 && playexact[d->clientnum] && hastrack(d->clientnum);
         return game::clanmodactive() && game::player1 && game::player1->state==CS_SPECTATOR && haslive(d->clientnum);
     }
 
@@ -937,7 +1109,7 @@ namespace demohd
         if(game::demoplayback && play_loaded && hastrack(target->clientnum))
             ok = lerpsample(track, play_idx, server::demotime(), target->clientnum, s);
         else if(!game::demoplayback && game::clanmodactive() && game::player1 && game::player1->state==CS_SPECTATOR && haslive(target->clientnum))
-            ok = lerpsample(live, live_idx, lastmillis, target->clientnum, s);
+            ok = lerpsample(live, live_idx, livetime(target->clientnum), target->clientnum, s);
         if(!ok) return false;
         game::player1->yaw = s.yaw;
         game::player1->pitch = s.pitch;
@@ -996,32 +1168,14 @@ namespace demohd
         autofollowdone = true;
     }
 
+    // "HD" while the followed player is shown with his exact aim (demo track
+    // he sent himself, or live samples), nothing otherwise
     const char *hudstatus()
     {
-        static string s;
         fpsent *f = game::followingplayer();
-        if(game::demoplayback)
-        {
-            if(!play_loaded)
-            {
-                copystring(s, "Playback: vanilla  (HD unavailable — aim 1° 30 Hz)");
-                return s;
-            }
-            bool hdnow = demohdplay && f && hastrack(f->clientnum);
-            if(!demohdplay) copystring(s, "Playback: vanilla  (HD aim is off)");
-            else if(hdnow && playexact[f->clientnum]) copystring(s, nexactcns > 1 ? "Playback: HD (exact aim from this server)" : "Playback: HD (exact aim recorded on this machine)");
-            else if(hdnow) copystring(s, "Playback: smooth  (network aim, not exact)");
-            else copystring(s, "Playback: vanilla  (no HD track for this player)");
-            return s;
-        }
-        if(game::player1 && game::player1->state==CS_SPECTATOR && game::clanmodactive())
-        {
-            if(!f) copystring(s, "Spec: free cam");
-            else if(!demohdplay) copystring(s, "Spec: vanilla  (HD aim is off)");
-            else if(haslive(f->clientnum)) copystring(s, "Spec: HD (this client's aim)");
-            else copystring(s, "Spec: vanilla  (no HD for this player)");
-            return s;
-        }
+        if(!f || !demohdplay || f->clientnum < 0 || f->clientnum > 255) return "";
+        if(game::demoplayback) return play_loaded && hastrack(f->clientnum) && playexact[f->clientnum] ? "HD" : "";
+        if(game::player1 && game::player1->state==CS_SPECTATOR && game::clanmodactive() && haslive(f->clientnum)) return "HD";
         return "";
     }
 
@@ -1039,6 +1193,215 @@ namespace demohd
         f->write(data, len);
         delete f;
         conoutf("saved HD demo track \"%s\"", hdname);
+    }
+
+    // Server copy of the match replacing the local recording (AUTODEMO_CMD).
+    // The local files move to demo/replaced (kept AUTODEMO_KEEPDAYS days),
+    // the server's take their name. Anything unexpected keeps the local ones.
+    #define AUTODEMO_DIR "demo/replaced"
+    #define AUTODEMO_KEEPDAYS 7
+    // the local recording may start before the server's (map load) but must
+    // not cover much more than this match
+    #define AUTODEMO_SLACK 20000
+    #define AUTODEMO_HDHEADER 220
+    #define AUTODEMO_HDSAMPLE 32
+
+    // full path (stat, move, remove); streams take the relative name
+    static void autodemopath(char *dst, const char *fmt, const char *stem, char *reldst = NULL)
+    {
+        defformatstring(rel, fmt, stem);
+        path(rel);
+        if(reldst) copystring(reldst, rel, MAXSTRLEN);
+        const char *found = findfile(rel, "w");
+        copystring(dst, found ? found : rel, MAXSTRLEN);
+    }
+
+    static bool autodemoexists(const char *p)
+    {
+        struct stat st;
+        return stat(p, &st)==0;
+    }
+
+    static bool autodemomove(const char *from, const char *to)
+    {
+        if(autodemoexists(to)) return false; // never overwrite
+#ifdef WIN32
+        return MoveFileExA(from, to, MOVEFILE_WRITE_THROUGH) != 0;
+#else
+        return rename(from, to)==0;
+#endif
+    }
+
+    static bool autodemowrite(const char *p, const uchar *data, int len)
+    {
+        stream *f = openrawfile(p, "wb");
+        if(!f) return false;
+        bool ok = f->write(data, len) == size_t(len);
+        delete f;
+        return ok;
+    }
+
+    static void autodemopurge()
+    {
+        time_t now = time(NULL);
+        static const char * const exts[2] = { "dmo", "dmohd" };
+        loopk(2)
+        {
+            vector<char *> names;
+            listfiles(AUTODEMO_DIR, exts[k], names);
+            loopv(names)
+            {
+                defformatstring(rel, "%s/%s.%s", AUTODEMO_DIR, names[i], exts[k]);
+                path(rel);
+                const char *found = findfile(rel, "r");
+                struct stat st;
+                if(found && stat(found, &st)==0 && now - st.st_mtime > AUTODEMO_KEEPDAYS*24*3600) remove(found);
+                DELETEA(names[i]);
+            }
+        }
+    }
+
+    // the HD aim file: same match (map, mode), whole samples, and the
+    // player's own aim in it (else the local file knows more)
+    static bool autodemohdok(const uchar *data, int len, const char *map, int mode, int cn)
+    {
+        if(!data || len < AUTODEMO_HDHEADER + AUTODEMO_HDSAMPLE || (len - AUTODEMO_HDHEADER) % AUTODEMO_HDSAMPLE) return false;
+        if(memcmp(data, DEMOHD_MAGIC, sizeof(DEMOHD_MAGIC))) return false;
+        ushort version;
+        int hdmode;
+        memcpy(&version, data + 8, 2);
+        memcpy(&hdmode, data + 16, 4);
+        lilswap(&version, 1);
+        lilswap(&hdmode, 1);
+        if(version != DEMOHD_VERSION || hdmode != mode) return false;
+        char hdmap[65];
+        memcpy(hdmap, data + 28, 64);
+        hdmap[64] = 0;
+        if(strcasecmp(hdmap, map)) return false;
+        for(int off = AUTODEMO_HDHEADER; off < len; off += AUTODEMO_HDSAMPLE)
+            if(data[off+4] == cn && (data[off+5] & HD_OWN)) return true;
+        return false;
+    }
+
+    // the .dmo: readable to its last packet with a matching gzip check, and
+    // its first packet is the welcome of the same match; returns its length
+    // in ms, -1 when it is not usable
+    static int autodemodmolen(const char *p, const uchar *raw, int rawlen, const char *map, int mode)
+    {
+        if(!raw || rawlen < 18 + 8) return -1;
+        stream *f = opengzfile(p, "rb");
+        if(!f) return -1;
+        uint total = 0;
+        int lastt = -1;
+        demoheader hdr;
+        bool ok = f->read(&hdr, sizeof(hdr)) == sizeof(hdr) && !memcmp(hdr.magic, DEMO_MAGIC, sizeof(hdr.magic));
+        if(ok)
+        {
+            total += sizeof(hdr);
+            lilswap(&hdr.version, 2);
+            ok = hdr.version == DEMO_VERSION && hdr.protocol == PROTOCOL_VERSION;
+        }
+        bool first = true;
+        uchar skip[4096];
+        while(ok)
+        {
+            int stamp[3];
+            size_t n = f->read(stamp, sizeof(stamp));
+            if(!n) break;
+            if(n != sizeof(stamp)) { ok = false; break; }
+            total += sizeof(stamp);
+            lilswap(stamp, 3);
+            int len = stamp[2];
+            if(len < 0 || len > (1<<24)) { ok = false; break; }
+            lastt = max(lastt, stamp[0]);
+            if(first)
+            {
+                first = false;
+                uchar *buf = new (false) uchar[max(len, 1)];
+                if(!buf || f->read(buf, len) != size_t(len)) { DELETEA(buf); ok = false; break; }
+                total += len;
+                ucharbuf q(buf, len);
+                string text;
+                ok = getint(q) == N_WELCOME && getint(q) == N_MAPCHANGE;
+                if(ok) { getstring(text, q); ok = !q.overread() && !strcasecmp(text, map) && getint(q) == mode && !q.overread(); }
+                delete[] buf;
+                continue;
+            }
+            while(len > 0)
+            {
+                int k = min(len, int(sizeof(skip)));
+                if(f->read(skip, k) != size_t(k)) { ok = false; break; }
+                total += k;
+                len -= k;
+            }
+        }
+        uint crc = f->getcrc();
+        delete f;
+        if(!ok || first) return -1;
+        const uchar *t = raw + rawlen - 8;
+        uint rcrc = t[0] | (t[1]<<8) | (t[2]<<16) | (uint(t[3])<<24);
+        uint rsize = t[4] | (t[5]<<8) | (t[6]<<16) | (uint(t[7])<<24);
+        if(rcrc != crc || rsize != total) return -1;
+        return lastt;
+    }
+
+    // the local recording of the match that just ended, if any; it will be
+    // closed at the next map even when the same map is played again
+    bool autodemolocal(const char *map, int mode, char *stem, int stemlen, int &elapsed)
+    {
+        if(!active || !committed || !dmo || !dmostem[0] || !map || !map[0]) return false;
+        if(strcasecmp(curmap, map) || recmode != mode) return false;
+        copystring(stem, dmostem, stemlen);
+        elapsed = recstart ? max(totalmillis - recstart, 0) : 0;
+        splitnext = true;
+        autodemopurge();
+        return true;
+    }
+
+    bool autodemoreplace(const char *stem, const char *map, int mode, int cn, int elapsed, const uchar *dmodata, int dmolen, const uchar *hddata, int hdlen)
+    {
+        if(!stem || !stem[0] || !autodemohdok(hddata, hdlen, map, mode, cn)) return false;
+        string ldmo, lhd, tdmo, thd, bdmo, bhd, rdmo, rhd;
+        autodemopath(ldmo, "demo/%s.dmo", stem);
+        autodemopath(lhd, "demo/%s.dmohd", stem);
+        autodemopath(tdmo, "demo/%s.dmo.srv", stem, rdmo);
+        autodemopath(thd, "demo/%s.dmohd.srv", stem, rhd);
+        autodemopath(bdmo, AUTODEMO_DIR "/%s.dmo", stem);
+        autodemopath(bhd, AUTODEMO_DIR "/%s.dmohd", stem);
+        bool ok = autodemowrite(rdmo, dmodata, dmolen) && autodemowrite(rhd, hddata, hdlen);
+        if(ok)
+        {
+            int len = autodemodmolen(rdmo, dmodata, dmolen, map, mode);
+            ok = len >= DEMOHD_MINMS && elapsed <= len + AUTODEMO_SLACK;
+        }
+        if(ok && active && !strcmp(dmostem, stem)) finish(true);
+        // the local files must still be there (not dropped or pruned), and
+        // an older copy in demo/replaced is never overwritten
+        if(ok) ok = autodemoexists(ldmo) && !autodemoexists(bdmo) && !autodemoexists(bhd);
+        bool hadhd = ok && autodemoexists(lhd);
+        if(ok) ok = autodemomove(ldmo, bdmo);
+        if(ok && hadhd && !autodemomove(lhd, bhd))
+        {
+            autodemomove(bdmo, ldmo);
+            ok = false;
+        }
+        if(ok && !autodemomove(tdmo, ldmo))
+        {
+            autodemomove(bdmo, ldmo);
+            if(hadhd) autodemomove(bhd, lhd);
+            ok = false;
+        }
+        if(ok && !autodemomove(thd, lhd))
+        {
+            remove(ldmo);
+            autodemomove(bdmo, ldmo);
+            if(hadhd) autodemomove(bhd, lhd);
+            ok = false;
+        }
+        remove(tdmo);
+        remove(thd);
+        scanmillis = 0;
+        return ok;
     }
 
     void stoprecording() { finish(true); }
@@ -1207,7 +1570,7 @@ static void hdprune() { demohd::prune(); }
 
 void game::demohdsample() { demohd::captureframe(); }
 void game::demohdapplyzoom() { demohd::applyzoom(); }
-void game::demohdafterpacket(int chan, const uchar *data, int len) { demohd::afterpacket(chan, data, len); }
+void game::demohdafterpacket(int chan, const uchar *data, int len) { if(!game::specpacketqueued()) demohd::afterpacket(chan, data, len); }
 void game::demohdwritepos(const uchar *data, int len) { demohd::writepos(data, len); }
 
 extern int hidehud;
@@ -1311,7 +1674,11 @@ ICOMMAND(toggledemorecord, "", (),
         demohd::stoprecording();
         conoutf("local demo + HD recording off");
     }
-    else conoutf("local demo + HD recording on");
+    else
+    {
+        conoutf("local demo + HD recording on");
+        game::announceautodemo();
+    }
 });
 ICOMMAND(toggledemohd, "", (),
 {
@@ -1322,7 +1689,7 @@ ICOMMAND(toggledemohd, "", (),
         return;
     }
     demohdplay = demohdplay ? 0 : 1;
-    conoutf("%s", demohd::hudstatus());
+    conoutf("HD aim %s", demohdplay ? "on" : "off");
 });
 ICOMMAND(demohdstatus, "", (), result(demohd::hudstatus()));
 ICOMMAND(demohdloaded, "", (), intret(demohd::play_loaded ? 1 : 0));

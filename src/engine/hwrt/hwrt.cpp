@@ -203,11 +203,23 @@ VARP(hwrtshadowself, 0, 1, 4);
 // a nearby glow pad or magic-circle tint. Toggling is live.
 VARP(hwrtteleportlight, 0, 1, 1);
 VARP(hwrtjumppadlight, 0, 0, 1);
-// Rifle / rocket smoke sprites cast partial shadows as coarse spheres. Off
-// keeps the sprites and drops only their shadow. Off until the puff reads as
-// smoke: an 8x6 sphere at 45% opacity draws a faceted translucent solid that
-// follows the shooter, which is what a tester saw and took for a second shadow.
+// Weapon smoke (rifle trail, rocket and grenade puffs) dims the sun, the lamps
+// and the sky behind it. 0 = no smoke shadow, the sprites stay. 1 = each puff
+// is a soft ball of smoke: the shadow ray integrates its density analytically
+// along the segment it crosses, so the shadow is as dark as the smoke is thick
+// there, fades with the sprite and has no facets, no noise and no hard edge.
+// The first version (an 8x6 sphere at 45% opacity, kept or dropped at random
+// per ray) drew a faceted translucent solid that followed the shooter, which a
+// tester took for a second shadow.
 VARP(hwrtsmokeshadow, 0, 0, 1);
+// Peak optical depth through the centre of a fresh puff, in percent of 0.3.
+// Overlapping trail puffs add up: 100 dims the sun by about a third under a
+// fresh rifle trail.
+VARP(hwrtsmokeshadowdensity, 10, 100, 400);
+// Comparison only, not saved. 0 = analytic ball on a one-box procedural BLAS,
+// 1 = the same ball integrated on the 8x6 sphere's triangles, 2 = the first
+// version (random keep at 45% per sphere crossing).
+VAR(hwrtsmokeshadowmethod, 0, 0, 2);
 // How many shadowed glow lamps (teleports + lava) to evaluate. Nearest
 // around the camera, plus those on screen. 8 is playable on triforts (54 pads).
 VARP(hwrtglowdlights, 1, 2, 16);

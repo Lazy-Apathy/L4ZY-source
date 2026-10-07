@@ -1,5 +1,7 @@
 #include "game.h"
 
+extern int demohdrecord;
+
 namespace game
 {
     VARP(minradarscale, 0, 384, 10000);
@@ -1006,8 +1008,18 @@ namespace game
         clearchatlog();
     }
 
+    void clearspecqueue();
+
+    static void hdchunksdrop(const char *why);
+    static void autodemoready(const char *args);
+    static void autodemoreset();
+    static void autodemoupdate();
+
     void gamedisconnect(bool cleanup)
     {
+        clearspecqueue();
+        hdchunksdrop(NULL);
+        autodemoreset();
         matchrec::ondisconnect();
         demohd::ondisconnect();
         if(remote) stopfollowing();
@@ -1206,6 +1218,7 @@ namespace game
         sendpositions();
         sendmessages();
         demohd::flushtoServer();
+        autodemoupdate();
         flushclient();
     }
 
@@ -2150,10 +2163,25 @@ namespace game
                         applyfragrt(actor, fovms, xhms);
                     break;
                 }
+                // Distinct prefix: neither command is a prefix of the other.
+                if(!strncmp(text, FRAGRTALL_CMD, sizeof(FRAGRTALL_CMD)-1) && text[sizeof(FRAGRTALL_CMD)-1] == ' ')
+                {
+                    int actor = -1, victim = -1, fovms = 0, xhms = 0;
+                    if(sscanf(text + sizeof(FRAGRTALL_CMD)-1, " %d %d %d %d", &actor, &victim, &fovms, &xhms) == 4)
+                        applyfragrtall(actor, victim, fovms, xhms);
+                    break;
+                }
+                if(!strncmp(text, DEMOREADY_CMD, sizeof(DEMOREADY_CMD)-1) && text[sizeof(DEMOREADY_CMD)-1] == ' ')
+                {
+                    autodemoready(text + sizeof(DEMOREADY_CMD)-1);
+                    break;
+                }
                 if(!strcmp(text, CLANMOD_HELLO))
                 {
                     setclanmod(true);
                     addmsg(N_SERVCMD, "rs", CLANMOD_ACK);
+                    addmsg(N_SERVCMD, "rs", HDCHUNKS_CMD);
+                    announceautodemo();
                 }
                 break;
 
@@ -2177,6 +2205,196 @@ namespace game
     static int lastdemoreq = 0;
     static string lasthdname;
 
+    static int lastdemotag = -1;
+
+    // Server copy of the match (AUTODEMO_CMD / DEMOREADY_CMD). While the local
+    // demo is recorded, the client asks a clan server for its copy of the match
+    // that just ended (it has every L4ZY player's HD aim), once, during the
+    // intermission. The local recording is replaced only by a whole, checked
+    // copy of the same match; in any doubt the local one stays. A failed
+    // download is never asked again: the server pays for its bandwidth.
+    struct autodemostate
+    {
+        int tag, mode, cn, elapsed, started;
+        string map, stem;
+        uchar *dmo;
+        int dmolen;
+    };
+    static autodemostate autodl = { -1, 0, -1, 0, 0, "", "", NULL, 0 };
+    // demoready seen just before the intermission message: kept a moment
+    struct autodemopending { int num, mode, millis; string map; };
+    static autodemopending autopend = { -1, 0, 0, "" };
+    static bool autodemoannounced = false;
+    static string autodemolaststem = "";
+    // every automatic request of this connection: late or repeated data is
+    // dropped instead of being saved like a /getdemo
+    static vector<int> autodemotags;
+    static const int AUTODEMO_TIMEOUT = 120000, AUTODEMO_PENDING = 5000;
+
+    static bool isautodemotag(int tag) { return tag >= 0 && autodemotags.find(tag) >= 0; }
+
+    void announceautodemo()
+    {
+        if(autodemoannounced || !demohdrecord || !remote || !clanmodactive()) return;
+        addmsg(N_SERVCMD, "rs", AUTODEMO_CMD);
+        autodemoannounced = true;
+    }
+
+    static void autodemoclear()
+    {
+        DELETEA(autodl.dmo);
+        autodl.dmolen = 0;
+        autodl.tag = -1;
+        autodl.stem[0] = '\0';
+    }
+
+    static void autodemoreset()
+    {
+        autodemoclear();
+        autopend.num = -1;
+        autodemoannounced = false;
+        autodemolaststem[0] = '\0';
+        autodemotags.setsize(0);
+    }
+
+    static void autodemofail()
+    {
+        if(autodl.tag < 0) return;
+        autodemoclear();
+        conoutf("Server demo not received, local demo kept");
+    }
+
+    static void autodemorequest(int num, const char *map, int mode)
+    {
+        string stem;
+        int elapsed = 0;
+        if(!demohd::autodemolocal(map, mode, stem, sizeof(stem), elapsed)) return;
+        if(!strcmp(stem, autodemolaststem)) return; // this recording was already asked for
+        copystring(autodemolaststem, stem);
+        autodl.tag = ++lastdemoreq;
+        autodl.mode = mode;
+        autodl.cn = player1->clientnum;
+        autodl.elapsed = elapsed;
+        autodl.started = totalmillis;
+        copystring(autodl.map, map);
+        copystring(autodl.stem, stem);
+        if(autodemotags.length() >= 32) autodemotags.remove(0);
+        autodemotags.add(autodl.tag);
+        addmsg(N_GETDEMO, "rii", num, autodl.tag);
+    }
+
+    static void autodemoready(const char *args)
+    {
+        int num = -1, hd = 0;
+        string map, mode;
+        if(sscanf(args, " %d %259s %259s %d", &num, map, mode, &hd) != 4 || num < 0) return;
+        // no HD aim in the server copy: the local one keeps the player's own
+        if(!hd || !demohdrecord || !remote || demoplayback || autodl.tag >= 0) return;
+        if(strcasecmp(map, getclientmap())) return;
+        int m = INT_MIN;
+        if(isdigit(mode[0]) || (mode[0] == '-' && isdigit(mode[1]))) m = parseint(mode);
+        else if(!strcasecmp(mode, server::modename(gamemode, ""))) m = gamemode;
+        if(m != gamemode) return;
+        autopend.num = num;
+        autopend.mode = m;
+        autopend.millis = totalmillis;
+        copystring(autopend.map, map);
+        autodemoupdate();
+    }
+
+    static void autodemoupdate()
+    {
+        // a demo stored before the end of the match (server size limit) is
+        // not the whole match: only asked for during the intermission
+        if(autopend.num >= 0)
+        {
+            if(intermission && !strcasecmp(autopend.map, getclientmap()) && autopend.mode == gamemode)
+            {
+                autodemorequest(autopend.num, autopend.map, autopend.mode);
+                autopend.num = -1;
+            }
+            else if(totalmillis - autopend.millis > AUTODEMO_PENDING) autopend.num = -1;
+        }
+        if(autodl.tag >= 0 && totalmillis - autodl.started > AUTODEMO_TIMEOUT) autodemofail();
+    }
+
+    static void autodemogotdmo(int tag, const uchar *data, int len)
+    {
+        if(tag != autodl.tag) return;
+        if(autodl.dmo || len <= 0) { autodemofail(); return; }
+        autodl.dmo = new (false) uchar[len];
+        if(!autodl.dmo) { autodemofail(); return; }
+        memcpy(autodl.dmo, data, len);
+        autodl.dmolen = len;
+        lastdemotag = tag; // its HD aim may follow in parts
+    }
+
+    static void autodemogothd(int tag, const uchar *data, int len)
+    {
+        if(tag != autodl.tag) return;
+        if(!autodl.dmo) { autodemofail(); return; }
+        bool ok = demohd::autodemoreplace(autodl.stem, autodl.map, autodl.mode, autodl.cn, autodl.elapsed, autodl.dmo, autodl.dmolen, data, len);
+        autodemoclear();
+        if(ok) conoutf("Server demo saved (HD)");
+        else conoutf("Server demo not used, local demo kept");
+    }
+
+    // .dmohd received in parts (see HDCHUNKS_CMD): joined in order in memory
+    // (bounded), checked (tag, part count, exact size), then saved like a
+    // single N_SENDDEMOHD. Anything unexpected drops it cleanly.
+    struct hdchunkrecv { int tag, total, parts, got, len; uchar *buf; };
+    static hdchunkrecv hdrecv = { -1, 0, 0, 0, 0, NULL };
+    static const int HDCHUNKS_MAXBYTES = 128<<20, HDCHUNKS_MAXPARTS = 64;
+
+    static bool isautodemotag(int tag);
+    static void autodemofail();
+
+    static void hdchunksdrop(const char *why)
+    {
+        if(hdrecv.tag >= 0 && why)
+        {
+            if(!isautodemotag(hdrecv.tag)) conoutf(CON_WARN, "HD aim of the demo not received (%s)", why);
+            else autodemofail();
+        }
+        DELETEA(hdrecv.buf);
+        hdrecv.tag = -1;
+        hdrecv.total = hdrecv.parts = hdrecv.got = hdrecv.len = 0;
+    }
+
+    static void hdchunksheader(const char *args)
+    {
+        int tag = -1, total = 0, parts = 0;
+        hdchunksdrop("a new download started");
+        if(sscanf(args, " %d %d %d", &tag, &total, &parts) != 3) return;
+        if(total <= 0 || total > HDCHUNKS_MAXBYTES || parts < 1 || parts > HDCHUNKS_MAXPARTS || parts > total) return;
+        if(tag != lastdemotag) { conoutf(CON_WARN, "HD aim of the demo not received (no matching demo)"); return; }
+        hdrecv.buf = new (false) uchar[total];
+        if(!hdrecv.buf) return;
+        hdrecv.tag = tag;
+        hdrecv.total = total;
+        hdrecv.parts = parts;
+    }
+
+    static void autodemogothd(int tag, const uchar *data, int len);
+
+    static void installdemohd(int tag, const uchar *data, int len)
+    {
+        if(isautodemotag(tag)) { autodemogothd(tag, data, len); return; }
+        string hdname;
+        hdname[0] = '\0';
+        loopv(demoreqs) if(demoreqs[i].tag == tag)
+        {
+            copystring(hdname, demoreqs[i].name);
+            demoreqs.remove(i);
+            break;
+        }
+        if(!hdname[0]) copystring(hdname, lasthdname);
+        if(!hdname[0]) return;
+        int n = strlen(hdname);
+        if(n < 4 || strcasecmp(&hdname[n-4], ".dmo")) concatstring(hdname, ".dmo");
+        demohd::installsidecar(hdname, data, len);
+    }
+
     void receivefile(packetbuf &p)
     {
         int type;
@@ -2191,6 +2409,12 @@ namespace game
                 string fname;
                 fname[0] = '\0';
                 int tag = getint(p);
+                if(isautodemotag(tag))
+                {
+                    ucharbuf b = p.subbuf(p.remaining());
+                    autodemogotdmo(tag, b.buf, b.maxlen);
+                    break;
+                }
                 loopv(demoreqs) if(demoreqs[i].tag == tag)
                 {
                     copystring(fname, demoreqs[i].name);
@@ -2213,30 +2437,43 @@ namespace game
                 demo->write(b.buf, b.maxlen);
                 delete demo;
                 copystring(lasthdname, fname);
+                lastdemotag = tag;
                 break;
             }
 
             case N_SENDDEMOHD:
             {
                 int tag = getint(p);
-                string hdname;
-                hdname[0] = '\0';
-                loopv(demoreqs) if(demoreqs[i].tag == tag)
-                {
-                    copystring(hdname, demoreqs[i].name);
-                    demoreqs.remove(i);
-                    break;
-                }
-                if(!hdname[0]) copystring(hdname, lasthdname);
-                if(!hdname[0])
-                {
-                    p.subbuf(p.remaining());
-                    break;
-                }
-                int len = strlen(hdname);
-                if(len < 4 || strcasecmp(&hdname[len-4], ".dmo")) concatstring(hdname, ".dmo");
                 ucharbuf b = p.subbuf(p.remaining());
-                demohd::installsidecar(hdname, b.buf, b.maxlen);
+                if(hdrecv.tag >= 0 && tag != hdrecv.tag) hdchunksdrop("unexpected part");
+                if(hdrecv.tag < 0)
+                {
+                    installdemohd(tag, b.buf, b.maxlen);
+                    break;
+                }
+                if(hdrecv.got >= hdrecv.parts || b.maxlen > hdrecv.total - hdrecv.len)
+                {
+                    hdchunksdrop("parts do not match");
+                    break;
+                }
+                memcpy(hdrecv.buf + hdrecv.len, b.buf, b.maxlen);
+                hdrecv.len += b.maxlen;
+                hdrecv.got++;
+                if(hdrecv.got < hdrecv.parts) break;
+                if(hdrecv.len != hdrecv.total) { hdchunksdrop("incomplete"); break; }
+                installdemohd(tag, hdrecv.buf, hdrecv.len);
+                hdchunksdrop(NULL);
+                break;
+            }
+
+            case N_SERVCMD:
+            {
+                string text;
+                getstring(text, p);
+                if(!strncmp(text, HDCHUNKS_CMD, sizeof(HDCHUNKS_CMD)-1) && text[sizeof(HDCHUNKS_CMD)-1] == ' ')
+                    hdchunksheader(text + sizeof(HDCHUNKS_CMD)-1);
+                else if(!strncmp(text, DEMOREADY_CMD, sizeof(DEMOREADY_CMD)-1) && text[sizeof(DEMOREADY_CMD)-1] == ' ')
+                    autodemoready(text + sizeof(DEMOREADY_CMD)-1);
                 break;
             }
 
@@ -2261,9 +2498,127 @@ namespace game
         }
     }
 
+    // Live spectating with exact (HD) aim: the followed view is drawn
+    // hdlivedelay ms in the past, so everything else (positions, shots, sounds,
+    // deaths, kill feed, scores...) is replayed with the same delay: game
+    // packets are kept here in arrival order and parsed at "now - delay".
+    // Not delayed: HD samples (they carry their own time), pongs and lone
+    // server messages. The delay is global to the spectator, whoever is
+    // followed (HD or not) or in free cam: hdlivedelay on a server with the
+    // clan extras, from the moment you become a spectator; 0 when playing, in
+    // demos and on older or vanilla servers. Later changes move at most 20 % of
+    // real time, so time never jumps (joining the game flushes the queue).
+    static int peekmessagetype(const uchar *data, int len)
+    {
+        if(!data || len <= 0) return -1;
+        ucharbuf q(const_cast<uchar *>(data), len);
+        return getint(q);
+    }
+
+    struct specpacket { int millis, chan; vector<uchar> data; };
+    static vector<specpacket *> specqueue;
+    static int specqueuebytes = 0;
+    static float specdelay = 0;
+    static int specdelaymillis = 0;
+    static bool specreplaying = false, specjustqueued = false, specwasactive = false;
+    static const int SPECQUEUE_MAXPACKETS = 8192, SPECQUEUE_MAXBYTES = 8<<20;
+
+    static bool specdelayactive()
+    {
+        return connected && remote && !demoplayback && clanmodactive() && player1 && player1->state==CS_SPECTATOR;
+    }
+
+    static void parsepacketnow(int chan, packetbuf &p)
+    {
+        switch(chan)
+        {
+            case 0:
+                parsepositions(p);
+                break;
+
+            case 1:
+                parsemessages(-1, NULL, p);
+                break;
+        }
+    }
+
+    static void replayspecpacket(specpacket *sp)
+    {
+        specqueuebytes -= sp->data.length();
+        ENetPacket *packet = enet_packet_create(sp->data.getbuf(), sp->data.length(), 0);
+        if(packet)
+        {
+            specreplaying = true;
+            packetbuf p(packet);
+            parsepacketnow(sp->chan, p);
+            demohd::afterpacket(sp->chan, packet->data, (int)packet->dataLength);
+            specreplaying = false;
+            enet_packet_destroy(packet);
+        }
+        delete sp;
+    }
+
+    void clearspecqueue()
+    {
+        specqueue.deletecontents();
+        specqueuebytes = 0;
+        specdelay = 0;
+        specdelaymillis = 0;
+    }
+
+    // called every frame after the network: moves the delay and replays what is due
+    void updatespecqueue()
+    {
+        int elapsed = specdelaymillis ? max(totalmillis - specdelaymillis, 0) : 0;
+        specdelaymillis = totalmillis;
+        int goal = 0;
+        if(specdelayactive() && demohd::livecompatible()) goal = demohd::livedelay();
+        // becoming a spectator: start at the goal (the game just holds still for
+        // that long) instead of sliding into it
+        bool active = specdelayactive();
+        if(active && !specwasactive && !specqueue.length()) specdelay = goal;
+        specwasactive = active;
+        float step = 0.2f*elapsed;
+        specdelay = goal > specdelay ? min(specdelay + step, float(goal)) : max(specdelay - step, float(goal));
+        while(specqueue.length())
+        {
+            bool flush = !specdelayactive() || specqueue.length() > SPECQUEUE_MAXPACKETS || specqueuebytes > SPECQUEUE_MAXBYTES;
+            if(!flush && specqueue[0]->millis > totalmillis - int(specdelay)) break;
+            replayspecpacket(specqueue.remove(0));
+        }
+        if(!specdelayactive()) specdelay = 0;
+    }
+
+    // local view time of the followed HD aim (the same past as the replayed game)
+    int specviewdelay() { return int(specdelay); }
+
+    // the packet just received was queued: the local demo records it when replayed
+    bool specpacketqueued()
+    {
+        bool q = specjustqueued;
+        specjustqueued = false;
+        return q;
+    }
+
     void parsepacketclient(int chan, packetbuf &p)   // processes any updates from the server
     {
         if(p.packet->flags&ENET_PACKET_FLAG_UNSEQUENCED) return;
+        if((chan == 0 || chan == 1) && !specreplaying && (specqueue.length() || (specdelay > 0 && specdelayactive())))
+        {
+            int type = peekmessagetype(p.buf, p.maxlen);
+            if(type != N_HDPOS && type != N_PONG && type != N_SERVMSG)
+            {
+                specpacket *sp = new specpacket;
+                sp->millis = totalmillis;
+                sp->chan = chan;
+                sp->data.put(p.buf, p.maxlen);
+                specqueuebytes += p.maxlen;
+                specqueue.add(sp);
+                specjustqueued = true;
+                p.len = p.maxlen;
+                return;
+            }
+        }
         switch(chan)
         {
             case 0:

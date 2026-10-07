@@ -28,6 +28,7 @@ from urllib.parse import parse_qs, urlparse
 import sauerrt_paths as paths
 import updater
 import llama_runtime
+import menu_plan
 import model_manager
 
 # ---------------------------------------------------------------------------
@@ -411,6 +412,63 @@ def llama_ctx():
         return int(cfg.get("ctx") or 4096)
     except Exception:
         return 4096
+
+
+# Assistant des reglages : plan des menus (data/assistant-menus.txt, genere a
+# chaque version depuis menus.cfg). Le resume des pages remplace la liste ecrite
+# a la main du prompt ; pour chaque question, on ajoute seulement la position
+# exacte des reglages trouves et, si la question porte sur la disposition, la
+# section autour. Sans plan (ancienne installation) : le prompt reste tel quel.
+MENU_OVERVIEW_RE = re.compile(r"<menu-overview>\n?(.*?)</menu-overview>\n?", re.DOTALL)
+ASSIST_ANSWER_TOKENS = 400
+
+
+def assistant_menu_plan():
+    try:
+        return menu_plan.load(paths.ROOT / "data" / "assistant-menus.txt")
+    except Exception as exc:  # un plan illisible ne doit jamais casser l'assistant
+        print(f"  [assistant] plan des menus illisible : {exc}", file=sys.stderr)
+        return None
+
+
+def assistant_system(prompt, catalog, question, history, plan, ctx=None):
+    """Prompt systeme de l'assistant : prompt (resume des menus a jour),
+    catalogue (chemins du plan), puis positions / disposition des menus dans
+    la place qui reste dans le contexte du modele (~3 caracteres par jeton)."""
+    if plan is not None:
+        ov = plan.overview()
+        if ov:
+            prompt = MENU_OVERVIEW_RE.sub(lambda m: ov + "\n", prompt)
+        catalog = plan.rewrite_catalog(catalog)
+    prompt = prompt.replace("<menu-overview>\n", "").replace("</menu-overview>\n", "")
+
+    def build(cat):
+        return (prompt.strip() + "\n\nSettings and commands for this question (name = current value (limits) : label [menu]):\n"
+                + (cat.strip() or "(none)"))
+    system = build(catalog)
+    if plan is None:
+        return system
+    extra = plan.context(question, catalog, budget=1800)
+    if not extra:
+        return system
+    # place qui reste (~3,6 caracteres par jeton mesures avec Qwen3 sur ce prompt) ;
+    # si elle manque, les derniers reglages du catalogue (les moins probables,
+    # le jeu les classe du meilleur au moins bon) laissent la place au plan
+    ctx = ctx or llama_ctx()
+    room = int((ctx - ASSIST_ANSWER_TOKENS - 120) * 3.6) - sum(len(h) for h in history) - len(question)
+    lines = catalog.strip().splitlines()
+    want = min(len(extra), 1800)
+    while len(system) + 2 + want > room:
+        settings = [k for k, l in enumerate(lines) if re.match(r"^\w+ = ", l)]
+        if len(settings) <= 6:
+            break
+        del lines[settings[-1]]
+        system = build("\n".join(lines))
+    budget = room - len(system) - 2
+    if budget < 250:
+        return system
+    extra = plan.context(question, "\n".join(lines), budget=min(budget, 1800))
+    return system + ("\n\n" + extra if extra else "")
 
 
 # Assistant des reglages : de quoi deviner la langue de la question.
@@ -2002,8 +2060,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             prompt = (paths.CODE / "assistant-prompt.txt").read_text(encoding="utf-8")
         except OSError:
             prompt = "You are the settings assistant of the game. Propose game settings as lines starting with CMD:."
-        system = (prompt.strip() + "\n\nSettings and commands for this question (name = current value (limits) : label [menu]):\n"
-                  + (catalog.strip() or "(none)"))
+        system = assistant_system(prompt, catalog, question, history, assistant_menu_plan())
         messages = [{"role": "system", "content": system}]
         for i in range(0, len(history) - 1, 2):
             messages.append({"role": "user", "content": history[i]})

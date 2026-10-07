@@ -1708,6 +1708,11 @@ struct skelmodel : animmodel
             {
                 if(hwrtvelskelpass)
                 {
+                    // The velocity pass can be the first to draw a freshly loaded
+                    // model (HUD gun of a newly followed player). Until genvbo has
+                    // run, vblends is 0 and blendcombo::interpindex still holds the
+                    // load-time combo index, so skinning would index past the bones.
+                    if(!vbocache->vbuf) genvbo(tangents, *vbocache);
                     animmodel::disablevbo();
                     gle::forcedisable();
                     gle::clearvbo();

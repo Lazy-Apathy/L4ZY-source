@@ -692,6 +692,16 @@ struct animmodel : model
             }
         }
 
+        // Links made by mdllink keep the tag name after the script argument
+        // that carried it is freed: keep a persistent copy of each name.
+        static const char *linktagname(const char *tag)
+        {
+            static vector<char *> names;
+            if(!tag) return NULL;
+            loopv(names) if(!strcmp(names[i], tag)) return names[i];
+            return names.add(newstring(tag));
+        }
+
         bool link(part *p, const char *tag, const vec &translate = vec(0, 0, 0), int anim = -1, int basetime = 0, vec *pos = NULL)
         {
             int i = meshes ? meshes->findtag(tag) : -1;
@@ -707,7 +717,7 @@ struct animmodel : model
             l.basetime = basetime;
             l.translate = translate;
             l.pos = pos;
-            l.tagname = tag;
+            l.tagname = linktagname(tag);
             return true;
         }
 

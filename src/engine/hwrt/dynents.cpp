@@ -153,15 +153,22 @@ static hwrtscenemodel scenemodels[HWRT_MAX_SCENE_MODELS];
 static int nscenemodels = 0;
 static bool scenecollecting = false;
 
-enum { HWRT_MAX_SMOKE_PUFFS = 1024 };
+// Puffs reported this frame (every live weapon smoke sprite, up to RAW) and
+// how many of them may become TLAS instances (MAX).
+enum { HWRT_MAX_SMOKE_PUFFS = 1024, HWRT_MAX_SMOKE_RAW = 16384 };
 struct hwrtsmokepuff
 {
     vec o;
     float radius;
-    uchar opacity;
+    uint seed;
+    uchar life;
 };
-static hwrtsmokepuff smokepuffs[HWRT_MAX_SMOKE_PUFFS];
+static hwrtsmokepuff smokepuffs[HWRT_MAX_SMOKE_RAW];
 static int nsmokepuffs = 0;
+// One axis-aligned box [-1,1]^3 as procedural geometry. A soft puff is this
+// box scaled by its radius; the shadow ray integrates the ball inside it.
+static hwrtmodelblas smokeboxc;
+static bool smokeboxfailed = false;
 
 // Sentinel model* so the smoke-puff sphere keeps its cache slot. Never
 // dereference: it is not a real model. prunecache / cachehasunused skip it,
@@ -226,17 +233,21 @@ void hwrtnotescenemodel(const char *mdl, const vec &o, float yaw, float pitch, i
     nscenemodels++;
 }
 
-void hwrtnotesmokepuff(const vec &o, float radius, int opacity)
+void hwrtnotesmokepuff(const vec &o, float radius, int life, uint seed)
 {
     if(!scenecollecting) return;
-    if(nsmokepuffs >= HWRT_MAX_SMOKE_PUFFS) return;
-    if(radius < 0.15f) return;
-    opacity = clamp(opacity, 0, 255);
-    if(opacity < 5) return;
+    if(nsmokepuffs >= HWRT_MAX_SMOKE_RAW) return;
     smokepuffs[nsmokepuffs].o = o;
     smokepuffs[nsmokepuffs].radius = radius;
-    smokepuffs[nsmokepuffs].opacity = uchar(opacity);
+    smokepuffs[nsmokepuffs].seed = seed;
+    smokepuffs[nsmokepuffs].life = uchar(clamp(life, 0, 255));
     nsmokepuffs++;
+}
+
+static inline float smokehash01(uint h)
+{
+    h ^= h >> 16; h *= 0x7feb352du; h ^= h >> 15; h *= 0x846ca68bu; h ^= h >> 16;
+    return float(h >> 8) * (1.0f / 16777216.0f);
 }
 
 static bool skipdynent(dynent *d);
@@ -572,6 +583,8 @@ static void destroylocked()
     hwrtteleporthole = vec(0, 0, 7.3f);
     hwrthasteleporthole = false;
     bulletc = NULL;
+    destroymodel(smokeboxc);
+    smokeboxfailed = false;
 }
 
 static void addneededmodel(vector<model *> &need, model *m)
@@ -1632,6 +1645,105 @@ static hwrtmodelblas *buildbulletblas()
     return bulletc;
 }
 
+// One procedural box for the soft smoke puffs. A box gives a ray query one
+// candidate per puff (the sphere mesh gives two, entry and exit) and covers
+// the whole ball, so the analytic test in the shader sees every ray that
+// crosses it. NO_DUPLICATE_ANY_HIT: a puff must be counted once per ray.
+
+static bool buildsmokeboxblas()
+{
+    if(smokeboxc.addr) return true;
+    if(smokeboxfailed || dyn.failed) return false;
+    if(!hwrtdev.ok() || !hwrtdev.rayquery || !vkCreateAccelerationStructureKHR) return false;
+    if(!ensurecmd()) return false;
+    smokeboxfailed = true;
+
+    VkAabbPositionsKHR box = { -1, -1, -1, 1, 1, 1 };
+    hwrtbuf abuf, scratch;
+    memset(&abuf, 0, sizeof(abuf));
+    memset(&scratch, 0, sizeof(scratch));
+    if(!allocbuf(abuf, sizeof(box),
+                 VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR|VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT))
+        return false;
+    if(!uploadbuf(abuf, &box, sizeof(box))) { destroybuf(abuf); return false; }
+
+    VkAccelerationStructureGeometryKHR geo = { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR };
+    geo.geometryType = VK_GEOMETRY_TYPE_AABBS_KHR;
+    geo.flags = VK_GEOMETRY_NO_DUPLICATE_ANY_HIT_INVOCATION_BIT_KHR;
+    geo.geometry.aabbs.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_AABBS_DATA_KHR;
+    geo.geometry.aabbs.data.deviceAddress = abuf.address;
+    geo.geometry.aabbs.stride = sizeof(VkAabbPositionsKHR);
+    VkAccelerationStructureBuildRangeInfoKHR range = { 1, 0, 0, 0 };
+    const VkAccelerationStructureBuildRangeInfoKHR *ranges = &range;
+    uint32_t count = 1;
+
+    VkAccelerationStructureBuildGeometryInfoKHR info = { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR };
+    info.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+    info.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+    info.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+    info.geometryCount = 1;
+    info.pGeometries = &geo;
+    VkAccelerationStructureBuildSizesInfoKHR sizes = { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR };
+    vkGetAccelerationStructureBuildSizesKHR(hwrtdev.device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &info, &count, &sizes);
+
+    hwrtmodelblas slot;
+    memset(&slot, 0, sizeof(slot));
+    if(!createas(slot.blas, slot.buf, VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR, sizes.accelerationStructureSize, false))
+    {
+        destroybuf(abuf);
+        return false;
+    }
+    VkDeviceSize scralign = hwrtdev.scratchalign ? hwrtdev.scratchalign : 256;
+    if(!allocbuf(scratch, alignup(sizes.buildScratchSize, scralign) + scralign,
+                 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT|VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT))
+    {
+        destroymodel(slot);
+        destroybuf(abuf);
+        return false;
+    }
+    info.dstAccelerationStructure = slot.blas;
+    info.scratchData.deviceAddress = alignedaddr(scratch.address, scralign);
+
+    bool ok = vkResetCommandBuffer(dyn.cmd, 0) == VK_SUCCESS;
+    VkCommandBufferBeginInfo begin = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+    begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    ok = ok && vkBeginCommandBuffer(dyn.cmd, &begin) == VK_SUCCESS;
+    if(ok)
+    {
+        vkCmdBuildAccelerationStructuresKHR(dyn.cmd, 1, &info, &ranges);
+        VkMemoryBarrier barrier = { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+        barrier.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+        barrier.dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR;
+        vkCmdPipelineBarrier(dyn.cmd,
+                             VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+                             VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR|VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                             0, 1, &barrier, 0, NULL, 0, NULL);
+        ok = vkEndCommandBuffer(dyn.cmd) == VK_SUCCESS;
+    }
+    if(ok)
+    {
+        VkSubmitInfo submit = { VK_STRUCTURE_TYPE_SUBMIT_INFO };
+        submit.commandBufferCount = 1;
+        submit.pCommandBuffers = &dyn.cmd;
+        ok = vkQueueSubmit(hwrtdev.queue, 1, &submit, VK_NULL_HANDLE) == VK_SUCCESS;
+    }
+    if(ok) ok = hwrtwaitidle("vkDeviceWaitIdle (smoke box BLAS)");
+    destroybuf(scratch);
+    destroybuf(abuf);
+    if(ok) slot.addr = asaddress(slot.blas);
+    if(!ok || !slot.addr)
+    {
+        destroymodel(slot);
+        return false;
+    }
+    smokeboxc = slot;
+    smokeboxfailed = false;
+    logoutf("hwrt: smoke puff box BLAS");
+    return true;
+}
+
 static bool ensuretlasbuffers()
 {
     if(dyn.slot[0].tlas) return true;
@@ -2480,6 +2592,75 @@ struct hwrtnearerfirst
     bool operator()(const hwrtqueuedmap &x, const hwrtqueuedmap &y) const { return x.dist < y.dist; }
 };
 
+extern int hwrtsmokeshadowdensity, hwrtsmokeshadowmethod;
+int hwrtsmokeinsts = 0, hwrtsmokeraw = 0;
+
+// Smoke sprites, one instance per puff, scaled by the sprite's bounding radius.
+// FORCE_NO_OPAQUE: a puff never commits a hit, the shadow ray goes on.
+static uint32_t addsmokepuffs(hwrtinstance *dst, uint32_t n, int &dynn)
+{
+    hwrtsmokeraw = nsmokepuffs;
+    hwrtsmokeinsts = 0;
+    if(!nsmokepuffs) return n;
+    int method = hwrtsmokeshadowmethod;
+    if(method == 0 && !smokeboxc.addr) method = 1;
+    if(method != 0 && !(bulletc && bulletc->addr)) return n;
+    const uint32_t noopaque = uint32_t(VK_GEOMETRY_INSTANCE_FORCE_NO_OPAQUE_BIT_KHR);
+    int added = 0;
+    if(method == 2)
+    {
+        // First version, for comparison: every stride-th puff as an 8x6
+        // sphere in the CASTER mask, kept by the shadow ray's any-hit with
+        // probability opacity/255 (customIndex bits 8-15).
+        int stride = (nsmokepuffs + HWRT_MAX_SMOKE_PUFFS - 1) / HWRT_MAX_SMOKE_PUFFS;
+        uint32_t geom = customforcache(bulletc) & 0xFFu;
+        for(int i = 0; i < nsmokepuffs && added < HWRT_MAX_SMOKE_PUFFS; i += stride)
+        {
+            const hwrtsmokepuff &p = smokepuffs[i];
+            int opac = int(p.life / 255.0f * 0.45f * 255.0f + 0.5f);
+            if(p.radius < 0.15f || opac < 5) continue;
+            if(n >= HWRT_MAX_INSTANCES) { notefull(); break; }
+            instanceat(dst[n], p.o, 0, 0, geom | (uint32_t(opac) << 8), bulletc->addr,
+                       HWRT_RAYMASK_CASTER, noopaque, p.radius, p.radius, p.radius);
+            n++;
+            added++;
+        }
+    }
+    else
+    {
+        // Soft puffs in their own SMOKE mask: customIndex bit 16 marks them,
+        // bits 8-15 carry the peak optical depth in 1/128. Over the cap a
+        // stable subset is kept (a puff's hash does not change over its
+        // life) and every kept puff is made denser by the inverse fraction,
+        // so a crowded fight keeps the same shadow instead of thinning out
+        // or crawling as the count changes.
+        float keepfrac = 1.0f;
+        if(nsmokepuffs > HWRT_MAX_SMOKE_PUFFS) keepfrac = 0.95f * HWRT_MAX_SMOKE_PUFFS / nsmokepuffs;
+        float base = 0.3f * hwrtsmokeshadowdensity / 100.0f / keepfrac;
+        VkDeviceAddress blas = method == 0 ? smokeboxc.addr : bulletc->addr;
+        uint32_t geom = method == 0 ? 0u : (customforcache(bulletc) & 0xFFu);
+        loopi(nsmokepuffs)
+        {
+            const hwrtsmokepuff &p = smokepuffs[i];
+            if(p.radius < 0.15f) continue;
+            if(keepfrac < 1 && smokehash01(p.seed) >= keepfrac) continue;
+            // +-25% per puff, fixed for its life: the trail is not a tube.
+            float tau = base * (p.life / 255.0f) * (0.75f + 0.5f * smokehash01(p.seed ^ 0x9e3779b9u));
+            int q = min(int(tau * 128.0f + 0.5f), 255);
+            if(q < 1) continue;
+            if(added >= HWRT_MAX_SMOKE_PUFFS) break;
+            if(n >= HWRT_MAX_INSTANCES) { notefull(); break; }
+            instanceat(dst[n], p.o, 0, 0, HWRT_SMOKE_SOFT | (uint32_t(q) << 8) | geom, blas,
+                       HWRT_RAYMASK_SMOKE, noopaque, p.radius, p.radius, p.radius);
+            n++;
+            added++;
+        }
+    }
+    dynn += added;
+    hwrtsmokeinsts = added;
+    return n;
+}
+
 static uint32_t gatherinstances(hwrtdynslot &s, hwrtinstance *dst, int *nmap, int *ndyn, int *nrag)
 {
     uint32_t n = 0;
@@ -2571,22 +2752,7 @@ static uint32_t gatherinstances(hwrtdynslot &s, hwrtinstance *dst, int *nmap, in
         if(next > n) dynn++;
         n = next;
     }
-    // Smoke sprites: one scaled sphere per puff. CASTER so primary / RTAO /
-    // sky miss it. FORCE_NO_OPAQUE so a shadow ray can keep going when the
-    // puff's opacity test fails — otherwise the BLAS commits a 100% block
-    // and the trail never dissipates. Opacity lives in customIndex bits 8-15.
-    if(bulletc && bulletc->addr) loopi(nsmokepuffs)
-    {
-        if(n >= HWRT_MAX_INSTANCES) { notefull(); break; }
-        float rad = smokepuffs[i].radius;
-        uint32_t geom = customforcache(bulletc) & 0xFFu;
-        uint32_t packed = geom | (uint32_t(smokepuffs[i].opacity) << 8);
-        instanceat(dst[n], smokepuffs[i].o, 0, 0, packed, bulletc->addr,
-                   HWRT_RAYMASK_CASTER, uint32_t(VK_GEOMETRY_INSTANCE_FORCE_NO_OPAQUE_BIT_KHR),
-                   rad, rad, rad);
-        n++;
-        dynn++;
-    }
+    n = addsmokepuffs(dst, n, dynn);
     if(nscenemodels)
     {
         static bool logged = false;
@@ -2760,6 +2926,7 @@ void hwrtsyncdynents()
     if(!hwrtdev.ok() || !hwrtdev.rayquery) return;
     hwrtreaptexupload(false);
     if(!bulletc) buildbulletblas();
+    if(!smokeboxc.addr) buildsmokeboxblas();
     syncmodels(true);
     if(allowskinprune && skinsunderpressure() && cachehasunused(true))
     {
@@ -2841,6 +3008,7 @@ void hwrtrebuilddynents()
         hwrtpreloadmodel("projectiles/grenade");
         hwrtpreloadmodel("projectiles/rocket");
         buildbulletblas();
+        buildsmokeboxblas();
         hwrtpreloadplayermodels();
     }
     syncmodels(true);

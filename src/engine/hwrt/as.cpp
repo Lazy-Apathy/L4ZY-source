@@ -537,6 +537,51 @@ static bool createimg(hwrttexarray &t, int w, int h, int layers, int miplevels)
     return true;
 }
 
+// glGetTexImage returns the stored channels and ignores the texture swizzle:
+// a one- or two-channel image (GL_RED / GL_RG, set up as luminance or
+// luminance-alpha by setuptexparameters) comes back as (L, 0, 0, 1) or
+// (L, A, 0, 1). Apply the texture's own swizzle to the RGBA8 copy so it holds
+// what the raster shaders sample. The texture must be bound to target. An
+// identity swizzle (every RGB/RGBA texture, and "noswizzle" ones) returns at
+// once without touching the pixels; this only runs on load / rebuild paths.
+static void applytexswizzle(GLenum target, uchar *buf, size_t npixels)
+{
+    if(!hasTSW || !buf || !npixels) return;
+    GLint swz[4] = { GL_RED, GL_GREEN, GL_BLUE, GL_ALPHA };
+    while(glGetError() != GL_NO_ERROR);
+    glGetTexParameteriv(target, GL_TEXTURE_SWIZZLE_RGBA, swz);
+    if(glGetError() != GL_NO_ERROR) return;
+    // Source index per output channel: 0..3 = R G B A, 4 = zero, 5 = one.
+    int sel[4];
+    bool identity = true;
+    loopi(4)
+    {
+        switch(swz[i])
+        {
+            case GL_RED: sel[i] = 0; break;
+            case GL_GREEN: sel[i] = 1; break;
+            case GL_BLUE: sel[i] = 2; break;
+            case GL_ALPHA: sel[i] = 3; break;
+            case GL_ZERO: sel[i] = 4; break;
+            case GL_ONE: sel[i] = 5; break;
+            default: sel[i] = i; break;
+        }
+        if(sel[i] != i) identity = false;
+    }
+    if(identity) return;
+    uchar src[6];
+    src[4] = 0;
+    src[5] = 255;
+    for(size_t p = 0; p < npixels; p++, buf += 4)
+    {
+        src[0] = buf[0]; src[1] = buf[1]; src[2] = buf[2]; src[3] = buf[3];
+        buf[0] = src[sel[0]];
+        buf[1] = src[sel[1]];
+        buf[2] = src[sel[2]];
+        buf[3] = src[sel[3]];
+    }
+}
+
 // Pulls a set of GL textures back with glGetTexImage and stacks them into one
 // R8G8B8A8 2D array. The copy happens on the caller's command buffer and waits
 // for the device, so it belongs on a rebuild / first-use path, never in a frame.
@@ -726,6 +771,7 @@ bool hwrtuploadtexarray(VkCommandBuffer cmd, const vector<GLuint> &ids, int maxd
                 while(glGetError() != GL_NO_ERROR);
                 glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, tmp);
                 ok = glGetError() == GL_NO_ERROR;
+                if(ok) applytexswizzle(GL_TEXTURE_2D, tmp, size_t(w)*size_t(h));
                 if(ok && chain)
                 {
                     // A texture larger than the array (cap) is first shrunk
@@ -1017,6 +1063,7 @@ bool hwrtuploadtexlayers(const vector<GLuint> &ids, int first, int maxdim, int c
             while(glGetError() != GL_NO_ERROR);
             glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, target);
             ok = glGetError() == GL_NO_ERROR;
+            if(ok) applytexswizzle(GL_TEXTURE_2D, target, size_t(w)*size_t(h));
             if(ok && !direct) blitstretch(target, w, h, dst, maxw, maxh);
         }
         if(!ok)
@@ -1252,6 +1299,7 @@ bool hwrtuploadcubemapcap(VkCommandBuffer cmd, GLuint gltex, hwrttexarray &out, 
                 while(glGetError() != GL_NO_ERROR);
                 glGetTexImage(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, GL_RGBA, GL_UNSIGNED_BYTE, tmp);
                 ok = glGetError() == GL_NO_ERROR;
+                if(ok) applytexswizzle(GL_TEXTURE_CUBE_MAP, tmp, size_t(tw)*size_t(tw));
                 if(ok) blitstretch(tmp, tw, tw, dst, w, w);
             }
             if(!ok)
@@ -1419,6 +1467,7 @@ static vec avgtexrgb(GLuint id)
     while(glGetError() != GL_NO_ERROR);
     glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, tmp);
     bool ok = glGetError() == GL_NO_ERROR;
+    if(ok) applytexswizzle(GL_TEXTURE_2D, tmp, size_t(tw)*size_t(th));
     glBindTexture(GL_TEXTURE_2D, prev);
     if(ok)
     {
@@ -1726,6 +1775,7 @@ static uchar *readgltex(GLuint id, int &w, int &h)
     while(glGetError() != GL_NO_ERROR);
     glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, buf);
     if(glGetError() != GL_NO_ERROR) { delete[] buf; return NULL; }
+    applytexswizzle(GL_TEXTURE_2D, buf, size_t(tw)*size_t(th));
     w = tw;
     h = th;
     return buf;

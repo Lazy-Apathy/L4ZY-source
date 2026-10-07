@@ -1,0 +1,299 @@
+{
+ "version": "2026.10.7.1",
+ "channel": "stable",
+ "label": "L4ZY: RT weapon lights, borderless resolution, mouse and HUD fixes",
+ "notes": "RT weapon lights and projectile colours, smoke shadows, borderless at any resolution, mouse and HUD fixes, clan server demos",
+ "starter_model": "",
+ "features": {
+  "service_port_env": true
+ },
+ "base": {
+  "game_exe": "src/ compile par distrib/tools/build-game.bat",
+  "menus": "data/menus.cfg de l atelier (= L4ZY)",
+  "source": "L4ZY-source@v2026.10.7.1"
+ },
+ "files": [
+  {
+   "dest": "bin64/sauerbraten.exe",
+   "src": "distrib/.cache/game/sauerbraten.exe"
+  },
+  {
+   "dest": "data/glsl.cfg",
+   "src": "data/glsl.cfg",
+   "sha256": "07583f1ebd13bab9cca441be1178d53672e59ddcbee25b7515e0b5148e72d518"
+  },
+  {
+   "dest": "data/menus.cfg",
+   "src": "data/menus.cfg"
+  },
+  {
+   "dest": "bin64/ngx-hdr/sauer_ngx.dll",
+   "src": "bin64/ngx-hdr/sauer_ngx.dll",
+   "sha256": "f4dd701f2da748ddf86da30729d8ff6cc98e82b90b22cc2859bd697e37be9e07"
+  },
+  {
+   "dest": "bin64/ngx-hdr/nvngx_dlss.dll",
+   "src": "bin64/ngx-hdr/nvngx_dlss.dll",
+   "sha256": "3975567b8943c53acce397f2b72380092f84f162d00b0d2c7d08a1025c563983"
+  },
+  {
+   "dest": "bin64/SDL2.dll",
+   "src": "bin64/SDL2.dll",
+   "sha256": "aae1e2c1a5a2a360be4d849a503ced184425913f89b5f5967ac7231281970d0b"
+  },
+  {
+   "dest": "bin64/SDL2_image.dll",
+   "src": "bin64/SDL2_image.dll",
+   "sha256": "1e364af75fee0c83506fbdfd4d5b0e386c4e9c6a33ddbddac61ddb131e360194"
+  },
+  {
+   "dest": "bin64/SDL2_mixer.dll",
+   "src": "bin64/SDL2_mixer.dll",
+   "sha256": "900eeb69b67266946f541bc6da5460e6cb9ed4f92816a1710a84625ad123808c"
+  },
+  {
+   "dest": "bin64/libFLAC-8.dll",
+   "src": "bin64/libFLAC-8.dll",
+   "sha256": "d0733bf2e0980904e7d80faba790cb3a61b5f4032b4d4edc0928092534c57641"
+  },
+  {
+   "dest": "bin64/libjpeg-9.dll",
+   "src": "bin64/libjpeg-9.dll",
+   "sha256": "3a224af540c96574800f5e9acf64b2cdfb9060e727919ec14fbd187a9b5bfe69"
+  },
+  {
+   "dest": "bin64/libmikmod-2.dll",
+   "src": "bin64/libmikmod-2.dll",
+   "sha256": "a605ead59098f773897f0147892330cb8109cdc269e274de7664f365c1a9fc59"
+  },
+  {
+   "dest": "bin64/libmodplug-1.dll",
+   "src": "bin64/libmodplug-1.dll",
+   "sha256": "640bc4c744fb6b03672a9b638dc9bdc68512ef55231be8793d3c938ee8452821"
+  },
+  {
+   "dest": "bin64/libmpg123-0.dll",
+   "src": "bin64/libmpg123-0.dll",
+   "sha256": "f0e36bf80b152b03ccff9709e2a1b634c70eefb3538575228f80cdbeb0504a81"
+  },
+  {
+   "dest": "bin64/libogg-0.dll",
+   "src": "bin64/libogg-0.dll",
+   "sha256": "ea4b1ac5754ecdf7b7dc2c5ebd22456263712cc59526e28746bf5d4d4f987a60"
+  },
+  {
+   "dest": "bin64/libopus-0.dll",
+   "src": "bin64/libopus-0.dll",
+   "sha256": "f689176c1f47253ab53fd10acb36df8c8342d97829fcb17d2782473bfd5faf86"
+  },
+  {
+   "dest": "bin64/libopusfile-0.dll",
+   "src": "bin64/libopusfile-0.dll",
+   "sha256": "40c0585d4c0b8a68f4581af48e28e05de935652d459cce0dd1e34597105e3425"
+  },
+  {
+   "dest": "bin64/libpng16-16.dll",
+   "src": "bin64/libpng16-16.dll",
+   "sha256": "e688b4a4d18f4b6ccc99c6ca4980f51218cb825610775192d9b60b2f05eff2d5"
+  },
+  {
+   "dest": "bin64/libtiff-5.dll",
+   "src": "bin64/libtiff-5.dll",
+   "sha256": "ebfe97ac5ef26b94945af3db5ffd110a4b8e92dc02559bf81ccb33f0d5ebce95"
+  },
+  {
+   "dest": "bin64/libvorbis-0.dll",
+   "src": "bin64/libvorbis-0.dll",
+   "sha256": "6a7d759176cb9b4eb8a7481c553386dc29814887295312d4af6441eab6d62da7"
+  },
+  {
+   "dest": "bin64/libvorbisfile-3.dll",
+   "src": "bin64/libvorbisfile-3.dll",
+   "sha256": "0d785f8282e6c0389fc6bf11d18c1765352f62511346b2f46ae11b741379b6ed"
+  },
+  {
+   "dest": "bin64/libwebp-7.dll",
+   "src": "bin64/libwebp-7.dll",
+   "sha256": "9a53563b6058f70f2725029b7dd2fe96f869c20e8090031cd303e994dfe07b50"
+  },
+  {
+   "dest": "bin64/libwinpthread-1.dll",
+   "src": "bin64/libwinpthread-1.dll",
+   "sha256": "3f31d7f3cd8c84cb6d26386e10c8b0c9cc869cde10a8470e04d0e28ab52218ca"
+  },
+  {
+   "dest": "bin64/smpeg2.dll",
+   "src": "bin64/smpeg2.dll",
+   "sha256": "bfeae02ab21864af7899a80fa3db246f68d1590d57ad2855d643d6641984cd89"
+  },
+  {
+   "dest": "bin64/zlib1.dll",
+   "src": "bin64/zlib1.dll",
+   "sha256": "b1f58a17f3bfd55523e7bef685acf5b32d1c2a6f25abdcd442681266fd26ab08"
+  },
+  {
+   "dest": "bin64/LICENSE.FLAC.txt",
+   "src": "bin64/LICENSE.FLAC.txt",
+   "sha256": "3335ec1badce668895809c158185b1d29299e718a7192ad6c020158b89e7524a"
+  },
+  {
+   "dest": "bin64/LICENSE.jpeg.txt",
+   "src": "bin64/LICENSE.jpeg.txt",
+   "sha256": "25bf843e90ea09448ecf9f8a8bf94ef50b182075a551bf326a51cc05d1b76f76"
+  },
+  {
+   "dest": "bin64/LICENSE.mikmod.txt",
+   "src": "bin64/LICENSE.mikmod.txt",
+   "sha256": "73cb5d1cf8feea2b6ff40152300b84e28a67a9796adc6d1f0bd170efb33c1944"
+  },
+  {
+   "dest": "bin64/LICENSE.modplug.txt",
+   "src": "bin64/LICENSE.modplug.txt",
+   "sha256": "0c68419a8cb5785cc963daac39187534f4d2a4a35807d4986e065f7a5ee85c0e"
+  },
+  {
+   "dest": "bin64/LICENSE.mpg123.txt",
+   "src": "bin64/LICENSE.mpg123.txt",
+   "sha256": "a18d7ae28a3b695e1a3df2970d133495e4899f7d746ad46a4b0d5dd222441456"
+  },
+  {
+   "dest": "bin64/LICENSE.ogg-vorbis.txt",
+   "src": "bin64/LICENSE.ogg-vorbis.txt",
+   "sha256": "a853081d4111fa74a47f75b28bc74c2218d3254292f097c31096f1387ee7865a"
+  },
+  {
+   "dest": "bin64/LICENSE.opus.txt",
+   "src": "bin64/LICENSE.opus.txt",
+   "sha256": "124717414895f2a518600f6a04ef0518ec28693c401966dfa1e66ca27b8e0fe3"
+  },
+  {
+   "dest": "bin64/LICENSE.opusfile.txt",
+   "src": "bin64/LICENSE.opusfile.txt",
+   "sha256": "15c55f8c6a88ef9ee9a18ada9dbb2459bebaaf2527c91159fc23818f275f32b2"
+  },
+  {
+   "dest": "bin64/LICENSE.png.txt",
+   "src": "bin64/LICENSE.png.txt",
+   "sha256": "f40671f236201909a843efc805bded4a04aac79980bab4e62a9655e675c82d4d"
+  },
+  {
+   "dest": "bin64/LICENSE.smpeg.txt",
+   "src": "bin64/LICENSE.smpeg.txt",
+   "sha256": "c10b8eb2263fa584c0d2ebd5665b4506588fb9a336f2436bee647e71d2455903"
+  },
+  {
+   "dest": "bin64/LICENSE.tiff.txt",
+   "src": "bin64/LICENSE.tiff.txt",
+   "sha256": "58e15005ea45d16482a2dc2f5daa47e75bfab250e57f55c68ee057e457004a3d"
+  },
+  {
+   "dest": "bin64/LICENSE.webp.txt",
+   "src": "bin64/LICENSE.webp.txt",
+   "sha256": "234c8f47e6d3ff26271a75f046a29ec132b55e37884307bbf62ea44910af6c46"
+  },
+  {
+   "dest": "bin64/LICENSE.zlib.txt",
+   "src": "bin64/LICENSE.zlib.txt",
+   "sha256": "49a398f1686d02ce6ff23b32a1214c5af2485682c61e6cbe8fb60bd37ad314d3"
+  },
+  {
+   "dest": "bin64/README-SDL.txt",
+   "src": "bin64/README-SDL.txt",
+   "sha256": "f17d8919136f9627468b4dffbd7bddd188ef2aaa8ed21914d2107d1c759e99d7"
+  },
+  {
+   "dest": "bin64/phonon.dll",
+   "src": "bin64/phonon.dll",
+   "sha256": "ca3dbc01dbc24492717011e80f6a51404ca143ae344ca660971d2c983f1e058d"
+  },
+  {
+   "dest": "bin64/nrd/sauer_nrd.dll",
+   "src": "bin64/nrd/sauer_nrd.dll",
+   "sha256": "1d28faf1dd8daf4e8687092572105ea102ffaaa69be4310ab933e58d063fa873"
+  },
+  {
+   "dest": "bin64/nrd/LICENSE-NRD.txt",
+   "src": "bin64/nrd/LICENSE-NRD.txt",
+   "sha256": "85201d19c2dc5041d9a2029e9fda9d78105fe41ce21ce9701d4aa7e56184b6e7"
+  },
+  {
+   "dest": "bin64/fsr/sauer_fsr.dll",
+   "src": "bin64/fsr/sauer_fsr.dll",
+   "sha256": "2eb797aa301b8ddf9ded272bdce5c92f1ca1a59e6c6d77c5a54e2c036517c856"
+  },
+  {
+   "dest": "bin64/fsr/LICENSE-FidelityFX.txt",
+   "src": "bin64/fsr/LICENSE-FidelityFX.txt",
+   "sha256": "c93d509cd69d50698796c9c3274247352736ef122a3197ace2010f0978e21aa6"
+  },
+  {
+   "dest": "autoexec.cfg",
+   "src": "distrib/game/autoexec.cfg"
+  },
+  {
+   "dest": "traduction.cfg",
+   "src": "traduction.cfg"
+  }
+ ],
+ "dirs": [
+  {
+   "dest": "data",
+   "src": "data",
+   "exclude": [
+    "glsl.cfg",
+    "menus.cfg",
+    "*.bak",
+    "*.orig",
+    "*.tmp"
+   ]
+  },
+  {
+   "dest": "packages",
+   "src": "packages",
+   "exclude": [
+    "base/cmterrain.ogz",
+    "base/cmvalley.ogz",
+    "*.bak",
+    "*.tmp"
+   ]
+  }
+ ],
+ "docs": [
+  {
+   "dest": "docs/sauerbraten/config.html",
+   "src": "docs/config.html"
+  },
+  {
+   "dest": "docs/sauerbraten/editing.html",
+   "src": "docs/editing.html"
+  },
+  {
+   "dest": "docs/sauerbraten/editref.html",
+   "src": "docs/editref.html"
+  },
+  {
+   "dest": "docs/sauerbraten/game.html",
+   "src": "docs/game.html"
+  },
+  {
+   "dest": "docs/sauerbraten/history.html",
+   "src": "docs/history.html"
+  },
+  {
+   "dest": "docs/sauerbraten/models.html",
+   "src": "docs/models.html"
+  },
+  {
+   "dest": "docs/sauerbraten/style.css",
+   "src": "docs/style.css"
+  },
+  {
+   "dest": "docs/sauerbraten/cube2logo.png",
+   "src": "docs/cube2logo.png"
+  },
+  {
+   "dest": "docs/sauerbraten/favicon.ico",
+   "src": "docs/favicon.ico"
+  }
+ ]
+}

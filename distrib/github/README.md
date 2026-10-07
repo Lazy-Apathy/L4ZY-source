@@ -114,7 +114,8 @@ L4ZY ships its own `menus.cfg`: a new main menu, and an Options hub with pages f
 | `hwrt` | `0` Classic (no RT), `1` ray tracing | `0` |
 | `hwrtshadowself` | own-body RT shadow: `0` off, `1` sun, `2` + small/glow lights, `3` + nearest lamps, `4` + sky | `1` |
 | `hwrtteleportlight` / `hwrtjumppadlight` | light cast by teleporters / jump pads | `1` / `0` |
-| `hwrtsmokeshadow` | rifle/rocket smoke casts RT shadows | `0` |
+| `hwrtsmokeshadow` | weapon smoke (rifle trail, rockets, grenades, any trail colour) casts soft RT shadows; `hwrtsmokeshadowdensity` sets how dark (10–400, `100`) | `0` |
+| `hwrtdynlights` | muzzle flashes, rockets and grenades in flight and explosions light the scene (*RT Weapon Lights*); custom colours tint the light | `1` |
 | `hwrtsundisk` | hide the skybox and draw a sun disk | `0` |
 | `hwrtreflections` | sharp RT reflections on water and on surfaces the map made reflective (*RT Reflections*) | `1` |
 | `hwrtspecular` | shine of lamps and the sun on glossy surfaces (*RT Specular*) | `1` |
@@ -330,6 +331,7 @@ Ask in plain words how to find or change a setting, and the translation model an
 - **T** or middle click on a frame: its text follows the new size, or keeps its normal size.
 - **Right click** on a frame: back to its original place and size. **Esc** or **Enter** when done.
 - Parts: health/armour/ammo icons, radar, flag timer, flag messages, kill feed, killing spree, match clock, score, ammo bar, spectator block, FPS and clock, console, chat.
+- Parts can be made as big as you like: they always stay on screen.
 - *Put everything back in place* (same page) or `hudlayoutreset` resets them all. The layout is saved in `hudlayout`.
 
 ### CTF: flag timer and flag messages
@@ -393,6 +395,11 @@ Pick the colour of each weapon's trail: for everyone (*All*), and if you want, d
 | `trailbrightness` | brightness of changed colours, in % (25–100) | `100` |
 | `settrailcolor [me\|others\|all] <weapon> <#RRGGBB\|stock\|same>` | set one colour | |
 | `trailcolorreset [me\|others\|all]` | back to the stock colours | |
+| `projcolor<weapon>`, `projmycolor<weapon>`, `projothercolor<weapon>` | rockets and grenades only (`rocketlauncher`, `grenadelauncher`): colour of the projectile glow and of its explosion, for All / Me / Others; `-1` = stock (All) or same as All (Me, Others) | `-1` |
+| `setprojcolor [me\|others\|all] <weapon> <#RRGGBB\|stock\|same>`, `projcolorreset` | set one projectile colour / all back to stock | |
+| `muzzlelight<weapon>` | light cast by that weapon's muzzle flash, for every player (`shotgun`, `chaingun`, `rifle`, `grenadelauncher`, `pistol`); the flash itself always stays | `1` |
+
+With ray tracing, lights follow your colours: a muzzle flash takes the trail colour, a rocket or grenade and its explosion take the projectile colour (never the smoke colour). Projectile colours and the muzzle flash light boxes are on the same pages (Options → HUD).
 
 Idea from p1xbraten; written for L4ZY.
 
@@ -402,6 +409,7 @@ Idea from p1xbraten; written for L4ZY.
 - **Kills-deaths against each player:** `[3-1]` next to a kill feed line is how many times you killed that player and they killed you this match.
 - **React times:** on your own kills and deaths, how long the target had been in view and under your crosshair (`view / crosshair ms`).
   - On your deaths the value is approximate (`~`) unless the killer also runs this client on a compatible server.
+- **Others' react times** (`reacttimeall`, off by default): on a compatible server, frags between two other players also show the killer's own react times, when the killer runs this client with react times on. Spectators too.
 - **Kill streak popups:** display only, no gameplay effect.
 - When you spectate someone or watch a demo, "mine" and "my team" (filter, streaks, kills-deaths, react times) are the player you watch. React times of another player are only shown when their aim is exact (HD demo, compatible server).
 
@@ -411,7 +419,7 @@ Idea from p1xbraten; written for L4ZY.
 |---|---|
 | `killfeed`, `killfeedconsole`, `killfeedfilter` (0 all, 1 team, 2 mine) | `1`, `0`, `0` |
 | `killfeedx`, `killfeedy`, `killfeedscale`, `killfeedalign`, `killfeedfade` (s), `killfeedmax` | `0.02`, `0.40`, `0.5`, `-1`, `5`, `5` |
-| `reacttime` | `1` |
+| `reacttime`, `reacttimeall` (frags between other players) | `1`, `0` |
 | `killfeedvs` (kills-deaths against each player) | `1` |
 | `killstreak`, `killstreakothers`, `killstreaktk`, `killstreakstep` | `1`, `1`, `1`, `5` |
 | `killstreakx`, `killstreaky`, `killstreakscale`, `killstreakalign`, `killstreakfade` (s) | `0.50`, `0.18`, `0.85`, `0`, `3` |
@@ -450,6 +458,9 @@ Idea from p1xbraten; written for L4ZY.
 - Every match you play is saved as a normal `.dmo`, plus a `.dmohd` file with full-precision aim.
 - On playback, the HD aim replaces the 1° steps of vanilla demos and follows the recorder: their team is blue, the other red.
 - A playback bar has −10 s, play/pause, +10 s, a seek slider, 50%/100% speed, and hide.
+- While you watch a player whose exact aim is used (HD demo, or live on a compatible server), a small grey **HD** sits next to their name; nothing is shown otherwise.
+- Live on a compatible server, the exact aim is shown `hdlivedelay` ms late (200 by default, the same for every player) and drawn along smooth curves, so it plays fluid and complete. The rest of the game (other players, shots, sounds, deaths, kill feed, scores) is replayed with the same delay, so you see exactly what the watched player saw; chat and server messages sent on their own are not delayed. The delay applies as soon as you spectate on a server with the clan extras, the same whoever you watch (with or without exact aim, bots) and in free cam; joining the game puts you back on time. Long HD aim files (over 31 MB) come in parts from compatible servers and are joined automatically.
+- On a compatible server, while you record, the server's demo of the match (with the HD aim of every L4ZY player) is downloaded during the map vote and replaces your local one, only if it arrived complete and is the same match. Your own recording is kept for 7 days in `demoeplaced`. One try per match, never retried; if the server demo has no HD aim, your local one is kept.
 
 **Menu:** Options → Recording
 
@@ -457,6 +468,7 @@ Idea from p1xbraten; written for L4ZY.
 |---|---|---|
 | `demohdrecord` / `demohdplay` | record / use the HD aim | `1` / `1` |
 | `demokeep` | demos kept (1–30) | `5` |
+| `hdlivedelay` | live spectating on a compatible server: the HD aim is shown this many ms late, the same for every player, so it plays smooth and complete (0–1000) | `200` |
 | `toggledemorecord`, `toggledemohd` | recording on/off, HD/vanilla aim while watching | |
 | `demorewind [ms]`, `demoforward [ms]` | seek (default 10 s) | |
 | `playlocaldemo <i>`, `localdemoextract <i>` | play a demo, copy it with its `.dmohd` | |
@@ -471,6 +483,7 @@ Idea from p1xbraten; written for L4ZY.
   - All go from 0 to 200 (`100` = normal). `mixreset` puts them all back to 100.
 - **Mouse** (Options → Mouse): `mousedpi` (`800`), `setcm360 <cm>` and `getcm360`, for hipfire cm per 360°.
 - **Window** (Options → Display): `windowmode` `0` windowed, `1` exclusive fullscreen, `2` borderless (default).
+  - `borderlessres` (`0`): in borderless, play at the resolution chosen below it and stretch it over the whole screen; Windows keeps its own resolution. `borderlessaspect` (`0`) keeps the proportions with black bars.
 
 ### Online rules
 
@@ -494,7 +507,26 @@ Idea from p1xbraten; written for L4ZY.
 
 Each release is listed on the [Releases](https://github.com/Lazy-Apathy/L4ZY/releases) page, newest first.
 
-### 2026.10.5.1 (test)
+### 2026.10.7.1 (test)
+
+- Ray tracing: weapon lights redone. Short muzzle flashes sized to each weapon (your gun lights up with them), rockets and grenades light their path in flight, and an explosion's light lasts as long as the explosion itself.
+- New projectile colours for rockets and grenades (glow in flight and explosion), separately for *Me*, *Others* and *All*; with ray tracing, the light follows the projectile colour, and muzzle flashes follow the trail colour (Options → HUD → *Weapon Trails: Colours*).
+- New boxes to turn off the light of each weapon's muzzle flash; the flash itself stays (Options → HUD).
+- Ray tracing: optional soft shadows from weapon smoke, Off by default (Options → Graphics → *Lighting* → *Smoke shadows*).
+- New: borderless at the resolution you choose, stretched over the whole screen or with black bars, without changing the Windows resolution (Options → Display).
+- Fixed: mouse stuck in the middle of the screen in menus after loading a map, in exclusive fullscreen.
+- Fixed: a chat, kill feed, clock or other HUD part made much bigger in the HUD editor could leave the screen; chat messages then only showed in F10. Layouts saved that way are repaired.
+- Fixed: greyscale textures shown red with ray tracing.
+- Fixed: black minimap when loading maps with waterfalls (haste, tejen…).
+- Fixed: a crash while spectating and switching between players.
+- On servers with the clan extras:
+  - spectating: you now watch the game 200 ms in the past, so the player's exact aim plays smooth and complete, with shots and the kill feed in sync;
+  - HD demos record the exact aim twice as often (200 times per second);
+  - if you record your matches, the server's demo (with the exact aim of every L4ZY player, not only yours) is downloaded during the map vote and replaces yours, only when it arrived complete; yours is kept for 7 days;
+  - optional: see the react times of frags between other players (Options → HUD → *Kill Feed*, off by default).
+- Settings: an unreadable config is never overwritten, a backup `config.cfg.bak` is kept, and *Import settings* is safer and easier to find (top of Options).
+
+### 2026.10.5.1 (stable)
 
 - Ray tracing: lighting is now smooth across faceted floors, slopes and rocks, like classic lighting (Options → Graphics → *RT Normals*, On by default).
 - Ray tracing in edit mode: new or removed geometry and texture changes now show up in the ray-traced lighting, shortly after you stop editing (no cost outside edit mode).

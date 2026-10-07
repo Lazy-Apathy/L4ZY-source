@@ -234,6 +234,11 @@ namespace server
         int connectauth;
         bool clanmodok, clanmodlocked;
         int clanmodhello;
+        // HD aim: server time of a sample = client t + hdoff (see N_HDPOS)
+        int hdoff, hdlastct, hdlastst;
+        bool hdtimed;
+        int fragrtalldeath; // lastdeath already relayed with l4zy/fragrtall
+        bool hdchunks;      // announced HDCHUNKS_CMD: can join a .dmohd sent in parts
         uint authreq;
         string authname, authdesc;
         void *authchallenge;
@@ -298,6 +303,9 @@ namespace server
             overflow = 0;
             timesync = false;
             lastevent = 0;
+            hdoff = hdlastct = hdlastst = 0;
+            hdtimed = false;
+            fragrtalldeath = -1;
             exceeded = 0;
             pushed = 0;
             clientmap[0] = '\0';
@@ -349,6 +357,7 @@ namespace server
             cleanauth();
             clanmodok = clanmodlocked = false;
             clanmodhello = 0;
+            hdchunks = false;
             mapchange();
         }
 
@@ -624,8 +633,21 @@ namespace server
     };
     static vector<hdmuxsample> hdmux;
     static int hdlastt[256];
-    #define HD_MUX_MAX (16<<20)
-    #define HD_MUX_MINDT 10
+    // ENet refuses packets over 32 MB: up to HD_SEND_ONE the .dmohd goes out in
+    // one N_SENDDEMOHD, above it in HD_SEND_PART parts to clients that announced
+    // HDCHUNKS_CMD, and cut to the first HD_SEND_ONE bytes for the others.
+    #ifndef HD_MUX_MAX
+    #define HD_MUX_MAX (64<<20)
+    #endif
+    #ifndef HD_SEND_ONE
+    #define HD_SEND_ONE (31<<20)
+    #endif
+    #ifndef HD_SEND_PART
+    #define HD_SEND_PART (16<<20)
+    #endif
+    #define HD_MUX_HEADER 220
+    #define HD_MUX_SAMPLE 32
+    #define HD_MUX_MINDT 5
 
     template<class T>
     static void hdput(vector<uchar> &o, T n)
@@ -650,10 +672,15 @@ namespace server
         hdmux.add(s);
     }
 
+    static bool hdmuxless(const hdmuxsample &a, const hdmuxsample &b) { return a.t < b.t; }
+
     static void hdmuxbuild(vector<uchar> &out)
     {
         out.setsize(0);
         if(hdmux.empty()) return;
+        // each packet is stamped back over its own samples: players interleave
+        // a little, playback wants one time-ordered list (stable, nearly sorted)
+        insertionsort(hdmux.getbuf(), hdmux.length(), hdmuxless);
         uchar seen[256];
         memset(seen, 0, sizeof(seen));
         int ntracks = 0, rec = -1;
@@ -992,7 +1019,8 @@ namespace server
         if(!ci) return false;
         if(!ci->local && !ci->state.canpickup(sents[i].type))
         {
-            sendf(sender, 1, "ri3", N_ITEMACC, i, -1);
+            // a bot has no connection of its own: answer its owner
+            sendf(ci->ownernum, 1, "ri3", N_ITEMACC, i, -1);
             return false;
         }
         sents[i].spawned = false;
@@ -1289,7 +1317,24 @@ namespace server
         if((ci->getdemo = sendf(ci->clientnum, 2, "riim", N_SENDDEMO, tag, d.len, d.data)))
             ci->getdemo->freeCallback = freegetdemo;
         if(ci->clanmodok && d.hddata && d.hdlen > 0)
-            sendf(ci->clientnum, 2, "riim", N_SENDDEMOHD, tag, d.hdlen, d.hddata);
+        {
+            if(d.hdlen <= HD_SEND_ONE) sendf(ci->clientnum, 2, "riim", N_SENDDEMOHD, tag, d.hdlen, d.hddata);
+            else if(ci->hdchunks)
+            {
+                int parts = (d.hdlen + HD_SEND_PART - 1)/HD_SEND_PART;
+                defformatstring(hdr, "%s %d %d %d", HDCHUNKS_CMD, tag, d.hdlen, parts);
+                sendf(ci->clientnum, 2, "ris", N_SERVCMD, hdr);
+                for(int off = 0; off < d.hdlen; off += HD_SEND_PART)
+                    sendf(ci->clientnum, 2, "riim", N_SENDDEMOHD, tag, min(HD_SEND_PART, d.hdlen - off), d.hddata + off);
+            }
+            else
+            {
+                // older client: whole samples only, the header still counts every track
+                int cut = HD_MUX_HEADER + ((HD_SEND_ONE - HD_MUX_HEADER)/HD_MUX_SAMPLE)*HD_MUX_SAMPLE;
+                sendf(ci->clientnum, 2, "riim", N_SENDDEMOHD, tag, cut, d.hddata);
+                sendf(ci->clientnum, 1, "ris", N_SERVMSG, "this demo's HD aim is too long for your client: only its beginning was sent (update L4ZY)");
+            }
+        }
     }
 
     void enddemoplayback()
@@ -3956,16 +4001,37 @@ namespace server
                         fovms = clamp(fovms, 0, 60000);
                         xhms = clamp(xhms, 0, 60000);
                         clientinfo *vic = getinfo(vcn);
-                        if(vic && vic->connected && vic->clanmodok && vic->clientnum != sender
+                        if(vic && vic->connected && vic->clientnum != sender
                            && vic->state.aitype == AI_NONE
                            && vic->state.lastkiller == sender
                            && gamemillis - vic->state.lastdeath >= 0
                            && gamemillis - vic->state.lastdeath <= 2500)
                         {
-                            defformatstring(out, "%s %d %d %d", FRAGRT_CMD, sender, fovms, xhms);
-                            sendf(vic->clientnum, 1, "ris", N_SERVCMD, out);
+                            if(vic->clanmodok)
+                            {
+                                defformatstring(out, "%s %d %d %d", FRAGRT_CMD, sender, fovms, xhms);
+                                sendf(vic->clientnum, 1, "ris", N_SERVCMD, out);
+                            }
+                            // everyone else with this client, players and spectators, once per death
+                            if(vic->fragrtalldeath != vic->state.lastdeath)
+                            {
+                                vic->fragrtalldeath = vic->state.lastdeath;
+                                defformatstring(all, "%s %d %d %d %d", FRAGRTALL_CMD, sender, vic->clientnum, fovms, xhms);
+                                loopv(clients)
+                                {
+                                    clientinfo *e = clients[i];
+                                    if(!e->connected || !e->clanmodok || e->state.aitype != AI_NONE) continue;
+                                    if(e->clientnum == sender || e->clientnum == vic->clientnum) continue;
+                                    sendf(e->clientnum, 1, "ris", N_SERVCMD, all);
+                                }
+                            }
                         }
                     }
+                    break;
+                }
+                if(ci && ci->connected && ci->state.aitype == AI_NONE && !strcmp(text, HDCHUNKS_CMD))
+                {
+                    ci->hdchunks = true;
                     break;
                 }
                 if(ci && ci->connected && ci->state.aitype == AI_NONE && !strcmp(text, CLANMOD_ACK))
@@ -3988,41 +4054,74 @@ namespace server
                 int n = getint(p);
                 if(n < 1 || n > 32) { disconnect_client(sender, DISC_MSGERR); return; }
                 bool take = ci && ci->connected && ci->clanmodok && ci->state.aitype == AI_NONE && ci->state.state != CS_SPECTATOR;
-                packetbuf q(MAXTRANS, 0);
-                if(take)
-                {
-                    putint(q, N_HDPOS);
-                    putint(q, n);
-                }
+                hdmuxsample in[32];
+                int ct[32], fl[32], gn[32], st[32];
                 loopi(n)
                 {
                     int cn = getint(p), t = getint(p), flags = getint(p), gun = getint(p), state = getint(p);
                     float yaw = getfloat(p), pitch = getfloat(p), roll = getfloat(p);
                     float x = getfloat(p), y = getfloat(p), z = getfloat(p);
                     if(p.overread()) { disconnect_client(sender, DISC_MSGERR); return; }
-                    if(!take) continue;
-                    cn = sender;
-                    t = gamemillis;
-                    hdmuxsample s;
-                    s.t = t;
-                    s.cn = cn;
+                    (void)cn;
+                    hdmuxsample &s = in[i];
+                    ct[i] = t; fl[i] = flags; gn[i] = gun; st[i] = state;
+                    s.t = gamemillis;
+                    s.cn = sender;
                     s.flags = uchar(flags);
                     s.gun = uchar(gun);
                     s.state = uchar(state);
                     s.yaw = yaw; s.pitch = pitch; s.roll = roll;
                     s.x = x; s.y = y; s.z = z;
-                    hdmuxadd(s);
-                    putint(q, cn);
-                    putint(q, t);
-                    putint(q, flags);
-                    putint(q, gun);
-                    putint(q, state);
-                    putfloat(q, yaw);
-                    putfloat(q, pitch);
-                    putfloat(q, roll);
-                    putfloat(q, x);
-                    putfloat(q, y);
-                    putfloat(q, z);
+                }
+                if(take)
+                {
+                    // server time = client sample time + offset. The offset follows
+                    // the smallest delay seen (newest sample vs gamemillis), +1 ms per
+                    // packet for clock drift, and restarts on a jump of over 1 s
+                    // (new map, pause, client restart). Samples keep their spacing.
+                    // Out of order or spread samples: server time only, as before.
+                    bool ordered = true;
+                    loopi(n) if(i && (ct[i] < ct[i-1] || (long long)ct[i] - ct[i-1] > 1000)) ordered = false;
+                    if(!ordered) ci->hdtimed = false;
+                    else
+                    {
+                        long long jump = (long long)ct[0] - ci->hdlastct;
+                        int delay = int(clamp((long long)gamemillis - ct[n-1], (long long)INT_MIN/2, (long long)INT_MAX/2));
+                        bool restart = !ci->hdtimed || jump < 0 || jump > 1000;
+                        if(restart) { ci->hdoff = delay; ci->hdlastst = INT_MIN; }
+                        else ci->hdoff = min(ci->hdoff + 1, delay);
+                        ci->hdtimed = true;
+                        ci->hdlastct = ct[n-1];
+                        loopi(n)
+                        {
+                            int t = int(min((long long)ct[i] + ci->hdoff, (long long)gamemillis));
+                            if(ci->hdlastst != INT_MIN && t <= ci->hdlastst) t = ci->hdlastst + 1;
+                            ci->hdlastst = t;
+                            in[i].t = t;
+                        }
+                    }
+                }
+                packetbuf q(MAXTRANS, 0);
+                if(take)
+                {
+                    putint(q, N_HDPOS);
+                    putint(q, n);
+                    loopi(n)
+                    {
+                        const hdmuxsample &s = in[i];
+                        hdmuxadd(s);
+                        putint(q, s.cn);
+                        putint(q, s.t);
+                        putint(q, fl[i]);
+                        putint(q, gn[i]);
+                        putint(q, st[i]);
+                        putfloat(q, s.yaw);
+                        putfloat(q, s.pitch);
+                        putfloat(q, s.roll);
+                        putfloat(q, s.x);
+                        putfloat(q, s.y);
+                        putfloat(q, s.z);
+                    }
                 }
                 if(take)
                 {

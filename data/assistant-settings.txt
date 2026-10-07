@@ -15,6 +15,7 @@ teamcolorenemy: colour of every enemy's body, bots included (replaces red in tea
 friendsfollowteamcolor: 1 = friends' bodies take the teammate / enemy colour instead of the friend colours (names keep them)
 customplayermodel: 1 = use my own model from packages/models/custom in my profile (no colour skin on it; the picked model if the folder is empty)
 clantag: my clan tag, used to recognise clan mates as friends (text)
+friendaddname: -
 playermodel: my player model. 0 Mr Fixit, 1 Snout X10K, 2 Ogro, 3 Inky, 4 Captain Cannon
 forceplayermodels: 1 = everyone is shown with my player model
 teamskins: 1 = always use blue (my team) / red (others) skins, even outside team games
@@ -44,6 +45,12 @@ trailothercolorrocketlauncher: colour of the rocket trails of EVERY OTHER player
 trailothercolorgrenadelauncher: colour of the grenade trails of EVERY OTHER player and bot (any team, no team distinction) as a hex RGB value; -1 = same as All (trailcolorgrenadelauncher). Also: settrailcolor others GL "#RRGGBB" / same
 trailothercolorpistol: colour of the pistol trails of EVERY OTHER player and bot (any team, no team distinction) as a hex RGB value; -1 = same as All (trailcolorpistol). Also: settrailcolor others PI "#RRGGBB" / same
 trailbrightness: brightness of the custom trail colours in percent (25 to 100); stock colours are never changed
+projcolorrocketlauncher: All - projectile and explosion colour of rockets for every shot unless Me / Others has its own (separate from the smoke trail): a glow of that colour on the rocket in flight and a recoloured explosion; with RT the rocket's and explosion's light take it. Hex RGB value, -1 = stock look (orange explosion). Also: setprojcolor RL "#RRGGBB", setprojcolor RL stock
+projcolorgrenadelauncher: All - projectile and explosion colour of grenades for every shot unless Me / Others has its own (separate from the smoke trail); with RT their light takes it. Hex RGB value, -1 = stock look (cyan explosion). Also: setprojcolor GL "#RRGGBB", setprojcolor GL stock
+projmycolorrocketlauncher: projectile and explosion colour of MY rockets as a hex RGB value; -1 = same as All (projcolorrocketlauncher). Also: setprojcolor me RL "#RRGGBB" / same
+projmycolorgrenadelauncher: projectile and explosion colour of MY grenades as a hex RGB value; -1 = same as All (projcolorgrenadelauncher). Also: setprojcolor me GL "#RRGGBB" / same
+projothercolorrocketlauncher: projectile and explosion colour of the rockets of EVERY OTHER player and bot (any team) as a hex RGB value; -1 = same as All (projcolorrocketlauncher). Also: setprojcolor others RL "#RRGGBB" / same
+projothercolorgrenadelauncher: projectile and explosion colour of the grenades of EVERY OTHER player and bot (any team) as a hex RGB value; -1 = same as All (projcolorgrenadelauncher). Also: setprojcolor others GL "#RRGGBB" / same; projcolorreset = all projectile colours back to stock
 
 # --- crosshair ---
 crosshairsize: size of the crosshair, 0 = hidden
@@ -62,6 +69,11 @@ teamhudguns: first person weapon in team colour
 chainsawhudgun: show the chainsaw in first person
 muzzleflash: flash at the gun barrel when shooting
 muzzlelight: light at the gun barrel when shooting
+muzzlelightshotgun: light of the shotgun muzzle flash on walls, floor, players and the gun, for every player (me and the others), classic lighting and ray tracing: 1 on (default), 0 off (the flash sprite at the barrel stays)
+muzzlelightchaingun: light of the chaingun muzzle flash on walls, floor, players and the gun, for every player (me and the others), classic lighting and ray tracing: 1 on (default), 0 off (the flash sprite at the barrel stays)
+muzzlelightrifle: light of the rifle muzzle flash on walls, floor, players and the gun, for every player (me and the others), classic lighting and ray tracing: 1 on (default), 0 off (the flash sprite at the barrel stays)
+muzzlelightgrenadelauncher: light of the grenade launcher muzzle flash on walls, floor, players and the gun, for every player (me and the others), classic lighting and ray tracing: 1 on (default), 0 off (the flash sprite at the barrel stays)
+muzzlelightpistol: light of the pistol muzzle flash on walls, floor, players and the gun, for every player (me and the others), classic lighting and ray tracing: 1 on (default), 0 off (the flash sprite at the barrel stays)
 healthcolors: health number changes colour when low
 ammohud: ammo icons on the HUD
 statusicons: health/armour/ammo icons at the bottom of the screen
@@ -128,6 +140,7 @@ killfeedscale: size of the kill feed
 killfeedfade: seconds before a kill feed line fades
 killfeedmax: number of lines in the kill feed
 reacttime: reaction times (view / crosshair, in ms) on my kills and deaths in the kill feed
+reacttimeall: also the reaction times of frags between other players, measured by their killer (compatible server, killer with reacttime on). 0 off (default), 1 on
 killfeedvs: kills-deaths against each player, next to their name in the kill feed
 # killstreak
 killstreak: announce my killing sprees on screen (display only)
@@ -193,6 +206,9 @@ mixmove: loudness of footsteps, jumps and landings. 100 normal, 0 mute, 200 doub
 mixworld: loudness of map sounds (ambience). 100 normal, 0 mute, 200 double
 minimizedsounds: keep playing sounds when the game is minimized
 maxsoundsatonce: how many copies of the same sound can play at once
+soundchans: how many sounds can play at the same time. 1 to 128, default 32. Applied when the sound restarts
+soundfreq: sound mixing frequency in Hz: 11025, 22050 (default) or 44100. 3D sound sets it to 44100. Applied when the sound restarts
+soundbufferlen: sound buffer length: bigger if the sound crackles or stutters, smaller for less delay. 128 to 4096, default 1024. Applied when the sound restarts
 mumble: Mumble positional audio (voice chat comes from the player's position)
 son3d: 3D sound (Steam Audio). 0 off (usual left/right sound), 1 headphones: HRTF, ahead/behind and above/below can be heard (sets the sound frequency to 44100 Hz), 2 speakers: usual left/right sound plus occlusion. Own sounds, menus, announcements and music never change
 son3docclusion: with 3D sound on (headphones or speakers), walls between me and a sound muffle it (never muted)
@@ -219,6 +235,13 @@ lowlatency: low latency mode, the mouse is read once the GPU catches up. 0 off, 
 vsynctear: allow tearing when the frame rate drops below the refresh rate
 maxfps: frame rate limit (0 = none)
 windowmode: 0 windowed, 1 exclusive fullscreen, 2 borderless fullscreen
+scr_w: width of the game resolution in pixels, set with scr_h by the Display > Resolution buttons (applied at once in windowed or exclusive fullscreen, and in borderless fullscreen when borderlessres is 1; otherwise borderless uses the monitor size). Typed alone, applied after restarting the game (at once in borderless with borderlessres 1)
+scr_h: height of the game resolution in pixels, set with scr_w by the Display > Resolution buttons (applied at once in windowed or exclusive fullscreen, and in borderless fullscreen when borderlessres is 1; otherwise borderless uses the monitor size). Typed alone, applied after restarting the game (at once in borderless with borderlessres 1)
+borderlessres: borderless fullscreen at a chosen resolution. 0 = monitor size (default), 1 = the game renders at the Display > Resolution size (scr_w x scr_h) and the picture is stretched over the whole screen, like a stretched exclusive fullscreen, without changing the Windows resolution. Works with DLSS, FSR, native, ray tracing and HDR. Not with Full-Scene Anti-Aliasing above 0 (the Display menu then hides the box and says so)
+borderlessaspect: with borderlessres 1, 1 = keep the proportions of the chosen resolution (black bars), 0 = stretch over the whole screen (default)
+fsaa: full-scene anti-aliasing (multisampling): -1 driver default (default), 0 off, 2, 4, 8 or 16 samples. Applied after restarting the game
+depthbits: precision of the depth buffer in bits: 0 automatic, 24 bits (default), 16, 24 or 32. Applied after restarting the game
+gui2d: 1 = menus drawn flat on the screen (default), 0 = menus floating in the 3D world
 hdroutpref: display output. -1 automatic (HDR if Windows HDR is on), 0 SDR (default), 1 native HDR
 hdroutref: HDR paper white: brightness of normal white in HDR, in nits
 hdroutmax: HDR peak brightness in nits (0 = what the screen reports)
@@ -230,11 +253,14 @@ hwrtnrd: denoiser for ray traced lighting
 hwrtreflections: sharp ray traced reflections on water and reflective surfaces (ray tracing). 1 on, 0 off
 hwrtspecular: shine of lamps and sun on glossy surfaces (ray tracing). 1 on, 0 off
 hwrtdiffupscale: how small wall and floor textures are enlarged with ray tracing (blocky, shimmering steps up close otherwise). 2 bicubic (default), 3 Lanczos (a little sharper, slower map load), 0 nearest (old blocky look), 1 bilinear (softer)
+hwrtdiffmipbias: detail of distant wall and floor textures with ray tracing (Graphics > RT Textures > Distance detail). 0 Stable (default, less shimmer in motion with DLAA/DLSS), -0.5 Sharper (a little more detail far away, more shimmer)
 hwrtsmoothnormals: smooth lighting across faceted floors, slopes and rocks with ray tracing, like classic lighting (no light steps between faces). 1 on (default), 0 off (flat faces, the old RT look)
+hwrtdynlights: muzzle flashes, rockets and grenades in flight and explosions light the walls, floor, players and my gun with ray tracing (custom colours tint the light: the trail colour for muzzle flashes, the projectile colour for rockets, grenades and their explosions). 1 on (default), 0 off (as before: these lights do not light the RT image)
 hwrtshadowself: which lights cast my own shadow with ray tracing. 0 none, 1 the sun, 2 + small lights, 3 + nearest lamps, 4 + sky
 hwrtteleportlight: teleporters glow and light the room (ray tracing)
 hwrtjumppadlight: jump pads glow and light the room (ray tracing)
-hwrtsmokeshadow: smoke casts shadows (ray tracing)
+hwrtsmokeshadow: weapon smoke (rifle trail, rockets, grenades, any trail colour) casts soft shadows from the sun, lamps and sky with ray tracing. 1 on, 0 off (no smoke shadow)
+hwrtsmokeshadowdensity: how dark weapon smoke shadows are, percent (ray tracing). 100 default, 10 to 400
 hwrtsundisk: draw the sun disk in the sky
 hwrtskytemporal: smooths sky light over several frames (higher = smoother, slower to react)
 hwrtworldgain: -
@@ -256,7 +282,7 @@ dlaa: -
 dlss: -
 dlssquality: -
 gtao: ambient occlusion in classic lighting (darkens corners, wall bases and contacts with props, only the ambient and sky part of the light; never players, guns, water or effects). 0 off, 1 low (small, close occlusion), 2 high (wider). Not used with ray tracing
-lookao: soft shadows in creases and corners (ambient occlusion)
+lookao: old "Creases" soft shadows in corners, classic lighting only and only when Ambient Occlusion (gtao) is off; no longer in the menus, never applied with ray tracing. Prefer gtao (Graphics > Lighting > Ambient Occlusion)
 lookaoscale: strength of that ambient occlusion
 lookaoradius: size of that ambient occlusion
 looktaa: temporal anti-aliasing (smoother edges, a bit blurry)
@@ -267,6 +293,17 @@ skyboxglare: glare from the sky
 aniso: anisotropic filtering (sharper textures at an angle): 0 off, 2, 4, 8, 16
 bilinear: bilinear texture filtering
 trilinear: trilinear texture filtering (mipmaps)
+caustics: moving light patterns on the floor under water. 1 on (default), 0 off
+shadowmap: soft shadows cast by players and models on the floor and walls. 0 off (default), 1 on. When off, blob shadows can be used instead
+shadowmapsize: quality of the soft shadows: 9 medium (default), 10 high (7 to 11)
+blobs: round dark shadow under players and items (used when soft shadows are off). 1 on (default), 0 off
+glare: glow around bright lights. 0 off (default), 1 on; the Subtle / Glowy / Soft / Intense buttons set its blur and strength
+depthfx: soft particles: smoke and explosions fade where they touch walls and floor instead of cutting into them. 1 on (default), 0 off
+depthfxsize: quality of the soft particles: 7 low (default), 10 medium, 12 high
+glassenv: reflections on glass. 1 on (default), 0 off
+decals: bullet holes, scorch marks and blood splats on walls and floor. 1 on (default), 0 off; Quick Fade / Slow Fade (decalfade) choose how long they stay
+envmapmodels: shiny environment reflections on models (weapons, items). 1 on (default), 0 off
+bumpmodels: bump mapping (surface relief) on models. 1 on (default), 0 off
 texreduce: lowers texture quality (0 = full)
 maxtexsize: -
 reducefilter: -
@@ -322,6 +359,11 @@ translatetimeout: -
 texampledir: -
 texamplekind: -
 texamplelang: -
+tmodelurl: -
+tmodelkey: -
+tmodelapimodel: -
+texamplesrc: -
+texampledst: -
 
 # --- recording, demos ---
 matchrecord: record a video of each match automatically
@@ -329,6 +371,7 @@ matchkeep: how many match videos to keep (oldest deleted)
 matchrecquality: video quality. 1 720p light, 2 720p normal, 3 720p high, 4 1080p, 5 1080p high
 demohdrecord: record HD demos (exact aim) along with normal demos
 demohdplay: play HD demos with exact aim when available
+hdlivedelay: when spectating live on a compatible server, how far in the past (ms) the exact HD aim is shown, so it plays smooth and complete; same delay for every player. Default 200, 0 to 1000
 demokeep: how many demos to keep (oldest deleted)
 screenshotformat: screenshot format. 0 BMP, 1 TGA, 2 PNG, 3 JPG
 screenshotquality: JPG screenshot quality

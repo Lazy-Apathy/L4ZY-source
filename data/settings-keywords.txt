@@ -79,7 +79,7 @@
 =frag: frags killfeed
 =frags: frags killfeed
 =serie: streak killstreak
-=reaction: react reacttime
+=reaction: react reacttime reacttimeall
 =demo: demo record
 =demos: demo record demokeep
 =enregistrer: record recording
@@ -169,8 +169,19 @@ trailothercolorrocketlauncher: trainee couleur autres adversaire ennemi allie jo
 trailothercolorgrenadelauncher: trainee couleur autres adversaire ennemi allie joueurs bots grenade lance-grenades fumee
 trailothercolorpistol: trainee couleur autres adversaire ennemi allie joueurs bots pistolet
 trailbrightness: trainee luminosite intensite couleur
+projcolorrocketlauncher: projectile roquette lance-roquettes explosion boule de feu couleur lueur lumiere tous tout le monde
+projcolorgrenadelauncher: projectile grenade lance-grenades explosion boule de feu couleur lueur lumiere tous tout le monde
+projmycolorrocketlauncher: projectile roquette lance-roquettes explosion couleur moi mes tirs perso lueur
+projmycolorgrenadelauncher: projectile grenade lance-grenades explosion couleur moi mes tirs perso lueur
+projothercolorrocketlauncher: projectile roquette lance-roquettes explosion couleur autres adversaire ennemi joueurs bots lueur
+projothercolorgrenadelauncher: projectile grenade lance-grenades explosion couleur autres adversaire ennemi joueurs bots lueur
 muzzleflash: flash tir
 muzzlelight: lumiere tir
+muzzlelightshotgun: lumiere flash canon tir eclairage mur sol arme desactiver couper fusil a pompe shotgun
+muzzlelightchaingun: lumiere flash canon tir eclairage mur sol arme desactiver couper mitrailleuse chaingun
+muzzlelightrifle: lumiere flash canon tir eclairage mur sol arme desactiver couper fusil rifle
+muzzlelightgrenadelauncher: lumiere flash canon tir eclairage mur sol arme desactiver couper grenade lance-grenades
+muzzlelightpistol: lumiere flash canon tir eclairage mur sol arme desactiver couper pistolet
 showfps: images par seconde compteur
 fov: champ de vision angle
 vsync: synchronisation verticale dechirement
@@ -182,6 +193,7 @@ ragdoll: cadavre physique corps
 hidedead: cacher morts corps
 killfeed: morts liste frags qui a tue
 reacttime: temps de reaction ms
+reacttimeall: temps de reaction des autres joueurs frags autres ms
 killfeedvs: compteur duel contre tue morte
 showvs: compteur duel contre tue morte
 showlang: langues langue
@@ -201,7 +213,11 @@ hwrtfsrsharpness: fsr nettete sharpening rcas
 hwrtreflections: reflets eau miroir reflexion rt
 hwrtspecular: brillance speculaire reflet lampe soleil rt
 hwrtdiffupscale: textures lissage agrandissement bicubique lanczos pixels blocs escalier scintillement nettete rt
+hwrtdiffmipbias: detail distance lointain textures stable net sharper scintillement fourmillement aliasing crenelage dlaa dlss rt
 hwrtsmoothnormals: normales lissees lissage eclairage facettes marches relief sol mur roche pente sable rt
+hwrtdynlights: lumieres tir flash canon bouche roquette grenade explosion eclairage dynamique arme couleur traine rt
+hwrtsmokeshadow: ombre fumee traine fusil roquette grenade soleil rt
+hwrtsmokeshadowdensity: ombre fumee densite force rt
 looktaa: anticrenelage temporel taa
 gtao: occlusion ambiante ao gtao ssao coins recoins relief ombres contact
 lookao: ombres occlusion ssao
@@ -210,8 +226,148 @@ invmouse: inverser souris
 consize: console lignes taille
 miniconfilter: chat console
 demokeep: demos garder nombre
+hdlivedelay: retard spectateur direct visee hd fluide
 matchkeep: videos garder nombre
 flagtimer: drapeau chrono compteur temps ctf porteur
 =deplacer: move hudedit
 =disposition: hudedit layout
 flagfeed: drapeau message annonce vol marque capture ctf gros
+# juste apres la derniere ligne actuelle "flagfeed: ...". Les sous-titres "# --- ..." sont a garder (le jeu les ignore).
+# --- display ---
+fsaa: anticrenelage antialiasing multisampling msaa crenelage escaliers bords
+depthbits: profondeur zbuffer precision
+aniso: anisotrope filtrage textures nettete loin
+bilinear: filtrage bilineaire textures lisse
+trilinear: filtrage trilineaire mipmaps textures
+gui2d: menus 2d plat interface
+guiclicktab: onglet clic menus
+guifadein: fondu apparition menus
+scr_w: resolution largeur ecran taille pixels
+scr_h: resolution hauteur ecran taille pixels
+borderlessres: resolution etiree stretched stretch plein ecran fenetre sans bordure borderless 4:3 resolution choisie
+borderlessaspect: proportions bandes noires black bars aspect ratio etirer letterbox
+# --- graphics ---
+hdroutref: blanc reference nits luminosite hdr
+hdroutmax: pic luminosite crete nits hdr manuel automatique
+hdrouthud: luminosite hud interface hdr
+hwrtteleportlight: lumiere teleporteur rt
+hwrtjumppadlight: lumiere jumppad trampoline rt
+hwrtnrd: debruitage denoise denoiser ciel bruit grain filtre rt nrd
+ragdollmillis: cadavre corps rester garder reapparition ragdoll
+deadpush: cadavre projection vitesse ragdoll mort
+shaderdetail: shaders detail qualite
+waterrefract: eau refraction transparence
+waterreflect: eau reflet reflets miroir
+caustics: eau caustiques reflets lumiere fond
+vertwater: eau vagues animation
+waterfallrefract: cascade chute eau refraction
+waterfallenv: cascade chute eau reflet
+shadowmap: ombres douces ombre
+shadowmapsize: ombres douces qualite
+blobs: ombre ronde sol joueurs
+glare: eblouissement halo lueur lumiere
+motionblur: flou mouvement
+motionblurscale: flou mouvement intensite
+grass: herbe
+grassdist: herbe distance fondu
+maxdynlights: lumieres dynamiques eclairs tirs explosions
+depthfx: particules douces fumee explosions
+depthfxsize: particules douces qualite
+glassenv: verre vitre reflet
+decals: impacts balles traces brulures sang murs
+decalfade: impacts traces duree disparition
+maxtexsize: textures qualite resolution
+envmapmodels: modeles reflet brillant armes
+bumpmodels: modeles relief bump
+# --- sound ---
+soundchans: canaux sons simultanes
+soundfreq: frequence echantillonnage hz qualite son
+soundbufferlen: tampon buffer latence son coupe saccade
+# --- mouse ---
+sensitivity: sensibilite souris vitesse visee
+mousedpi: dpi souris
+guisens: sensibilite menus curseur interface souris
+# --- HUD ---
+wallclock: horloge heure
+wallclock24: horloge 24h format heure
+wallclocksecs: horloge secondes
+damagescreen: ecran rouge degats blessure
+damagecompass: boussole degats direction tir
+outlinemeters: contour jauges capture
+basenumbers: numeros bases capture
+radarteammates: radar minicarte coequipiers equipe
+ammobar: munitions barre balles
+gameclock: chrono temps partie minuteur
+hudscore: score ecran
+killfeedfilter: frags liste tous equipe miens filtre
+killstreak: serie frags
+# --- friends / translation ---
+friendaddname: -
+clantag: clan tag
+translateauto: traduction automatique envoi
+translatelang: langue lecture lire traduire vers
+translateoutlang: langue envoi ecrire
+fullchatsize: chat agrandi taille lignes
+tmodelurl: -
+tmodelkey: -
+tmodelapimodel: -
+texamplelang: exemples langue
+texampledir: exemples sens direction
+texamplekind: exemples type exacte
+texamplesrc: -
+texampledst: -
+# --- console / recording ---
+confilter: console filtre messages afficher
+fullconsize: console complete taille
+fullconfilter: console complete filtre
+fullkilllogsize: frags morts journal taille
+matchrecquality: video qualite enregistrement
+# --- scoreboard columns ---
+showservinfo: tableau scores serveur nom
+showfrags: tableau scores frags colonne
+hidefrags: tableau scores frags ctf collect
+showdeaths: tableau scores morts colonne
+showflags: tableau scores drapeaux cranes
+showstatus: tableau scores statut mort lag
+showpj: tableau scores packet jump pj saut paquets lag
+showclientnum: tableau scores numero client
+showspectators: tableau scores spectateurs
+highlightscore: tableau scores surligner moi
+showconnecting: tableau scores connexion joueurs
+# --- HUD pieces (Adjust pages) ---
+ammobaralign: munitions alignement
+ammobarhorizontal: munitions horizontal
+ammobarflip: munitions inverser
+ammobarhideempty: munitions vide cacher
+ammobarsep: munitions espacement
+ammobarcountsep: munitions espacement nombre
+ammobarcountscale: munitions taille nombre
+ammobarscale: munitions taille
+ammobarx: munitions position horizontale
+ammobary: munitions position verticale
+gameclockalign: chrono alignement
+gameclockalpha: chrono transparence opacite
+gameclockscale: chrono taille
+gameclockx: chrono position horizontale
+gameclocky: chrono position verticale
+hudscorealign: score alignement
+hudscorealpha: score transparence opacite
+hudscoresep: score espacement
+hudscorescale: score taille
+hudscorex: score position horizontale
+hudscorey: score position verticale
+killfeedconsole: frags console
+killfeedalign: frags liste alignement
+killfeedfade: frags liste disparition duree
+killfeedmax: frags liste nombre lignes
+killfeedscale: frags liste taille
+killfeedx: frags liste position horizontale
+killfeedy: frags liste position verticale
+killstreakothers: serie frags autres joueurs
+killstreaktk: serie frags coequipier tue equipe teamkill casse
+killstreakstep: serie frags annonce tous les combien pas
+killstreakfade: serie frags disparition
+killstreakalign: serie frags alignement
+killstreakscale: serie frags taille
+killstreakx: serie frags position horizontale
+killstreaky: serie frags position verticale

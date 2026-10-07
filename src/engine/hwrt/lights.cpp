@@ -1,8 +1,9 @@
 // lights.cpp: map ET_LIGHT entities plus sun / skylight as a tiny SSBO.
 //
 // Updated every frame so coop-edit light moves and sun-dir tweaks are visible.
-// Does not rebuild the BLAS, does not copy dynlights / muzzle flashes, and
-// must not take down the rest of the layer if the buffer fails to allocate.
+// Does not rebuild the BLAS. The game's dynamic lights (muzzle flashes,
+// rockets, grenades, explosions) are packed last when hwrtdynlights is on. Must
+// not take down the rest of the layer if the buffer fails to allocate.
 // Sun / sky (plus the fullbrightmodels floor, the world overbright, the
 // previous frame's camera for the temporal skyvis pass, and the world-diffuse
 // filter/vis knobs) live in a 432-byte std430 header in front of the point
@@ -454,6 +455,99 @@ static bool hwrtportalcol(int entidx, const extentity &tp, const char *tpmdl, ve
     return found;
 }
 
+// Weapon lights in RT (Options > Graphics > RT Weapon Lights, saved). 1: the
+// game's dynamic lights (muzzle flashes, rockets and grenades in flight,
+// explosions, flag events) light the RT scene, with the flash, flicker and
+// cooling shapes of dynlight.cpp (hwrtdynshape). They are packed after every map lamp, so the 256 cap
+// drops them first, and hitlight.comp evaluates them in the always-evaluated
+// loop, outside the nearest-N election: a flash adds light and never takes a
+// map lamp away from a pixel. 0: the RT lighting before the option (those
+// lights then only reach what GL still draws, such as the HUD gun).
+VARP(hwrtdynlights, 0, 1, 1);
+// Lab, not saved: at most this many weapon lights, the ones closest to the
+// camera; their shadow (1, walls only; 0 none). Shapes and intensities:
+// dynlight.cpp.
+VAR(hwrtdynlightmax, 1, 16, 32);
+VAR(hwrtdynshadow, 0, 1, 1);
+// Only the nearest few get a soft shadow (four rays); the others one hard ray.
+// Bounds the cost of a frame full of explosions (16 soft lights: about 0.2 ms
+// more at 1600x900, against 0.05 ms hard).
+VAR(hwrtdynsoftmax, 0, 4, 32);
+int hwrtdynlightcount = 0;
+extern int numalldynlights();
+extern bool getalldynlight(int n, vec &o, float &radius, vec &color, int &kind, float &src);
+
+struct hwrtdyncand
+{
+    vec pos;
+    vec col;
+    float radius;
+    float src;
+    float key;
+};
+
+// A rocket explodes on the wall it hit and a muzzle can touch a wall: a lamp on
+// (or a hair behind) the surface would light that surface edge-on and its
+// shadow ray would start inside it. Step the light out of any geometry closer
+// than `clear` along the six axes.
+static vec dynclearwalls(const vec &o, float clear)
+{
+    static const vec axes[6] = { vec(1, 0, 0), vec(-1, 0, 0), vec(0, 1, 0), vec(0, -1, 0), vec(0, 0, 1), vec(0, 0, -1) };
+    vec p = o;
+    loopi(6)
+    {
+        float d = raycube(o, axes[i], clear, 0);
+        if(d < clear) p.sub(vec(axes[i]).mul(clear - d));
+    }
+    return p;
+}
+
+static int packdynlights(hwrtlight *out, int room)
+{
+    int cap = min(int(hwrtdynlightmax), room);
+    if(cap <= 0 || !camera1) return 0;
+    hwrtdyncand keep[32];
+    int nkeep = 0;
+    int total = numalldynlights();
+    loopi(total)
+    {
+        vec o, col;
+        float radius, src;
+        int kind;
+        if(!getalldynlight(i, o, radius, col, kind, src)) continue;
+        if(radius <= 0 || max(col.x, max(col.y, col.z)) < 0.01f) continue;
+        hwrtdyncand c;
+        c.pos = o;
+        c.col = col;
+        c.radius = radius;
+        c.src = src;
+        // Nearest sphere first; ties keep the game's order.
+        c.key = max(camera1->o.dist(o) - radius, 0.0f);
+        if(nkeep < cap) keep[nkeep++] = c;
+        else if(c.key < keep[nkeep-1].key) keep[nkeep-1] = c;
+        else continue;
+        for(int j = nkeep - 1; j > 0 && keep[j].key < keep[j-1].key; j--) swap(keep[j], keep[j-1]);
+    }
+    loopi(nkeep)
+    {
+        hwrtlight &L = out[i];
+        float clear = min(keep[i].radius * 0.25f, 6.0f);
+        vec p = dynclearwalls(keep[i].pos, clear);
+        L.pos[0] = p.x;
+        L.pos[1] = p.y;
+        L.pos[2] = p.z;
+        L.radius = keep[i].radius;
+        L.color[0] = keep[i].col.x;
+        L.color[1] = keep[i].col.y;
+        L.color[2] = keep[i].col.z;
+        // 4 + source radius / 128 (soft shadow; kept inside the wall clearance so
+        // no sample of the source sits in the wall): shadowed. 5: no shadow ray.
+        float src = i < hwrtdynsoftmax ? clamp(keep[i].src, 0.0f, min(0.8f*clear, 60.0f)) : 0.0f;
+        L.flags = hwrtdynshadow ? 4.0f + src/128.0f : 5.0f;
+    }
+    return nkeep;
+}
+
 struct hwrtglowcand
 {
     vec pos;
@@ -787,6 +881,11 @@ void hwrtupdatelights()
         L.flags = (e.flags & EF_NOSHADOW) ? 1.0f : 0.0f;
     }
 
+    // Weapon lights last (flags 4/5): every map lamp above keeps its slot.
+    int ndyn = hwrtdynlights && n < HWRT_MAX_LIGHTS ? packdynlights(&packed.lights[n], HWRT_MAX_LIGHTS - n) : 0;
+    n += ndyn;
+    hwrtdynlightcount = ndyn;
+
     // Which loop of hitlight.comp visits each lamp, decided once here
     // with the shader's own float tests and counting order.
     {
@@ -794,6 +893,9 @@ void hwrtupdatelights()
         loopi(n)
         {
             const hwrtlight &L = packed.lights[i];
+            // Weapon lights: always evaluated, outside the 16 / 96 counts and
+            // never elected by nearest-N (they are last, so no count moves).
+            if(L.flags >= 3.5f) { packed.kind[i] = 1; continue; }
             bool unlim = L.radius <= 0.0f;
             bool glowL = L.flags >= 1.5f && !unlim;
             uint k = 0;
@@ -847,11 +949,11 @@ void hwrtupdatelights()
             loggedoverflow = true;
         }
     }
-    if(lights.logpending || n != lights.lastlogged || nunlim != lights.lastunlim || nglow != lights.lastglow || hwrtsunon != lights.lastsun || hwrtskyon != lights.lastsky)
+    if(lights.logpending || n - ndyn != lights.lastlogged || nunlim != lights.lastunlim || nglow != lights.lastglow || hwrtsunon != lights.lastsun || hwrtskyon != lights.lastsky)
     {
-        conoutf("hwrt: %d point lights (%d unlimited, %d glow), sun %s, sky %s", n, nunlim, nglow,
+        conoutf("hwrt: %d point lights (%d unlimited, %d glow), sun %s, sky %s", n - ndyn, nunlim, nglow,
                 hwrtsunon ? "on" : "off", hwrtskyon ? "on" : "off");
-        lights.lastlogged = n;
+        lights.lastlogged = n - ndyn;
         lights.lastunlim = nunlim;
         lights.lastglow = nglow;
         lights.lastsun = hwrtsunon;

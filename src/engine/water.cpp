@@ -801,6 +801,13 @@ void genwatertex(GLuint &tex, GLuint &fb, GLuint &db, bool refract = false)
         return;
     }
 
+    // Called lazily from whatever is drawing (main pass, mini-map, environment
+    // maps): give the caller back its own framebuffer and viewport.
+    GLint prevdraw = 0, prevread = 0, prevviewport[4];
+    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &prevdraw);
+    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &prevread);
+    glGetIntegerv(GL_VIEWPORT, prevviewport);
+
     if(!fb) glGenFramebuffers_(1, &fb);
     int find = needsalpha ? 0 : 2;
     do
@@ -831,7 +838,9 @@ void genwatertex(GLuint &tex, GLuint &fb, GLuint &db, bool refract = false)
         depthfmt = depthfmts[find];
     }
 
-    hwrtbindscenefb();
+    glBindFramebuffer_(GL_DRAW_FRAMEBUFFER, prevdraw);
+    glBindFramebuffer_(GL_READ_FRAMEBUFFER, prevread);
+    glViewport(prevviewport[0], prevviewport[1], prevviewport[2], prevviewport[3]);
 }
 
 void addwaterfallrefraction(materialsurface &m)

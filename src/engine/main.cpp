@@ -2,7 +2,7 @@
 
 #include "engine.h"
 
-#ifdef SDL_VIDEO_DRIVER_X11
+#if defined(SDL_VIDEO_DRIVER_X11) || defined(WIN32)
 #include "SDL_syswm.h"
 #endif
 
@@ -134,8 +134,9 @@ SDL_GLContext glcontext = NULL;
 #define SCR_MAXH 10000
 #define SCR_DEFAULTW 1024
 #define SCR_DEFAULTH 768
-VARF(scr_w, SCR_MINW, -1, SCR_MAXW, initwarning("screen resolution"));
-VARF(scr_h, SCR_MINH, -1, SCR_MAXH, initwarning("screen resolution"));
+static bool scrsizelive();
+VARF(scr_w, SCR_MINW, -1, SCR_MAXW, { if(!scrsizelive()) initwarning("screen resolution"); });
+VARF(scr_h, SCR_MINH, -1, SCR_MAXH, { if(!scrsizelive()) initwarning("screen resolution"); });
 VARF(depthbits, 0, 0, 32, initwarning("depth-buffer precision"));
 VARF(fsaa, -1, -1, 16, initwarning("anti-aliasing"));
 
@@ -394,6 +395,8 @@ void renderprogress(float bar, const char *text, GLuint tex, bool background)   
     clientkeepalive();      // make sure our connection doesn't time out while loading maps etc.
     
     SDL_PumpEvents(); // keep the event queue awake to avoid 'beachball' cursor
+    extern void releasegrabunfocused();
+    releasegrabunfocused(); // another window came to the front while loading
 
     extern int mesa_swap_bug, curvsync;
     bool forcebackground = progressbackground || (mesa_swap_bug && (curvsync || totalmillis==1));
@@ -558,6 +561,99 @@ static void checkframegap()
 VAR(sdl_xgrab_bug, 0, 0, 1);
 #endif
 
+void screendisplayrect(int &x, int &y, int &w, int &h);
+
+// Menu cursor from a position in window pixels. In borderless with a chosen
+// resolution the picture is stretched over the window, so map through the
+// rectangle it is shown in rather than dividing by screenw/screenh.
+static void setcursorfromwindow(int mx, int my)
+{
+    int x, y, w, h;
+    screendisplayrect(x, y, w, h);
+    if(w <= 0 || h <= 0) return;
+    g3d_setcursor((mx - x) / float(w), (my - y) / float(h));
+}
+
+static void windowcenter(int &cx, int &cy)
+{
+    int w = screenw, h = screenh;
+    if(screen) SDL_GetWindowSize(screen, &w, &h);
+    cx = w / 2;
+    cy = h / 2;
+}
+
+#ifdef WIN32
+// Menus free the mouse (relative mode and grab off) and read the absolute OS
+// cursor. While relative mode is on, SDL 2.0.12 clips the cursor to a 2x2
+// rectangle at the window centre and only removes that clip when
+// GetClipCursor() returns exactly the rectangle it set (relaxed upstream in
+// SDL 2.0.14, bug 5329). When Windows hands back a different rectangle (for
+// instance in exclusive fullscreen at a non-desktop resolution), the clip
+// stays and the menu cursor is stuck at the centre until Alt+Tab. Release any
+// clip left on our window whenever the mouse is not grabbed.
+// mouseclipfix 0 restores the old behaviour for comparison.
+VAR(mouseclipfix, 0, 1, 1);
+
+static HWND gamehwnd()
+{
+    if(!screen) return NULL;
+    SDL_SysWMinfo info;
+    SDL_VERSION(&info.version);
+    if(!SDL_GetWindowWMInfo(screen, &info) || info.subsystem != SDL_SYSWM_WINDOWS) return NULL;
+    return info.info.win.window;
+}
+
+// SDL 2.0.12 decides that a window has the keyboard focus from GetFocus(),
+// which only looks at our own thread: a game window created while the user
+// works in another program reports SDL_WINDOW_INPUT_FOCUS without being the
+// foreground window. Grabbing then (relative mode) clips the cursor to the
+// 2x2 centre of our window until the user clicks the game. Only the real
+// foreground window may take the mouse.
+static bool isforegroundwindow()
+{
+    HWND hwnd = gamehwnd();
+    return !hwnd || GetForegroundWindow() == hwnd;
+}
+
+static void releasestaleclip(const char *when)
+{
+    if(!mouseclipfix || !screen) return;
+    RECT clip, win;
+    if(!GetClipCursor(&clip)) return;
+    // No clip at all: GetClipCursor returns the whole virtual screen.
+    int vx = GetSystemMetrics(SM_XVIRTUALSCREEN), vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
+    if(clip.left <= vx && clip.top <= vy &&
+       clip.right >= vx + GetSystemMetrics(SM_CXVIRTUALSCREEN) &&
+       clip.bottom >= vy + GetSystemMetrics(SM_CYVIRTUALSCREEN))
+        return;
+    HWND hwnd = gamehwnd();
+    if(!hwnd || !GetWindowRect(hwnd, &win)) return;
+    // Only a clip centred on our own window is ours to remove.
+    LONG cx = (clip.left + clip.right) / 2, cy = (clip.top + clip.bottom) / 2;
+    if(cx < win.left || cx > win.right || cy < win.top || cy > win.bottom) return;
+    // In the background, only remove the exact 2x2 clip SDL puts at our centre:
+    // anything else belongs to the program in front.
+    if(GetForegroundWindow() != hwnd)
+    {
+        LONG wx = (win.left + win.right) / 2, wy = (win.top + win.bottom) / 2;
+        if(clip.left != wx - 1 || clip.top != wy - 1 || clip.right != wx + 1 || clip.bottom != wy + 1) return;
+    }
+    ClipCursor(NULL);
+    static int logged = 0;
+    if(logged < 20)
+    {
+        logged++;
+        logoutf("input: leftover cursor clip %ld,%ld-%ld,%ld (window %ld,%ld-%ld,%ld, windowmode %d) released (%s) t=%u ms",
+                long(clip.left), long(clip.top), long(clip.right), long(clip.bottom),
+                long(win.left), long(win.top), long(win.right), long(win.bottom),
+                getvar("windowmode"), when, SDL_GetTicks());
+    }
+}
+#else
+static bool isforegroundwindow() { return true; }
+static void releasestaleclip(const char *when) {}
+#endif
+
 void inputgrab(bool on, bool delay = false)
 {
 #ifdef SDL_VIDEO_DRIVER_X11
@@ -589,6 +685,7 @@ void inputgrab(bool on, bool delay = false)
         // Keep the OS cursor hidden over the game: Sauer draws its own. Windows
         // still shows a cursor on the other screen once the pointer leaves.
         SDL_ShowCursor(SDL_FALSE);
+        releasestaleclip("ungrab");
     }
     shouldgrab = delay;
 
@@ -613,10 +710,23 @@ void inputgrab(bool on, bool delay = false)
 
 static void ignoremousemotion();
 
+// Keyboard focus as SDL sees it, and on Windows also the real foreground window.
+static bool hasinputfocus()
+{
+    return screen && (SDL_GetWindowFlags(screen) & SDL_WINDOW_INPUT_FOCUS) && isforegroundwindow();
+}
+
+// Loading screens only pump events: free the mouse as soon as we are no
+// longer the foreground window, without waiting for the next frame.
+void releasegrabunfocused()
+{
+    if(grabinput && !hasinputfocus()) inputgrab(grabinput = false);
+}
+
 static bool shouldgrabmouse()
 {
     if(!screen) return false;
-    if(!(SDL_GetWindowFlags(screen) & SDL_WINDOW_INPUT_FOCUS)) return false;
+    if(!hasinputfocus()) return false;
     if(gui2dvisible() || overlaycursor()) return false;
     return true;
 }
@@ -626,14 +736,25 @@ static void syncinputgrab()
     bool want = shouldgrabmouse();
     if(want != grabinput)
     {
+        // Mouse freed for a menu opened during play: start the menu cursor at
+        // the centre (as the stock menus do) instead of wherever relative mode
+        // left the hidden OS cursor.
+        bool tomenu = grabinput && !want && hasinputfocus();
         inputgrab(grabinput = want);
+        if(tomenu)
+        {
+            int cx, cy;
+            windowcenter(cx, cy);
+            SDL_WarpMouseInWindow(screen, cx, cy);
+        }
         ignoremousemotion();
     }
     if(!grabinput && (gui2dvisible() || overlaycursor()) && screenw > 0 && screenh > 0)
     {
+        if(hasinputfocus()) releasestaleclip("menu");
         int mx, my;
         SDL_GetMouseState(&mx, &my);
-        g3d_setcursor(mx / float(screenw), my / float(screenh));
+        setcursorfromwindow(mx, my);
     }
 }
 
@@ -670,6 +791,7 @@ static void getdisplaybounds(SDL_Rect &bounds)
 void applywindowmode();
 void logwindowstate(const char *when);
 void restoredesktopwindow();
+static void setrendersize();
 
 VARF(windowmode, 0, WM_BORDERLESS, 2, applywindowmode());
 
@@ -719,7 +841,9 @@ void applywindowmode()
     {
         fullscreen = windowmode == WM_EXCLUSIVE ? 1 : 0;
         fullscreendesktop = 0;
-        SDL_GetWindowSize(screen, &screenw, &screenh);
+        int oldw = screenw, oldh = screenh;
+        setrendersize();
+        if(glcontext && (screenw != oldw || screenh != oldh)) gl_resize();
         logoutf("video: windowmode %d already applied, skip", windowmode);
         return;
     }
@@ -763,7 +887,7 @@ void applywindowmode()
     fullscreen = windowmode == WM_EXCLUSIVE ? 1 : 0;
     fullscreendesktop = 0;
 
-    SDL_GetWindowSize(screen, &screenw, &screenh);
+    setrendersize();
     if(glcontext) gl_resize();
     applyingwindowmode = false;
     logwindowstate("video: after applywindowmode");
@@ -792,6 +916,162 @@ VARF(fullscreendesktop, 0, 0, 1,
     }
 });
 
+// Borderless at a chosen resolution. The window keeps the monitor size and the
+// Windows display mode is never changed: the engine renders scr_w x scr_h in
+// the lower left corner of the window's framebuffer and swapbuffers() stretches
+// that picture over the window (the native HDR output stretches it through its
+// swap chain). borderlessres 0 = monitor size (default), 1 = scr_w x scr_h.
+// borderlessaspect 1 keeps the proportions with black bars.
+static void updaterendersize();
+VARFP(borderlessres, 0, 0, 1, updaterendersize());
+VARFP(borderlessaspect, 0, 0, 1, updaterendersize());
+
+// Size the engine renders at: the window size, or scr_w x scr_h (never larger
+// than the window) in borderless with borderlessres 1. A multisampled window
+// framebuffer (fsaa > 0) cannot be the target of a stretching blit, so it keeps
+// the window size.
+static void getrendersize(int &w, int &h)
+{
+    int ww = 0, wh = 0;
+    if(screen) SDL_GetWindowSize(screen, &ww, &wh);
+    w = ww;
+    h = wh;
+    if(windowmode != WM_BORDERLESS || !borderlessres || fsaa > 0 || ww <= 0 || wh <= 0) return;
+    w = max(1, min(scr_w, ww));
+    h = max(1, min(scr_h, wh));
+}
+
+static void setrendersize()
+{
+    getrendersize(screenw, screenh);
+}
+
+// Where the picture is shown, in window pixels from the top left corner.
+void screendisplayrect(int &x, int &y, int &w, int &h)
+{
+    int ww = screenw, wh = screenh;
+    if(screen) SDL_GetWindowSize(screen, &ww, &wh);
+    x = y = 0;
+    w = ww;
+    h = wh;
+    if(ww <= 0 || wh <= 0 || screenw <= 0 || screenh <= 0 || (screenw == ww && screenh == wh) || !borderlessaspect) return;
+    if(ww * (long long)screenh > wh * (long long)screenw)
+    {
+        w = int((wh * (long long)screenw + screenh / 2) / screenh);
+        x = (ww - w) / 2;
+    }
+    else
+    {
+        h = int((ww * (long long)screenh + screenw / 2) / screenw);
+        y = (wh - h) / 2;
+    }
+}
+
+static void updaterendersize()
+{
+    if(!screen || !glcontext || applyingwindowmode || shuttingdown) return;
+    int w, h;
+    getrendersize(w, h);
+    if(w <= 0 || h <= 0) return;
+    if(w != screenw || h != screenh)
+    {
+        int ww = 0, wh = 0;
+        SDL_GetWindowSize(screen, &ww, &wh);
+        logoutf("video: render size %dx%d -> %dx%d (window %dx%d, windowmode %d, borderlessres %d)",
+                screenw, screenh, w, h, ww, wh, windowmode, borderlessres);
+        screenw = w;
+        screenh = h;
+        gl_resize();
+    }
+}
+
+static bool scrsizelive()
+{
+    if(!screen || windowmode != WM_BORDERLESS || !borderlessres) return false;
+    updaterendersize();
+    return true;
+}
+
+static GLuint scalefbo = 0, scaletex = 0;
+static int scaletexw = 0, scaletexh = 0;
+
+// Objects die with the GL context (setupscreen); forget their names.
+static void forgetscaletargets()
+{
+    scalefbo = scaletex = 0;
+    scaletexw = scaletexh = 0;
+}
+
+// Back at the window size (borderlessres 0, another window mode): free the
+// stretch target instead of keeping it until the next GL context.
+static void freescaletargets()
+{
+    if(scalefbo) glDeleteFramebuffers_(1, &scalefbo);
+    if(scaletex) glDeleteTextures(1, &scaletex);
+    forgetscaletargets();
+}
+
+// Stretch the rendered corner (screenw x screenh) over the whole window just
+// before SDL_GL_SwapWindow. No cost when the render size is the window size.
+static void stretchscreen()
+{
+    if(!screen || !hasFBB || screenw <= 0 || screenh <= 0) return;
+    int ww = 0, wh = 0;
+    SDL_GetWindowSize(screen, &ww, &wh);
+    if(ww <= 0 || wh <= 0 || (screenw == ww && screenh == wh))
+    {
+        if(scalefbo || scaletex) freescaletargets();
+        return;
+    }
+    if(!scaletex || scaletexw != screenw || scaletexh != screenh)
+    {
+        if(!scaletex) glGenTextures(1, &scaletex);
+        if(!scalefbo) glGenFramebuffers_(1, &scalefbo);
+        glBindTexture(GL_TEXTURE_2D, scaletex);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, screenw, screenh, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glBindFramebuffer_(GL_FRAMEBUFFER, scalefbo);
+        glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, scaletex, 0);
+        GLenum st = glCheckFramebufferStatus_(GL_FRAMEBUFFER);
+        glBindFramebuffer_(GL_FRAMEBUFFER, 0);
+        if(st != GL_FRAMEBUFFER_COMPLETE)
+        {
+            static int told = 0;
+            if(told++ < 3) logoutf("video: stretch target %dx%d incomplete 0x%x", screenw, screenh, int(st));
+            return;
+        }
+        scaletexw = screenw;
+        scaletexh = screenh;
+        logoutf("video: stretching %dx%d over the %dx%d window (borderlessaspect %d)", screenw, screenh, ww, wh, borderlessaspect);
+    }
+    int x, y, w, h;
+    screendisplayrect(x, y, w, h);
+    glDisable(GL_SCISSOR_TEST);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glBindFramebuffer_(GL_READ_FRAMEBUFFER, 0);
+    glBindFramebuffer_(GL_DRAW_FRAMEBUFFER, scalefbo);
+    glBlitFramebuffer_(0, 0, screenw, screenh, 0, 0, screenw, screenh, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    glBindFramebuffer_(GL_FRAMEBUFFER, 0);
+    if(x > 0 || y > 0)
+    {
+        glViewport(0, 0, ww, wh);
+        glClearColor(0, 0, 0, 1);
+        glClear(GL_COLOR_BUFFER_BIT);
+        glClearColor(0, 0, 0, 0);
+    }
+    // GL rows go upwards: flip the top-left based rectangle.
+    int gy = wh - (y + h);
+    glBindFramebuffer_(GL_READ_FRAMEBUFFER, scalefbo);
+    glBindFramebuffer_(GL_DRAW_FRAMEBUFFER, 0);
+    glBlitFramebuffer_(0, 0, screenw, screenh, x, gy, x + w, gy + h, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+    glBindFramebuffer_(GL_FRAMEBUFFER, 0);
+    glViewport(0, 0, screenw, screenh);
+}
+
 void screenres(int w, int h)
 {
     scr_w = clamp(w, SCR_MINW, SCR_MAXW);
@@ -805,7 +1085,9 @@ void screenres(int w, int h)
             SDL_SetWindowPosition(screen, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
             initwindowpos = false;
         }
-        // borderless keeps native monitor size; scr_w/scr_h remembered for windowed/exclusive
+        // Borderless keeps the monitor size. With borderlessres 1 it renders at
+        // scr_w x scr_h and stretches; otherwise scr_w/scr_h wait for windowed/exclusive.
+        else updaterendersize();
     }
     else
     {
@@ -928,6 +1210,7 @@ void setupscreen()
         SDL_GL_DeleteContext(glcontext);
         glcontext = NULL;
     }
+    forgetscaletargets();
     if(screen)
     {
         SDL_DestroyWindow(screen);
@@ -1024,7 +1307,7 @@ void setupscreen()
     SDL_SetWindowMinimumSize(screen, SCR_MINW, SCR_MINH);
     SDL_SetWindowMaximumSize(screen, SCR_MAXW, SCR_MAXH);
 
-    SDL_GetWindowSize(screen, &screenw, &screenh);
+    setrendersize();
     logwindowstate("video: setupscreen");
 }
 
@@ -1106,7 +1389,9 @@ static inline bool filterevent(const SDL_Event &event)
         case SDL_MOUSEMOTION:
             if(grabinput && !relativemouse && !(SDL_GetWindowFlags(screen) & SDL_WINDOW_FULLSCREEN))
             {
-                if(event.motion.x == screenw / 2 && event.motion.y == screenh / 2)
+                int cx, cy;
+                windowcenter(cx, cy);
+                if(event.motion.x == cx && event.motion.y == cy)
                     return false;  // ignore any motion events generated by SDL_WarpMouse
                 #ifdef __APPLE__
                 if(event.motion.y == 0)
@@ -1192,7 +1477,9 @@ static void resetmousemotion()
 {
     if(grabinput && !relativemouse && !(SDL_GetWindowFlags(screen) & SDL_WINDOW_FULLSCREEN))
     {
-        SDL_WarpMouseInWindow(screen, screenw / 2, screenh / 2);
+        int cx, cy;
+        windowcenter(cx, cy);
+        SDL_WarpMouseInWindow(screen, cx, cy);
     }
 }
 
@@ -1220,7 +1507,7 @@ void checkinput()
 
         if(focused && event.type!=SDL_WINDOWEVENT)
         {
-            if(!gui2dvisible() && !overlaycursor() && grabinput != (focused>0)) inputgrab(grabinput = focused>0, shouldgrab);
+            if(!gui2dvisible() && !overlaycursor() && grabinput != (focused>0 && hasinputfocus())) inputgrab(grabinput = focused>0 && hasinputfocus(), shouldgrab);
             focused = 0;
         }
 
@@ -1306,7 +1593,7 @@ void checkinput()
                     case SDL_WINDOWEVENT_SIZE_CHANGED:
                     {
                         if(shuttingdown) break;
-                        SDL_GetWindowSize(screen, &screenw, &screenh);
+                        setrendersize();
                         if(screenw <= 0 || screenh <= 0) break;
                         if(windowmode == WM_WINDOWED)
                         {
@@ -1328,14 +1615,14 @@ void checkinput()
                     mousemoved = true;
                 }
                 else if((gui2dvisible() || overlaycursor()) && screenw > 0 && screenh > 0)
-                    g3d_setcursor(event.motion.x / float(screenw), event.motion.y / float(screenh));
-                else if(shouldgrab) inputgrab(grabinput = true);
+                    setcursorfromwindow(event.motion.x, event.motion.y);
+                else if(shouldgrab && shouldgrabmouse()) inputgrab(grabinput = true);
                 break;
 
             case SDL_MOUSEBUTTONDOWN:
             case SDL_MOUSEBUTTONUP:
                 if(!grabinput && (gui2dvisible() || overlaycursor()) && screenw > 0 && screenh > 0)
-                    g3d_setcursor(event.button.x / float(screenw), event.button.y / float(screenh));
+                    setcursorfromwindow(event.button.x, event.button.y);
                 switch(event.button.button)
                 {
                     case SDL_BUTTON_LEFT: processkey(-1, event.button.state==SDL_PRESSED); break;
@@ -1352,7 +1639,7 @@ void checkinput()
                 break;
         }
     }
-    if(focused) { if(grabinput != (focused>0)) inputgrab(grabinput = focused>0, shouldgrab); focused = 0; }
+    if(focused) { bool on = focused>0 && shouldgrabmouse(); if(grabinput != on) inputgrab(grabinput = on, shouldgrab); focused = 0; }
     syncinputgrab();
     if(mousemoved) resetmousemotion();
 }
@@ -1365,6 +1652,7 @@ void swapbuffers(bool overlay)
     extern double hdrout_perf_clock();
     hdrout_perf_swapstart();
     if(hdrout_present()) { hdrout_perf_swapend(true, 0); return; }
+    stretchscreen();
     gle::disable();
     double t0 = hdrout_perf_clock();
     SDL_GL_SwapWindow(screen);
@@ -1548,6 +1836,89 @@ static void applyl4zymigrations()
     if(l4zymigration < L4ZY_MIGRATION_LATEST) l4zymigration = L4ZY_MIGRATION_LATEST;
 }
 
+// Import settings from another client (Options > Import settings...).
+// L4ZY.exe lists the other clients it finds in l4zy-import-sources.txt (in
+// the profile folder) at each start. The game never copies settings itself:
+// it leaves l4zy-import-request.txt, and L4ZY.exe carries it out before the
+// game starts again, so a running game never rewrites the imported config.cfg.
+struct importsource { string name, label, folder; };
+static vector<importsource> importsources;
+static string importlast = "";
+
+static void importsrcrefresh()
+{
+    importsources.setsize(0);
+    importlast[0] = 0;
+    char *buf = loadfile("l4zy-import-sources.txt", NULL);
+    if(buf)
+    {
+        // source <TAB> name <TAB> date of its config.cfg <TAB> folder
+        for(char *line = buf; line && *line; )
+        {
+            char *next = strpbrk(line, "\r\n");
+            if(next) { *next++ = 0; while(*next == '\r' || *next == '\n') next++; }
+            char *f[4] = { line, NULL, NULL, NULL };
+            loopi(3) { if(!f[i]) break; char *t = strchr(f[i], '\t'); if(t) { *t = 0; f[i+1] = t + 1; } }
+            if(!strcmp(f[0], "source") && f[1] && f[2] && f[3] && f[1][0] && importsources.length() < 16)
+            {
+                importsource &s = importsources.add();
+                copystring(s.name, f[1]);
+                formatstring(s.label, "%s   (config.cfg %s)", f[1], f[2]);
+                copystring(s.folder, f[3]);
+            }
+            line = next;
+        }
+        delete[] buf;
+    }
+    buf = loadfile("l4zy-import.txt", NULL);
+    if(buf)
+    {
+        char *end = strpbrk(buf, "\r\n");
+        if(end) *end = 0;
+        copystring(importlast, buf);
+        delete[] buf;
+    }
+}
+COMMAND(importsrcrefresh, "");
+ICOMMAND(importsrccount, "", (), intret(importsources.length()));
+ICOMMAND(importsrclabel, "i", (int *i), result(importsources.inrange(*i) ? importsources[*i].label : ""));
+ICOMMAND(importsrcfolder, "i", (int *i), result(importsources.inrange(*i) ? importsources[*i].folder : ""));
+ICOMMAND(importlastresult, "", (), result(importlast));
+// Started by L4ZY.exe (it passes the service port): it can restart the game.
+static bool importrestartable() { const char *p = getenv("L4ZY_SERVICE_PORT"); return p && p[0]; }
+ICOMMAND(importrestartable, "", (), intret(importrestartable() ? 1 : 0));
+ICOMMAND(importsettingsmenu, "", (), showgui("importsettings"));
+
+// which: index in the list, or -1 for the folder typed by the player.
+static void importsettingsfrom(int *which, char *folder)
+{
+    string line;
+    if(importsources.inrange(*which)) formatstring(line, "name=%s", importsources[*which].name);
+    else if(*which == -1)
+    {
+        char *dir = folder;
+        while(*dir == ' ' || *dir == '"') dir++;
+        string clean;
+        copystring(clean, dir);
+        for(int n = (int)strlen(clean); n > 0 && (clean[n-1] == ' ' || clean[n-1] == '"'); n--) clean[n-1] = 0;
+        if(!clean[0]) { conoutf(CON_ERROR, "import: type the folder that holds the other client's config.cfg"); return; }
+        formatstring(line, "folder=%s", clean);
+    }
+    else { conoutf(CON_ERROR, "import: pick a client first"); return; }
+    stream *f = openutf8file("l4zy-import-request.txt", "w");
+    if(!f) { conoutf(CON_ERROR, "import: could not write the request in the profile folder"); return; }
+    f->printf("l4zy-import-request 1\n%s\nend\n", line);
+    delete f;
+    logoutf("import: request written (%s)", line);
+    if(importrestartable())
+    {
+        conoutf("\f0Importing settings: the game restarts now");
+        quit();
+    }
+    else conoutf("\f0Settings will be imported the next time you start L4ZY.exe");
+}
+COMMAND(importsettingsfrom, "is");
+
 int main(int argc, char **argv)
 {
     #ifdef WIN32
@@ -1707,8 +2078,17 @@ int main(int argc, char **argv)
     
     identflags |= IDF_PERSIST;
     
-    if(!execfile(game::savedconfig(), false)) 
+    if(!execfile(game::savedconfig(), false))
     {
+        extern bool savedconfigunreadable;
+        extern long long cfgfilesize(const char *name);
+        if(cfgfilesize(game::savedconfig()) > 0)
+        {
+            // Present but unreadable: defaults for this session only, the
+            // file itself must survive (see writecfg).
+            savedconfigunreadable = true;
+            conoutf(CON_ERROR, "\f3%s exists but could not be read (locked, offline or no permission): defaults are used for this session and your saved settings will NOT be overwritten", game::savedconfig());
+        }
         execfile(game::defaultconfig());
         writecfg(game::restoreconfig());
     }

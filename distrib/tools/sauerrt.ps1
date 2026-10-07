@@ -6,6 +6,8 @@
 #   powershell -ExecutionPolicy Bypass -File distrib\tools\sauerrt.ps1 release distrib\recipes\<version>.json --reuse <manifeste precedent>
 #   powershell -ExecutionPolicy Bypass -File distrib\tools\sauerrt.ps1 publish --version <v> --channel test --target <dossier du site>
 #   powershell -ExecutionPolicy Bypass -File distrib\tools\sauerrt.ps1 verify --url https://.../channels/test/latest.json
+#   powershell -ExecutionPolicy Bypass -File distrib\tools\sauerrt.ps1 menus-plan       (data\assistant-menus.txt ; release le fait aussi)
+#   powershell -ExecutionPolicy Bypass -File distrib\tools\sauerrt.ps1 check-settings   (reglages des menus connus de l'assistant)
 $ErrorActionPreference = 'Stop'
 $Tools = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Distrib = Split-Path -Parent $Tools
@@ -28,5 +30,7 @@ $cmd = $args[0]
 switch ($cmd) {
     { $_ -in 'fetch', 'release', 'seed' } { & $py (Join-Path $Tools 'sauerrt_build.py') @args; exit $LASTEXITCODE }
     { $_ -in 'publish', 'publish-github', 'readme-github', 'verify' } { & $py (Join-Path $Tools 'sauerrt_publish.py') @args; exit $LASTEXITCODE }
-    default { Write-Host 'commandes : fetch | release | publish | verify'; exit 2 }
+    'menus-plan' { & $py (Join-Path $Tools 'menus_plan.py') @($args | Select-Object -Skip 1); exit $LASTEXITCODE }
+    'check-settings' { & $py (Join-Path $Tools 'check_settings_coverage.py') @($args | Select-Object -Skip 1); exit $LASTEXITCODE }
+    default { Write-Host 'commandes : fetch | release | publish | verify | menus-plan | check-settings'; exit 2 }
 }

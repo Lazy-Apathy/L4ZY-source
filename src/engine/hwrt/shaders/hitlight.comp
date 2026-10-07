@@ -325,7 +325,11 @@ const uint RAYMASK_MODEL = 0x02u;
 const uint RAYMASK_SELF  = 0x04u;
 const uint RAYMASK_CASTER = 0x08u;
 const uint RAYMASK_PORTAL = 0x10u;
+const uint RAYMASK_SMOKE = 0x20u;
 const uint RAYMASK_ALL = 0xFFu;
+// customIndex bit 16 (HWRT_SMOKE_SOFT): a soft smoke puff, bits 8-15 its peak
+// optical depth in 1/128. Never a surface; shadow and sky rays integrate it.
+const uint SMOKE_SOFT = 0x10000u;
 
 // 16x16 so a 5x5 bilateral has interior pixels with a full neighbourhood.
 // 8x8 would average only inside an 8-pixel tile and show as a faint grid.
@@ -655,6 +659,7 @@ vec3 sampleWorldDiff(int layer, vec2 uv, ivec2 pix, vec3 p0, vec3 p1, vec3 p2, v
 // refuses the candidate so we do not paint a solid panel.
 bool alphaTexel(uint custom, uint prim, uint geomid, vec2 bary)
 {
+    if((custom & SMOKE_SOFT) != 0u) return false;
     uint geom = custom & 0xFFu;
     uint opac = (custom >> 8) & 0xFFu;
     if(geom == 0u) return true;
@@ -771,6 +776,95 @@ float occludedT(vec3 origin, vec3 dir, float tmax, uint mask, uint skipInst)
     return -1.0;
 }
 
+// Optical depth of one soft smoke puff along the shadow segment [t0, t1].
+// Density (1 - r^2/R^2)^2 around the centre c: zero with a flat slope at the
+// rim, so the shadow has no edge, and its line integral has a closed form.
+// With a = 1 - d^2/R^2 (d = ray-to-centre distance) and u = (t - tc)/R, the
+// integral is tauc * 15/16 * F(u), F(u) = a^2 u - 2a u^3/3 + u^5/5, which
+// gives tauc for a full chord through the centre. Clipping u to the segment
+// handles a receiver or a lamp inside the smoke. tri: the candidate came from
+// the sphere mesh (two per puff): keep the entry, or the exit from inside.
+float smokeTau(vec3 c, float R, uint custom, vec3 o, vec3 d, float t0, float t1, bool tri, float tcand)
+{
+    vec3 oc = o - c;
+    float tc = -dot(oc, d);
+    float oc2 = dot(oc, oc);
+    float R2 = R * R;
+    float a = 1.0 - (oc2 - tc * tc) / R2;
+    if(a <= 0.0) return 0.0;
+    if(tri && tcand > tc && oc2 >= R2) return 0.0;
+    float ra = sqrt(a);
+    float u0 = clamp((t0 - tc) / R, -ra, ra);
+    float u1 = clamp((t1 - tc) / R, -ra, ra);
+    float f0 = u0 * (a * a - u0 * u0 * (2.0 * a / 3.0 - u0 * u0 * 0.2));
+    float f1 = u1 * (a * a - u1 * u1 * (2.0 * a / 3.0 - u1 * u1 * 0.2));
+    float tauc = float((custom >> 8u) & 0xFFu) * (1.0 / 128.0);
+    return tauc * (15.0 / 16.0) * max(f1 - f0, 0.0);
+}
+
+// occluded() / occludedT() with soft smoke: 0 when a surface blocks, else the
+// transmittance exp(-sum of puff optical depths) along the ray, 1 when no puff
+// is crossed. hitT: the committed distance, or negative on a miss.
+float shadowVis(vec3 origin, vec3 dir, float tmax, uint mask, uint skipInst, out float hitT)
+{
+    hitT = -1.0;
+    rayQueryEXT sq;
+    float tmin = 0.01;
+    float tfar = max(tmax, tmin + 0.001);
+    if(mask == 0u) mask = RAYMASK_ALL;
+    bool skipalpha = (mask & ~(RAYMASK_WORLD | RAYMASK_MODEL | RAYMASK_PORTAL)) == 0u;
+    uint rflags = gl_RayFlagsTerminateOnFirstHitEXT;
+    if(skipalpha) rflags |= gl_RayFlagsOpaqueEXT;
+    rayQueryInitializeEXT(sq, tlas, rflags, mask, origin, tmin, dir, tfar);
+    if(skipalpha)
+    {
+        rayQueryProceedEXT(sq);
+        if(rayQueryGetIntersectionTypeEXT(sq, true) == gl_RayQueryCommittedIntersectionTriangleEXT)
+        {
+            hitT = rayQueryGetIntersectionTEXT(sq, true);
+            return 0.0;
+        }
+        return 1.0;
+    }
+    float tau = 0.0;
+    while(rayQueryProceedEXT(sq))
+    {
+        uint ctype = rayQueryGetIntersectionTypeEXT(sq, false);
+        if(ctype == gl_RayQueryCandidateIntersectionAABBEXT)
+        {
+            mat4x3 m = rayQueryGetIntersectionObjectToWorldEXT(sq, false);
+            uint custom = uint(rayQueryGetIntersectionInstanceCustomIndexEXT(sq, false));
+            if((custom & SMOKE_SOFT) != 0u)
+                tau += smokeTau(m[3], length(m[0]), custom, origin, dir, tmin, tfar, false, 0.0);
+            continue;
+        }
+        if(ctype == gl_RayQueryCandidateIntersectionTriangleEXT)
+        {
+            uint iid = uint(rayQueryGetIntersectionInstanceIdEXT(sq, false));
+            if(iid == skipInst) continue;
+            uint custom = uint(rayQueryGetIntersectionInstanceCustomIndexEXT(sq, false));
+            if((custom & SMOKE_SOFT) != 0u)
+            {
+                mat4x3 m = rayQueryGetIntersectionObjectToWorldEXT(sq, false);
+                float tcand = rayQueryGetIntersectionTEXT(sq, false);
+                tau += smokeTau(m[3], length(m[0]), custom, origin, dir, tmin, tfar, true, tcand);
+                continue;
+            }
+            uint prim = uint(rayQueryGetIntersectionPrimitiveIndexEXT(sq, false));
+            uint geomid = uint(rayQueryGetIntersectionGeometryIndexEXT(sq, false));
+            vec2 bary = rayQueryGetIntersectionBarycentricsEXT(sq, false);
+            if(alphaTexel(custom, prim, geomid, bary))
+                rayQueryConfirmIntersectionEXT(sq);
+        }
+    }
+    if(rayQueryGetIntersectionTypeEXT(sq, true) == gl_RayQueryCommittedIntersectionTriangleEXT)
+    {
+        hitT = rayQueryGetIntersectionTEXT(sq, true);
+        return 0.0;
+    }
+    return tau > 0.0 ? exp(-tau) : 1.0;
+}
+
 int skyPackFlags()
 {
     return int(lights.env.diffPad1 + 0.5);
@@ -861,22 +955,94 @@ void addOmni(int i, vec3 hit, vec3 n, vec3 sorigin, uint shmask, uint skipInst, 
     }
     if(intensity * ndotl < 0.02) return;
 
-    bool shadowed = false;
+    // vis: 0 behind a surface, below 1 through weapon smoke, else 1.
+    float vis = 1.0;
     bool wantshadow = flags < 0.5 || flags >= 2.5;
     float slack = flags >= 2.5 ? 0.35 : 0.01;
     if(wantshadow && mag > slack + 0.02)
-        shadowed = occluded(sorigin, ldir, mag - slack, shmask, skipInst);
-    if(shadowed) return;
-    acc += lights.l[i].color * intensity * ndotl;
+    {
+        float vt;
+        vis = shadowVis(sorigin, ldir, mag - slack, shmask, skipInst, vt);
+    }
+    if(vis <= 0.0) return;
+    acc += lights.l[i].color * intensity * ndotl * vis;
     if(!aura)
     {
-        addSpec(ldir, n, viewDir, lights.l[i].color * intensity, specMul, specAcc);
+        addSpec(ldir, n, viewDir, lights.l[i].color * intensity * vis, specMul, specAcc);
         // Real lamps only: the glow omnis (teleporters, jump pads, lava) are
         // RT extras with no highlight in classic lighting.
 #ifndef HWRT_NO_REFL
-        if(flags < 1.5) addWorldSpec(ldir, viewDir, lights.l[i].color * intensity);
+        if(flags < 1.5) addWorldSpec(ldir, viewDir, lights.l[i].color * intensity * vis);
 #endif
     }
+}
+
+// Weapon lights (hwrtdynlights, lights.cpp): muzzle flashes, rockets and grenades
+// in flight, explosions. Packed after every map lamp with flags 4 + source
+// radius / 128 (shadow rays, walls only; soft when the radius is not 0) or 5
+// (no shadow ray), always evaluated by the first loop, never
+// in the nearest-N election, so a flash cannot push a map lamp out of a pixel.
+// GL's dynlight falloff (1 - x^2) times Lambert (the model wrap on models). The
+// shadow ray skips models and foliage: a bot's own body would otherwise eat
+// the flash at its muzzle. No highlight, like GL's dynlights.
+const float DYN_SLACK = 0.35;
+// The weapon light added to one pixel never exceeds this (largest channel),
+// so an explosion next to a wall cannot turn it into an HDR highlight.
+const float DYN_MAX = 1.0;
+
+void addDyn(int i, vec3 hit, vec3 n, vec3 sorigin, uint skipInst, bool wrap, inout vec3 acc)
+{
+    vec3 lp = lights.l[i].pos;
+    float x = length(lp - hit) / lights.l[i].radius;
+    if(x >= 1.0) return;
+    vec3 toL = lp - sorigin;
+    float mag = length(toL);
+    vec3 ldir = mag > 1e-4 ? (toL / mag) : n;
+    float ndotl = dot(n, ldir);
+    ndotl = wrap ? modelWrap(ndotl) : max(ndotl, 0.0);
+    vec3 c = lights.l[i].color * ((1.0 - x*x) * ndotl);
+    if(max(c.r, max(c.g, c.b)) < 0.004) return;
+    float fl = lights.l[i].flags;
+    if(fl < 4.5 && mag > DYN_SLACK + 0.02)
+    {
+        // Source radius in the flags (4 + r/128). r > 0: four rays to points of a
+        // disc of that radius facing the hit, stratified, rotated per pixel (fixed
+        // over time, so the penumbra is a still dither the anti-aliasing resolves
+        // instead of noise that crawls), and the light is the visible fraction.
+        float sr = (fl - 4.0) * 128.0;
+        if(sr < 0.05)
+        {
+            if(occluded(sorigin, ldir, mag - DYN_SLACK, RAYMASK_WORLD | RAYMASK_PORTAL, skipInst)) return;
+        }
+        else
+        {
+            vec3 up = abs(ldir.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+            vec3 tx = normalize(cross(up, ldir));
+            vec3 ty = cross(ldir, tx);
+            uvec2 q = gl_GlobalInvocationID.xy;
+            float rot = rand01(q.x * 1973u + q.y * 9277u + 26699u) * 6.28318530718;
+            float vis = 0.0;
+            for(int k = 0; k < 4; k++)
+            {
+                float a = rot + float(k) * 1.57079632679;
+                float rr = sr * sqrt((float(k) + 0.5) * 0.25);
+                vec3 tgt = lp + (tx * cos(a) + ty * sin(a)) * rr;
+                vec3 d = tgt - sorigin;
+                float dl = length(d);
+                if(dl <= DYN_SLACK + 0.02 || !occluded(sorigin, d / dl, dl - DYN_SLACK, RAYMASK_WORLD | RAYMASK_PORTAL, skipInst))
+                    vis += 0.25;
+            }
+            if(vis <= 0.0) return;
+            c *= vis;
+        }
+    }
+    acc += c;
+}
+
+vec3 dynCap(vec3 c)
+{
+    float m = max(c.r, max(c.g, c.b));
+    return m > DYN_MAX ? c * (DYN_MAX / m) : c;
 }
 
 // Integration HDR lot 1. Players (fullbright models) in HDR are shaded exactly
@@ -1225,6 +1391,7 @@ void shadePixel()
     vec3 base = vec3(0.0);
     float gain = 1.0;
     vec3 direct = vec3(0.0);
+    vec3 dynAcc = vec3(0.0);
     vec3 specAcc = vec3(0.0);
     vec3 maskrgb = vec3(0.0);
     bool hasmask = false;
@@ -1284,7 +1451,7 @@ void shadePixel()
     // composite can keep them while still dropping world hits behind an
     // untraced GL model (grass). No OpaqueEXT: MESH_ALPHA is a candidate,
     // skins.a decides. Opaque BLAS triangles still commit in hardware.
-    uint primarymask = RAYMASK_ALL;
+    uint primarymask = RAYMASK_ALL & ~RAYMASK_SMOKE;
     if((pc.mode & SHADE_MODELS) != 0)
         primarymask = RAYMASK_WORLD | RAYMASK_MODEL;
     else if((pc.mode & MASK_MODELS) != 0)
@@ -1687,7 +1854,7 @@ void shadePixel()
     // Models keep walls + foliage + smoke, and skip their own instance so a
     // closed mesh does not go black. They still see SELF so a crate next
     // to you takes your shadow.
-    uint noself = RAYMASK_WORLD | RAYMASK_MODEL | RAYMASK_CASTER;
+    uint noself = RAYMASK_WORLD | RAYMASK_MODEL | RAYMASK_CASTER | RAYMASK_SMOKE;
     uint withself = noself | RAYMASK_SELF;
     // omnimask is the always-evaluated omnis, nearmask the nearest-N finite
     // lamps. Gating cannot depend on the hit: a per-pixel decision would cut
@@ -1731,6 +1898,11 @@ void shadePixel()
     for(int j = 0; j < nA; j++)
     {
         int i = int(sh_listA[j]);
+        if(lights.l[i].flags >= 3.5)
+        {
+            addDyn(i, hit, n, sorigin, skipInst, ismodel, dynAcc);
+            continue;
+        }
         bool unlim = lights.l[i].radius <= 0.0;
         bool glowL = lights.l[i].flags >= 1.5 && !unlim;
         uint gmask = omnimask;
@@ -1787,12 +1959,14 @@ void shadePixel()
             else ndotl = max(ndotl, 0.0);
             if(ndotl > 0.0)
             {
-                if(!occluded(sorigin, sdir, tmax, sunmask, skipInst))
+                float vt;
+                float vis = shadowVis(sorigin, sdir, tmax, sunmask, skipInst, vt);
+                if(vis > 0.0)
                 {
-                    direct += lights.env.sunColor * ndotl;
-                    addSpec(sdir, n, dir, lights.env.sunColor, specMul, specAcc);
+                    direct += lights.env.sunColor * ndotl * vis;
+                    addSpec(sdir, n, dir, lights.env.sunColor * vis, specMul, specAcc);
 #ifndef HWRT_NO_REFL
-                    addWorldSpec(sdir, dir, lights.env.sunColor);
+                    addWorldSpec(sdir, dir, lights.env.sunColor * vis);
 #endif
                 }
             }
@@ -1826,19 +2000,15 @@ void shadePixel()
             vec3 sdir = bluenoise ? skyBlueNoiseDir(n, bnbase, s) : cosineHemi(n, seed);
             // Smooth normals: a ray that leaves under the flat face is mirrored.
             if(gSmoothed && dot(sdir, gFlatN) < 0.0) sdir = reflect(sdir, gFlatN);
-            if(nrdOn)
+            float t;
+            float vis = shadowVis(sorigin, sdir, tmax, skymask, skipInst, t);
+            if(t < 0.0)
+                skyvis += wsky * vis;
+            else if(nrdOn)
             {
-                float t = occludedT(sorigin, sdir, tmax, skymask, skipInst);
-                if(t < 0.0)
-                    skyvis += wsky;
-                else
-                {
-                    hitAcc += t;
-                    hitN++;
-                }
+                hitAcc += t;
+                hitN++;
             }
-            else if(!occluded(sorigin, sdir, tmax, skymask, skipInst))
-                skyvis += wsky;
         }
         // Misses are open sky, not a 65504 hit. Averaging FP16_MAX with
         // occluder T made every partially open pixel look infinitely far,
@@ -1880,6 +2050,11 @@ void shadePixel()
     }
     specAcc += wspec;
 #endif
+    // Weapon lights sit on top of the bake-style combine below, the way GL adds
+    // its dynlights to the lightmap. On the world they ride with specAcc so the
+    // NRD compose, which never sees them, shows the same sum; models add them
+    // to their light before the model caps.
+    if(!ismodel) specAcc += albedo * dynCap(dynAcc) * gain;
 
     valid = true;
     } while(false);
@@ -2236,6 +2411,8 @@ void shadePixel()
         vec3 sky = base + max(skycol - base, vec3(0.0)) * skyvis;
         lit = base + (max(sunlamps, sky) - base) * gain;
     }
+
+    if(ismodel) lit += dynCap(dynAcc) * gain;
 
     // Visibility floor, not GL's 1.5 plate. Spec and envmap are added after
     // so the floor cannot kill the metal. Same 1.5 cap as other models —

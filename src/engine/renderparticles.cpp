@@ -126,6 +126,7 @@ struct particle
     bvec color;
     uchar flags;
     float size;
+    uchar tag; // particletag at creation (fits the padding before the union)
     union
     {
         const char *text;
@@ -138,6 +139,8 @@ struct particle
         };
     }; 
 };
+
+int particletag = PTAG_NONE;
 
 struct partvert
 {
@@ -325,6 +328,7 @@ struct listrenderer : partrenderer
         parempty = p->next;
         p->next = list;
         list = p;
+        p->tag = uchar(particletag);
         p->o = o;
         p->d = d;
         p->gravity = gravity;
@@ -752,6 +756,7 @@ struct varenderer : partrenderer
         p->size = size;
         p->owner = NULL;
         p->flags = 0x80 | (rndmask ? rnd(0x80) & rndmask : 0);
+        p->tag = uchar(particletag);
         lastupdate = -1;
         return p;
     }
@@ -897,40 +902,24 @@ struct varenderer : partrenderer
         // (steps = dist*2). The quad's bounding radius is size*SQRT2, same
         // as the soft-particle depthfx bound. Adjacent discs overlap, which
         // is the trail — thinning them turned the shadow into pearls.
-        int keep = 0;
+        // Every live puff is reported; the RT side applies the puff cap.
         loopi(numparts)
         {
             particle *p = &parts[i];
             if(p->fade < 8) continue;
-            if(p->color.r != 0x40 || p->color.g != 0x40 || p->color.b != 0x40) continue;
-            int blend, ts;
-            vec o, d;
-            calc(p, blend, ts, o, d, false);
-            if(blend <= 6) continue;
-            keep++;
-        }
-        int stride = 1;
-        const int maxpuffs = 1024;
-        if(keep > maxpuffs) stride = (keep + maxpuffs - 1) / maxpuffs;
-        int seen = 0;
-        loopi(numparts)
-        {
-            particle *p = &parts[i];
-            if(p->fade < 8) continue;
-            if(p->color.r != 0x40 || p->color.g != 0x40 || p->color.b != 0x40) continue;
+            if(p->tag != PTAG_WEAPONSMOKE) continue;
             vec o, d;
             int blend, ts;
             calc(p, blend, ts, o, d, false);
             if(blend <= 6) continue;
-            if((seen++ % stride) != 0) continue;
             // Same punch as the sprite (modifyblend <<2): the puff stays
-            // visible most of its life, then fades. Shadow follows that,
-            // still capped so it is smoke, not a wall.
+            // visible most of its life, then fades. Shadow follows that.
             int vis = min(blend << 2, 255);
-            float life = vis / 255.0f;
-            int opac = int(life * 0.45f * 255.0f + 0.5f);
-            float rad = p->size * SQRT2;
-            hwrtnotesmokepuff(o, rad, opac);
+            // Spawn point and time do not change over the puff's life: a
+            // stable identity for the cap and the per-puff variation.
+            uint seed = uint(p->millis) * 2654435761u;
+            loopk(3) { uint b; memcpy(&b, &p->o[k], sizeof(b)); seed = (seed ^ b) * 16777619u; }
+            hwrtnotesmokepuff(o, p->size * SQRT2, vis, seed);
         }
     }
 };
@@ -1473,6 +1462,25 @@ void particle_fireball(const vec &dest, float maxsize, int type, int fade, int c
     float growth = maxsize - size;
     if(fade < 0) fade = int(growth*20);
     newparticle(dest, vec(0, 0, 1), fade, type, color, size)->val = growth;
+}
+
+// The explosion fireball drawn at o (RT weapon lights, dynlight.cpp): when it
+// started, how long it lasts, its colour (0..1) and texture (blue = plasma.png).
+bool findfireball(const vec &o, int &millis, int &fade, vec &color, bool &blue)
+{
+    loopk(2)
+    {
+        for(listparticle *p = (k ? bluefireballs : fireballs).list; p; p = p->next)
+        {
+            if(p->fade <= 5 || p->o.dist(o) > 0.5f) continue;
+            millis = p->millis;
+            fade = p->fade;
+            color = vec(p->color.x, p->color.y, p->color.z).div(255.0f);
+            blue = k != 0;
+            return true;
+        }
+    }
+    return false;
 }
 
 //dir = 0..6 where 0=up

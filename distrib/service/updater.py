@@ -21,6 +21,7 @@ Compatible avec les anciens clients (1.2) qui n'envoient pas d'action.
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
 import os
 import re
@@ -68,6 +69,42 @@ _st = {
 _manifest = None
 _pointer = None
 _worker = None
+LOG_MAX = 512 * 1024
+UNCHANGED = "Your game is unchanged."
+
+
+class PortalError(RuntimeError):
+    """The network answered with a web page (hotel/school sign-in page)."""
+
+
+# --------------------------------------------------------------------------
+# journal (state/logs/updater.log, next to launcher.log)
+
+def log(text):
+    """One dated line per event; errors carry their technical detail."""
+    try:
+        path = state_dir() / "logs" / "updater.log"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.is_file() and path.stat().st_size > LOG_MAX:
+            os.replace(path, path.with_name("updater.old.log"))
+        line = time.strftime("%Y-%m-%d %H:%M:%S ") + str(text).replace("\r", " ").replace("\n", " | ")
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(line + "\n")
+    except OSError:
+        pass
+
+
+def _detail(exc):
+    """Technical description for the journal (never shown in the game)."""
+    parts = [type(exc).__name__]
+    reason = getattr(exc, "reason", None)
+    if reason is not None:
+        parts.append(f"reason={type(reason).__name__}: {reason}")
+    code = getattr(exc, "code", None)
+    if code is not None:
+        parts.append(f"code={code}")
+    parts.append(str(exc)[:400])
+    return " ".join(parts)
 
 
 # --------------------------------------------------------------------------
@@ -266,12 +303,32 @@ def _check_url(url):
     raise RuntimeError("update address must use https")
 
 
+def _is_html(resp, head=b""):
+    ctype = ""
+    if resp is not None:
+        try:
+            ctype = (resp.headers.get("Content-Type") or "").lower()
+        except AttributeError:
+            pass
+    start = head.lstrip()[:15].lower()
+    return "text/html" in ctype or start.startswith(b"<!doctype html") or start.startswith(b"<html")
+
+
 def _open(url, headers=None, timeout=30):
     _check_url(url)
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, **(headers or {})})
     resp = urllib.request.urlopen(req, timeout=timeout, context=_ssl_context()) \
         if url.startswith("https") else urllib.request.urlopen(req, timeout=timeout)
-    _check_url(resp.geturl())  # une redirection ne doit pas quitter https
+    final = resp.geturl()
+    try:
+        _check_url(final)  # une redirection ne doit pas quitter https
+    except RuntimeError:
+        resp.close()
+        # Typical of a hotel/school network sending every request to its sign-in page.
+        raise PortalError(f"redirected to a non-secure page: {final[:120]}")
+    if _is_html(resp):
+        resp.close()
+        raise PortalError(f"got a web page (text/html) instead of an update file from {url[:120]}")
     return resp
 
 
@@ -280,18 +337,40 @@ def fetch_small(url, limit):
         data = resp.read(limit + 1)
     if len(data) > limit:
         raise RuntimeError("update file too large")
+    if _is_html(None, data[:64]):
+        raise PortalError(f"got a web page instead of an update file from {url[:120]}")
     return data
 
 
 def _friendly(exc):
+    """Short English sentence for the Updates menu (ASCII, one line)."""
     text = str(exc)
+    if isinstance(exc, PortalError):
+        return "The network showed a web page instead of the update (hotel/school wifi sign-in page?)."
     if isinstance(exc, urllib.error.HTTPError):
-        return f"server answered {exc.code}"
+        return f"The update server answered with an error (HTTP {exc.code}). Try again later."
+    reason = getattr(exc, "reason", None)
+    if isinstance(exc, ssl.SSLError) or isinstance(reason, ssl.SSLError) or "CERTIFICATE" in text.upper():
+        return ("Secure connection to the update server failed (a hotel/school network or an antivirus "
+                "may be intercepting it).")
     if isinstance(exc, (urllib.error.URLError, TimeoutError, ConnectionError)) or "timed out" in text:
-        return "no connection to the update server"
-    if isinstance(exc, ssl.SSLError) or "CERTIFICATE" in text.upper():
-        return "secure connection failed (certificate)"
-    return text[:180]
+        return "Could not reach the update server (no internet, or a hotel/school network blocks it)."
+    if isinstance(exc, ValueError) and "JSON" in type(exc).__name__ + text:
+        return "The update server sent something unreadable (hotel/school network?)."
+    if "not enough disk space" in text:
+        return "Not enough disk space for the update (" + text.split(": ", 1)[-1][:60] + "). Free some space and try again."
+    if "hash mismatch" in text or "corrupted" in text or "failed verification" in text:
+        return "A downloaded file was damaged (checksum mismatch) and was deleted. Try again."
+    if "incomplete" in text:
+        return "The download was interrupted. Click again to resume where it stopped."
+    return "Update failed: " + text[:120] + "."
+
+
+def _fail(what, exc, **kw):
+    msg = f"{_friendly(exc)} {UNCHANGED}"
+    log(f"ERROR {what}: {_detail(exc)}")
+    log(f"  shown: {msg}")
+    _set(state="error", msg=msg, **kw)
 
 
 # --------------------------------------------------------------------------
@@ -340,6 +419,7 @@ def check(force=False):
         _st.update(state="checking", msg="checking for updates...", progress=0)
     url = channel_url()
     local = installed_version()
+    log(f"check: installed {local}, channel {url or '(none)'}")
     if not url:
         # Copie de travail (atelier) : pas de canal, rien a chercher.
         _set(state="uptodate", remote="", size=0, checked=time.time(),
@@ -356,6 +436,7 @@ def check(force=False):
             _manifest = None
             _set(state="uptodate", remote=remote, size=0, checked=time.time(),
                  msg=f"L4ZY {local} is up to date (checked {time.strftime('%H:%M')})")
+            log(f"check: up to date (channel has {remote})")
             return
         murl = urljoin(url, str(pointer.get("manifest") or ""))
         msha = str(pointer.get("manifest_sha256") or "").lower()
@@ -375,12 +456,14 @@ def check(force=False):
         if notes:
             msg += f" - {notes}"
         _set(state="available", remote=remote, size=size, checked=time.time(), msg=msg)
+        log(f"check: {remote} available, {len(changed)} components changed ({', '.join(changed)}), {human_size(size)}")
         # Intention deja donnee (telechargement interrompu par une fermeture) :
         # on reprend tout seul.
         if (stage_dir() / "APPLY").is_file() and not (stage_dir() / "READY").is_file():
+            log("check: a download was interrupted earlier, resuming it")
             start_download(restart=_read_apply().get("restart", False))
     except Exception as exc:  # noqa: BLE001
-        _set(state="error", checked=time.time(), msg=f"update check failed: {_friendly(exc)}")
+        _fail("check failed", exc, checked=time.time())
 
 
 # --------------------------------------------------------------------------
@@ -411,6 +494,8 @@ def _download_archive(url, dest: Path, size, sha, progress):
             raise
     with resp:
         status = getattr(resp, "status", 200)
+        if have:
+            log(f"download: resuming {dest.name} at {have} bytes (server status {status})")
         if have and status != 206:
             have = 0  # le serveur ignore Range : on repart de zero
         mode = "ab" if have else "wb"
@@ -418,7 +503,14 @@ def _download_archive(url, dest: Path, size, sha, progress):
         progress(written)
         with open(part, mode) as fh:
             while True:
-                chunk = resp.read(1024 * 1024)
+                try:
+                    chunk = resp.read(1024 * 1024)
+                except (OSError, http.client.HTTPException) as exc:
+                    # Connection lost mid-file: what arrived stays in .part
+                    # and the next attempt resumes from there.
+                    fh.flush()
+                    raise RuntimeError(f"download incomplete (network interrupted?): {type(exc).__name__} "
+                                       f"after {written} of {size} bytes") from exc
                 if not chunk:
                     break
                 written += len(chunk)
@@ -427,10 +519,10 @@ def _download_archive(url, dest: Path, size, sha, progress):
                 fh.write(chunk)
                 progress(written)
     if part.stat().st_size != size:
-        raise RuntimeError("download incomplete (network interrupted?)")
+        raise RuntimeError(f"download incomplete (network interrupted?): {part.stat().st_size} of {size} bytes")
     if _sha256(part) != sha:
         part.unlink(missing_ok=True)
-        raise RuntimeError("downloaded file is corrupted (hash mismatch), deleted")
+        raise RuntimeError(f"downloaded file is corrupted (hash mismatch), deleted: {dest.name}")
     os.replace(part, dest)
 
 
@@ -510,8 +602,11 @@ def _prepare(man, restart):
     inst_comps = inst.get("components") or {}
 
     # Nouveau depart propre si un ancien staging traine pour une autre version.
+    # Also when it was prepared from another installed version.
     old_ready = (stage / "READY")
-    if old_ready.is_file() and old_ready.read_text(encoding="utf-8").strip() != version:
+    if old_ready.is_file() and (old_ready.read_text(encoding="utf-8").strip() != version
+                                or _plan_from(stage) != installed_version()):
+        log("prepare: discarding an old staged update")
         shutil.rmtree(stage, ignore_errors=True)
     apply_intent = (stage / "APPLY").is_file()
     shutil.rmtree(stage / "files", ignore_errors=True)
@@ -523,8 +618,12 @@ def _prepare(man, restart):
     total = sum(int(comps[n]["archive_size"]) for n in changed)
     unpacked = sum(int(m[0]) for n in changed for m in comps[n]["files"].values())
     free = shutil.disk_usage(state_dir()).free
+    if os.environ.get("L4ZY_TEST_FREE_BYTES", "").isdigit() and os.environ.get("L4ZY_TEST_ALLOW_LOCAL_HTTP") == "1":
+        free = int(os.environ["L4ZY_TEST_FREE_BYTES"])  # local tests only, like local http
+    log(f"prepare: {version} from {installed_version()}, download {human_size(total)}, free {human_size(free)}")
     if free < total + unpacked + DISK_MARGIN:
-        raise RuntimeError(f"not enough disk space: need {human_size(total + unpacked + DISK_MARGIN)}")
+        raise RuntimeError(f"not enough disk space: need {human_size(total + unpacked + DISK_MARGIN)}, "
+                           f"{human_size(free)} free")
 
     # Cibles sures avant d'ecrire quoi que ce soit.
     for n in changed:
@@ -616,9 +715,9 @@ def _download_worker(man, restart):
         _prepare(man, restart)
         _set(state="ready", progress=100, restart=_read_apply().get("restart", False),
              msg=f"L4ZY {man['version']} is ready: restart the game to install it")
+        log(f"prepare: {man['version']} ready to install")
     except Exception as exc:  # noqa: BLE001
-        _set(state="error", progress=0,
-             msg=f"update download failed: {_friendly(exc)}. Your game is unchanged, try again later")
+        _fail("download failed", exc, progress=0)
     finally:
         with _lock:
             _worker = None
@@ -640,6 +739,7 @@ def start_download(restart=True):
         if not is_newer(man["version"], installed_version()):
             raise RuntimeError("no update waiting")
         _st.update(state="downloading", progress=1, msg="starting download...")
+        log(f"download: starting {man['version']} (restart={'1' if restart else '0'})")
         _worker = threading.Thread(target=_download_worker, args=(man, restart), daemon=True)
         _worker.start()
 
@@ -652,6 +752,7 @@ def request_restart():
         _write_apply(True)
         _st["restart"] = True
         _st["msg"] = "closing the game to install the update..."
+        log("restart requested: the launcher installs the update when the game closes")
 
 
 # --------------------------------------------------------------------------
@@ -675,25 +776,50 @@ def _last_result():
     return data
 
 
+def _plan_from(stage):
+    """Version a staged plan was prepared from ("" if unknown)."""
+    try:
+        for line in (Path(stage) / "plan.txt").read_text(encoding="utf-8").splitlines():
+            if line.startswith("from "):
+                return line[5:].strip()
+    except OSError:
+        pass
+    return ""
+
+
 def startup():
     local = installed_version()
     res = _last_result()
     stage = stage_dir()
     ready = (stage / "READY")
+    log(f"service start: installed {local}")
     if ready.is_file():
         ver = ready.read_text(encoding="utf-8").strip()
-        if is_newer(ver, local):
+        src = _plan_from(stage)
+        if is_newer(ver, local) and src == local:
             _set(state="ready", remote=ver, progress=100, restart=_read_apply().get("restart", False),
                  msg=f"L4ZY {ver} is ready: restart the game to install it")
+            log(f"startup: {ver} is staged and ready")
         else:
+            # Prepared for another installed version (go back to the previous
+            # version, reinstall): never applied, downloaded again if needed.
+            log(f"startup: staged update {ver} (prepared from {src or '?'}) does not fit installed {local}, discarded")
             shutil.rmtree(stage, ignore_errors=True)
+    elif (stage / "APPLY").is_file():
+        log("startup: an earlier download was interrupted; it resumes after the next check")
     if res:
         if res.get("ok") == "1":
             _set(msg=f"updated to L4ZY {res.get('version', local)}")
+            log(f"startup: last update installed ({res.get('version', local)})")
             shutil.rmtree(dl_dir(), ignore_errors=True)
+        elif "rolled back" in res.get("message", ""):
+            log(f"startup: went back to the previous version ({local})")
+            _set(msg=f"Back to the previous version (L4ZY {local}).")
         else:
+            log(f"startup: last update result: {res.get('message', '?')}")
             _set(state="error" if _st["state"] != "ready" else "ready",
-                 msg=_ascii(f"last update failed: {res.get('message', '?')} - previous version kept", 220))
+                 msg=_ascii(f"The last update could not be installed ({res.get('message', '?')}). "
+                            f"Your previous version was kept.", 220))
     threading.Thread(target=check, daemon=True).start()
 
 

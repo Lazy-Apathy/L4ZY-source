@@ -30,6 +30,9 @@ VIAddVersionKey /LANG=0 "LegalCopyright" "Sauerbraten engine zlib licence; see d
 !include "MUI2.nsh"
 !include "FileFunc.nsh"
 !include "LogicLib.nsh"
+!include "StrFunc.nsh"
+${StrStr}
+${UnStrStr}
 
 !define MUI_ICON "${ICON}"
 !define MUI_UNICON "${ICON}"
@@ -38,6 +41,7 @@ VIAddVersionKey /LANG=0 "LegalCopyright" "Sauerbraten engine zlib licence; see d
 !define MUI_FINISHPAGE_RUN_TEXT "$(RunNow)"
 
 !insertmacro MUI_PAGE_WELCOME
+!define MUI_PAGE_CUSTOMFUNCTION_LEAVE DirLeave
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_COMPONENTS
 !insertmacro MUI_PAGE_INSTFILES
@@ -60,6 +64,10 @@ LangString Junction ${LANG_FRENCH} "Ce dossier contient une jonction ou un lien 
 LangString Junction ${LANG_ENGLISH} "This folder contains a junction or link ($R9). Choose another folder."
 LangString Rollback ${LANG_FRENCH} "L4ZY - revenir à la version précédente"
 LangString Rollback ${LANG_ENGLISH} "L4ZY - go back to the previous version"
+LangString NotL4zy ${LANG_FRENCH} "Ce dossier contient déjà un autre jeu ou d'autres fichiers ($R9) et ce n'est pas une installation L4ZY. L4ZY n'y touche pas : choisis un dossier vide ou ton dossier L4ZY."
+LangString NotL4zy ${LANG_ENGLISH} "This folder already holds another game or other files ($R9) and is not an L4ZY installation. L4ZY will not touch it: choose an empty folder or your L4ZY folder."
+LangString UnNotL4zy ${LANG_FRENCH} "Ce dossier n'est pas une installation L4ZY : rien n'a été supprimé."
+LangString UnNotL4zy ${LANG_ENGLISH} "This folder is not an L4ZY installation: nothing was removed."
 LangString KeepData ${LANG_FRENCH} "Tes réglages, corrections de traduction et modèles sont conservés (Documents\My Games\L4ZY et %LOCALAPPDATA%\L4ZY)."
 LangString KeepData ${LANG_ENGLISH} "Your settings, translation corrections and models are kept (Documents\My Games\L4ZY and %LOCALAPPDATA%\L4ZY)."
 
@@ -87,6 +95,86 @@ Function .onInit
     ${IfNot} ${Errors}
         StrCpy $NoShortcuts "1"
         SectionSetFlags 1 0
+    ${EndIf}
+FunctionEnd
+
+; An L4ZY installation: state\installed.json written by the L4ZY setup or
+; updater (product "l4zy"). Older or damaged state: L4ZY.exe next to l4zy.ini.
+; Out: $0 = 1 when $INSTDIR is one.
+!macro _IsL4zyDir UN
+Function ${UN}IsL4zyDir
+    StrCpy $0 0
+    ClearErrors
+    FileOpen $1 "$INSTDIR\state\installed.json" r
+    ${IfNot} ${Errors}
+        ${Do}
+            ClearErrors
+            FileRead $1 $2
+            ${If} ${Errors}
+                ${ExitDo}
+            ${EndIf}
+            !if "${UN}" == "un."
+                ${UnStrStr} $3 $2 '"product": "l4zy"'
+            !else
+                ${StrStr} $3 $2 '"product": "l4zy"'
+            !endif
+            ${If} $3 != ""
+                StrCpy $0 1
+                ${ExitDo}
+            ${EndIf}
+        ${Loop}
+        FileClose $1
+    ${EndIf}
+    ${If} $0 == 0
+    ${AndIf} ${FileExists} "$INSTDIR\L4ZY.exe"
+    ${AndIf} ${FileExists} "$INSTDIR\l4zy.ini"
+        StrCpy $0 1
+    ${EndIf}
+FunctionEnd
+!macroend
+!insertmacro _IsL4zyDir ""
+!insertmacro _IsL4zyDir "un."
+
+; Never empty bin64/data/packages... of a folder that is not an L4ZY
+; installation (Sauerbraten folder, another game, a folder typed by hand).
+; Out: $0 = 1 when the folder may be used, else $0 = 0 and $R9 = what was found.
+!macro _Found ITEM SHOWN
+    ${If} $R9 == ""
+    ${AndIf} ${FileExists} "$INSTDIR\${ITEM}"
+        StrCpy $R9 "${SHOWN}"
+    ${EndIf}
+!macroend
+Function CheckTarget
+    Call IsL4zyDir
+    ${If} $0 == 1
+        Return
+    ${EndIf}
+    StrCpy $R9 ""
+    !insertmacro _Found "bin64\*.*" "bin64"
+    !insertmacro _Found "bin\*.*" "bin"
+    !insertmacro _Found "data\*.*" "data"
+    !insertmacro _Found "packages\*.*" "packages"
+    !insertmacro _Found "runtime\*.*" "runtime"
+    !insertmacro _Found "service\*.*" "service"
+    !insertmacro _Found "docs\*.*" "docs"
+    !insertmacro _Found "state\*.*" "state"
+    !insertmacro _Found "sauerbraten.bat" "sauerbraten.bat"
+    !insertmacro _Found "L4ZY.exe" "L4ZY.exe"
+    !insertmacro _Found "autoexec.cfg" "autoexec.cfg"
+    !insertmacro _Found "traduction.cfg" "traduction.cfg"
+    !insertmacro _Found "config.cfg" "config.cfg"
+    ${If} $R9 == ""
+        StrCpy $0 1
+    ${Else}
+        StrCpy $0 0
+    ${EndIf}
+FunctionEnd
+
+Function DirLeave
+    Call CheckTarget
+    ${If} $0 != 1
+        MessageBox MB_ICONSTOP "$(NotL4zy)"
+        Abort
     ${EndIf}
 FunctionEnd
 
@@ -143,6 +231,13 @@ Section "!$(SecGame)" SecMain
         System::Call 'kernel32::CloseHandle(p r1)'
     ${EndIf}
     Call CheckReparse
+    ; Silent installs skip the directory page: same check here.
+    Call CheckTarget
+    ${If} $0 != 1
+        MessageBox MB_ICONSTOP "$(NotL4zy)" /SD IDOK
+        SetErrorLevel 3
+        Quit
+    ${EndIf}
 
     ; Reinstallation : on remplace les fichiers distribues, pas les donnees.
     RMDir /r "$INSTDIR\bin64"
@@ -212,6 +307,12 @@ Section "Uninstall"
     !insertmacro _NoJunction "service"
     !insertmacro _NoJunction "docs"
     !insertmacro _NoJunction "state"
+    Call un.IsL4zyDir
+    ${If} $0 != 1
+        MessageBox MB_ICONSTOP "$(UnNotL4zy)" /SD IDOK
+        SetErrorLevel 3
+        Quit
+    ${EndIf}
     RMDir /r "$INSTDIR\bin64"
     RMDir /r "$INSTDIR\data"
     RMDir /r "$INSTDIR\packages"

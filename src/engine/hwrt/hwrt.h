@@ -461,6 +461,9 @@ enum
 // (1..64), the extra slots go after the animated ones (97..), so every index the
 // old layout produced is unchanged and the whole table still fits the 8 bits the
 // smoke puffs leave for it (customIndex bits 8-15 carry their opacity).
+// Soft smoke puffs set bit 16 (SMOKE_SOFT in hitlight.comp): never a surface,
+// only optical depth for shadow and sky rays.
+enum { HWRT_SMOKE_SOFT = 0x10000 };
 enum
 {
     HWRT_MODEL_BLAS_CAP = 128,
@@ -483,7 +486,7 @@ enum { HWRT_ANIM_REBUILD_EVERY = 24, HWRT_ANIM_REBUILDS_PER_FRAME = 2 };
 // Instance ray masks, mirrored by the RAYMASK_ constants in hitlight.comp.
 // Kept separate so a primary ray can ask for the world alone while shadow and
 // sky rays still see every model.
-enum { HWRT_RAYMASK_WORLD = 0x01, HWRT_RAYMASK_MODEL = 0x02, HWRT_RAYMASK_SELF = 0x04, HWRT_RAYMASK_CASTER = 0x08, HWRT_RAYMASK_PORTAL = 0x10, HWRT_RAYMASK_ALL = 0xFF };
+enum { HWRT_RAYMASK_WORLD = 0x01, HWRT_RAYMASK_MODEL = 0x02, HWRT_RAYMASK_SELF = 0x04, HWRT_RAYMASK_CASTER = 0x08, HWRT_RAYMASK_PORTAL = 0x10, HWRT_RAYMASK_SMOKE = 0x20, HWRT_RAYMASK_ALL = 0xFF };
 
 // Extra bits in the lighting push-constant `mode` int (the struct is 128 bytes).
 // They can be set together: SHADE_MODELS wins for the primary cull mask,
@@ -596,7 +599,7 @@ extern void hwrtpreloadmodel(const char *name);
 extern void hwrtbeginscenemodels();
 extern void hwrtendscenemodels();
 extern void hwrtnotescenemodel(const char *mdl, const vec &o, float yaw, float pitch, int flags, dynent *d);
-extern void hwrtnotesmokepuff(const vec &o, float radius, int opacity);
+extern void hwrtnotesmokepuff(const vec &o, float radius, int life, uint seed);
 
 extern bool hwrthasshade();
 extern int hwrtshadeepoch;

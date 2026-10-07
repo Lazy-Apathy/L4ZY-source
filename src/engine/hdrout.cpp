@@ -421,7 +421,7 @@ static void note_effective(const char *presentation)
     static string lastsig;
     if(!strcmp(lastsig, sig)) return;
     copystring(lastsig, sig);
-    logoutf("comparateur effectif cle=%s texte=%s presentation=%s enfant=%d hdr=%d out=%d exp=%.3f ref=%d max=%d hud=%d ngx=%d pret=%d courbe=%d lumiere_lot4=%d eclairage_rt=%d correction_lumiere_active=%d flammes_lot5=%d ciel_lot6_actif=%d couleur_lot7_active=%d jour_lot8_actif=%d dose_couleur_lot8=%d",
+    logoutf("hdrout compare effective key=%s text=%s presentation=%s child=%d hdr=%d out=%d exp=%.3f ref=%d max=%d hud=%d ngx=%d ready=%d curve=%d light_lot4=%d rt_lighting=%d light_fix_active=%d flames_lot5=%d sky_lot6_active=%d colour_lot7_active=%d day_lot8_active=%d colour_dose_lot8=%d",
             label_key(eff), eff, presentation ? presentation : "", g_child_on ? 1 : 0,
             hwrthdr, hdrout, hwrthdrexp, hdroutref, hdroutmax, hdrouthud, ngx, g_ready ? 1 : 0, hdroutcurve,
             hdroutlumiere, rt, fix, flame, sky, col, day, hdroutjourcouleur);
@@ -453,7 +453,7 @@ static void take_sonde(const char *presentation)
     float cz = camera1 ? camera1->o.z : 0.f;
     float yaw = camera1 ? camera1->yaw : 0.f;
     float pitch = camera1 ? camera1->pitch : 0.f;
-    logoutf("comparateur sonde cle=%s texte=%s presentation=%s enfant=%d hdr=%d out=%d exp=%.3f ref=%d max=%d hud=%d rt=%d nrd=%d ngx=%d cam=%.3f %.3f %.3f yaw=%.3f pitch=%.3f rgb=%.5f %.5f %.5f",
+    logoutf("hdrout compare probe key=%s text=%s presentation=%s child=%d hdr=%d out=%d exp=%.3f ref=%d max=%d hud=%d rt=%d nrd=%d ngx=%d cam=%.3f %.3f %.3f yaw=%.3f pitch=%.3f rgb=%.5f %.5f %.5f",
             label_key(eff), eff, presentation ? presentation : "", g_child_on ? 1 : 0,
             hwrthdr, hdrout, hwrthdrexp, hdroutref, hdroutmax, hdrouthud,
             getvar("hwrt"), getvar("hwrtnrd"), hwrtngxmodeapplied(),
@@ -479,27 +479,27 @@ static void log_state(const char *why)
 {
     int incomplete = 0;
     float mx = used_max_nits(&incomplete);
-    logoutf("hdrout mode pourquoi=%s hdr=%d out=%d effectif=%s raison=%s",
+    logoutf("hdrout mode why=%s hdr=%d out=%d effective=%s reason=%s",
             why ? why : "", hwrthdr, hdrout, mode_name(), g_reason[0] ? g_reason : "ok");
     logoutf("hdrout gpu gl=%s d3d=%s luid=%s", g_gl, g_adapter, g_luid);
-    logoutf("hdrout ecran %s hdr_dxgi=%d espace=%d %s bits=%u",
+    logoutf("hdrout screen %s hdr_dxgi=%d colourspace=%d %s bits=%u",
             g_output, g_hdr, g_cs, cs_name(g_cs), g_bits);
-    logoutf("hdrout caps min=%.3f max=%.3f plein_cadre=%.3f nits sdr_blanc_brut=%u sdr_blanc_nits=%.1f ac_supporte=%d ac_actif=%d",
+    logoutf("hdrout caps min=%.3f max=%.3f full_frame=%.3f nits sdr_white_raw=%u sdr_white_nits=%.1f ac_supported=%d ac_on=%d",
             g_min_nits, g_max_nits, g_full_nits, g_sdr_raw, g_sdr_nits, g_ac_sup, g_ac_on);
-    logoutf("hdrout format RGBA16F espace_present=G10_scRGB support=0x%X set=0x%08X taille=%dx%d",
+    logoutf("hdrout format RGBA16F present_colourspace=G10_scRGB support=0x%X set=0x%08X size=%dx%d",
             g_support, g_sethr, g_w, g_h);
-    logoutf("hdrout cal ref=%d max_utilise=%.1f incomplet=%d hud=%.1f exp=%.3f courbe=%s courbe_num=%d lumiere_lot4=%d flammes_lot5=%d ciel_lot6=%d ciel_lot6_actif=%d couleur_lot7=%d couleur_lot7_active=%d jour_lot8=%d jour_lot8_actif=%d dose_couleur_lot8=%d eclairage_rt=%d",
+    logoutf("hdrout cal ref=%d max_used=%.1f incomplete=%d hud=%.1f exp=%.3f curve=%s curve_num=%d light_lot4=%d flames_lot5=%d sky_lot6=%d sky_lot6_active=%d colour_lot7=%d colour_lot7_active=%d day_lot8=%d day_lot8_active=%d colour_dose_lot8=%d rt_lighting=%d",
             hdroutref, mx, incomplete, hud_nits(), hwrthdrexp, curve_name(), hdroutcurve, hdroutlumiere, hdroutflamme, hdroutciel, hdrout_skyfix_level(), hdroutcouleur, hdrout_colorfix_level(), hdroutjour, hdrout_dayfix_level(), hdroutjourcouleur, rt_lighting() ? 1 : 0);
-    logoutf("hdrout blanc SDR Windows %.1f nits est lu et n'est pas un gain. scRGB 1 = 80 nits n'impose pas scene 1 = 80 nits.",
+    logoutf("hdrout Windows SDR white %.1f nits is read, not used as a gain. scRGB 1 = 80 nits does not mean scene 1 = 80 nits.",
             g_sdr_nits);
     if(g_ready && hwrthdr && !hdrout)
-        logoutf("hdrout comparaison apercu SDR dans la surface HDR. Le mode physique de l'ecran n'est pas change.");
+        logoutf("hdrout comparison: SDR preview in the HDR surface. The physical screen mode is not changed.");
     static int fallback_logged = 0;
     if(!hwrthdr || g_ready) fallback_logged = 0;
     else if(g_tried && !fallback_logged)
     {
         fallback_logged = 1;
-        conoutf("SDR - sortie HDR indisponible (%s)", g_reason[0] ? g_reason : "?");
+        conoutf("hdrout SDR: native HDR output unavailable (%s)", g_reason[0] ? g_reason : "?");
     }
     hflush();
 }
@@ -507,16 +507,16 @@ static void log_state(const char *why)
 static void hdrout_on_pref()
 {
     if(!g_tried) return;
-    log_state("reglage");
+    log_state("setting");
 }
 
 static void hdrout_on_curve()
 {
     if(!g_tried) return;
-    logoutf("hdrout variante %s courbe %d lumiere_lot4 %d flammes_lot5 %d ciel_lot6 %d couleur_lot7 %d jour_lot8 %d dose_couleur %d. Exposition %.3f, blanc %d, pic %d et HUD %d ne changent pas. Ce n'est pas un reglage de calibration.",
+    logoutf("hdrout variant %s curve %d light_lot4 %d flames_lot5 %d sky_lot6 %d colour_lot7 %d day_lot8 %d colour_dose %d. Exposure %.3f, white %d, peak %d and HUD %d are unchanged. Not a calibration setting.",
             curve_name(), hdroutcurve, hdroutlumiere, hdroutflamme, hdroutciel, hdroutcouleur, hdroutjour, hdroutjourcouleur, hwrthdrexp, hdroutref, hdroutmax, hdrouthud);
     conoutf("%s", native_label());
-    log_state("courbe");
+    log_state("curve");
 }
 
 // The light colour and the flame target change the scene before DLAA/DLSS:
@@ -640,7 +640,7 @@ static bool load_wgl()
     pUnlock = (PFN_wglDXUnlockObjectsNV)wglGetProcAddress("wglDXUnlockObjectsNV");
     if(!pOpen || !pClose || !pReg || !pUnreg || !pLock || !pUnlock)
     {
-        set_reason("WGL_NV_DX_interop2 absent");
+        set_reason("WGL_NV_DX_interop2 missing");
         return false;
     }
     return true;
@@ -657,7 +657,7 @@ static void release_views()
     if(g_locked && pUnlock && g_dx && g_dxobj)
     {
         if(!pUnlock(g_dx, 1, &g_dxobj))
-            logoutf("hdrout api wglDXUnlockObjectsNV echoue");
+            logoutf("hdrout api wglDXUnlockObjectsNV failed");
     }
     g_locked = false;
     g_ui = false;
@@ -672,8 +672,69 @@ static void release_views()
     if(g_staging) { g_staging->Release(); g_staging = NULL; }
 }
 
+// Borderless at a chosen resolution (main.cpp): the swap chain keeps the
+// render size and DXGI_SCALING_STRETCH stretches it over the child window,
+// which covers the rectangle the picture is shown in. With kept proportions a
+// black child below it fills the bars, so the 8-bit GL window never shows there.
+extern void screendisplayrect(int &x, int &y, int &w, int &h);
+static HWND g_bars = NULL;
+static bool g_bars_want = false, g_bars_on = false;
+static int g_cx = -1, g_cy = -1, g_cw = -1, g_ch = -1;
+
+static LRESULT CALLBACK bars_proc(HWND hwnd, UINT msg, WPARAM w, LPARAM l)
+{
+    if(msg == WM_NCHITTEST) return HTTRANSPARENT;
+    return DefWindowProcW(hwnd, msg, w, l);
+}
+
+static void show_bars(bool on)
+{
+    if(on && !g_bars && g_parent)
+    {
+        HINSTANCE inst = GetModuleHandle(NULL);
+        WNDCLASSW wc;
+        memset(&wc, 0, sizeof(wc));
+        wc.lpfnWndProc = bars_proc;
+        wc.hInstance = inst;
+        wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
+        wc.lpszClassName = L"SauerHDROutBars";
+        RegisterClassW(&wc);
+        g_bars = CreateWindowExW(WS_EX_NOACTIVATE | WS_EX_NOPARENTNOTIFY | WS_EX_TRANSPARENT,
+                                 L"SauerHDROutBars", L"", WS_CHILD | WS_CLIPSIBLINGS,
+                                 0, 0, 64, 64, g_parent, NULL, inst, NULL);
+        if(!g_bars) logoutf("hdrout black bars: no window");
+    }
+    if(!g_bars) return;
+    if(on)
+    {
+        RECT rc;
+        if(!GetClientRect(g_parent, &rc)) return;
+        // Below the presenting child, over the whole client area.
+        SetWindowPos(g_bars, g_child ? g_child : HWND_BOTTOM, 0, 0, int(rc.right - rc.left), int(rc.bottom - rc.top),
+                     SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    }
+    else if(g_bars_on) ShowWindow(g_bars, SW_HIDE);
+    g_bars_on = on;
+}
+
+static void place_child(bool force)
+{
+    if(!g_child) return;
+    int x, y, w, h;
+    screendisplayrect(x, y, w, h);
+    if(w < 1 || h < 1) { x = y = 0; w = screenw; h = screenh; }
+    if(!force && x == g_cx && y == g_cy && w == g_cw && h == g_ch) return;
+    MoveWindow(g_child, x, y, w, h, FALSE);
+    g_cx = x; g_cy = y; g_cw = w; g_ch = h;
+    g_bars_want = x > 0 || y > 0;
+    if(g_child_on) show_bars(g_bars_want);
+    if(w != screenw || h != screenh)
+        logoutf("hdrout child %d,%d %dx%d: picture %dx%d stretched (bars %d)", x, y, w, h, screenw, screenh, g_bars_want ? 1 : 0);
+}
+
 static void hide_child()
 {
+    if(g_bars_on) show_bars(false);
     if(g_child && g_child_on)
     {
         ShowWindow(g_child, SW_HIDE);
@@ -690,7 +751,7 @@ static void abandon_hdr(const char *why)
     {
         glBindFramebuffer_(GL_FRAMEBUFFER, 0);
         if(!pUnlock(g_dx, 1, &g_dxobj))
-            logoutf("hdrout api wglDXUnlockObjectsNV echoue");
+            logoutf("hdrout api wglDXUnlockObjectsNV failed");
     }
     g_locked = false;
     g_ui = false;
@@ -698,8 +759,8 @@ static void abandon_hdr(const char *why)
     g_open_failed = true;
     g_frame_kind = -1;
     hide_child();
-    set_reason(why ? why : "presentation echouee");
-    if(live) log_state("repli");
+    set_reason(why ? why : "presentation failed");
+    if(live) log_state("fallback");
     else hflush();
 }
 
@@ -712,7 +773,8 @@ static void show_child()
     if(!g_child || g_child_on) return;
     ShowWindow(g_child, SW_SHOWNA);
     g_child_on = true;
-    logoutf("hdrout enfant montre apres Present reussi t=%u ms", SDL_GetTicks());
+    if(g_bars_want) show_bars(true);
+    logoutf("hdrout child shown after a successful Present t=%u ms", SDL_GetTicks());
     hflush();
 }
 
@@ -739,12 +801,12 @@ static bool ensure_child()
                                g_parent, NULL, inst, NULL);
     if(!g_child)
     {
-        set_reason("fenetre de presentation absente");
+        set_reason("no presentation window");
         return false;
     }
     // Created hidden: show_child() after the first successful Present.
     g_child_on = false;
-    logoutf("hdrout enfant cree cache t=%u ms", SDL_GetTicks());
+    logoutf("hdrout child created hidden t=%u ms", SDL_GetTicks());
     return true;
 }
 
@@ -757,7 +819,7 @@ static void read_display_path(const wchar_t *gdi)
     LONG st = GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &pc, &mc);
     if(st != ERROR_SUCCESS || pc < 1 || mc < 1 || pc > 32 || mc > 64)
     {
-        logoutf("hdrout GetDisplayConfigBufferSizes hr %ld chemins %u modes %u", st, pc, mc);
+        logoutf("hdrout GetDisplayConfigBufferSizes hr %ld paths %u modes %u", st, pc, mc);
         return;
     }
     DISPLAYCONFIG_PATH_INFO paths[32];
@@ -804,7 +866,7 @@ static void read_display_path(const wchar_t *gdi)
         }
         return;
     }
-    logoutf("hdrout chemin d'ecran non apparie");
+    logoutf("hdrout display path not matched");
 }
 
 static bool query_output(IDXGIAdapter *adapter, HMONITOR mon)
@@ -834,7 +896,7 @@ static bool query_output(IDXGIAdapter *adapter, HMONITOR mon)
     }
     if(!best)
     {
-        set_reason("sortie DXGI introuvable");
+        set_reason("DXGI output not found");
         return false;
     }
     DXGI_OUTPUT_DESC od;
@@ -847,7 +909,7 @@ static bool query_output(IDXGIAdapter *adapter, HMONITOR mon)
     best->Release();
     if(FAILED(hr) || !o6)
     {
-        set_reason("IDXGIOutput6 indisponible");
+        set_reason("IDXGIOutput6 unavailable");
         logoutf("hdrout api Output6 hr 0x%08X", (unsigned)hr);
         return false;
     }
@@ -857,7 +919,7 @@ static bool query_output(IDXGIAdapter *adapter, HMONITOR mon)
     o6->Release();
     if(FAILED(hr))
     {
-        set_reason("GetDesc1 echoue");
+        set_reason("GetDesc1 failed");
         logoutf("hdrout api GetDesc1 hr 0x%08X", (unsigned)hr);
         return false;
     }
@@ -867,7 +929,7 @@ static bool query_output(IDXGIAdapter *adapter, HMONITOR mon)
     g_max_nits = d.MaxLuminance;
     g_full_nits = d.MaxFullFrameLuminance;
     g_hdr = d.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020 ? 1 : 0;
-    if(!g_hdr) set_reason("Windows HDR inactif sur cet ecran");
+    if(!g_hdr) set_reason("Windows HDR off on this screen");
     return true;
 }
 
@@ -1016,7 +1078,7 @@ static bool make_shaders()
         g_mire = newshader(0, "hdroutmire", vs, mireps, NULL, 0);
     if(!g_map || !g_mire || g_map->invalid() || g_mire->invalid() || !g_map->program || !g_mire->program)
     {
-        set_reason("shaders de presentation absents");
+        set_reason("presentation shaders missing");
         return false;
     }
     return true;
@@ -1028,13 +1090,13 @@ static bool make_flip_shader()
     HMODULE mod = LoadLibraryA("d3dcompiler_47.dll");
     if(!mod)
     {
-        set_reason("d3dcompiler_47 absent");
+        set_reason("d3dcompiler_47 missing");
         return false;
     }
     PFN_D3DCompile compile = (PFN_D3DCompile)GetProcAddress(mod, "D3DCompile");
     if(!compile)
     {
-        set_reason("D3DCompile absent");
+        set_reason("D3DCompile missing");
         return false;
     }
     static const char *src =
@@ -1053,7 +1115,7 @@ static bool make_flip_shader()
     {
         if(err) logoutf("hdrout hlsl vs %s", (const char *)err->GetBufferPointer());
         if(err) err->Release();
-        set_reason("compilation du passage D3D echouee");
+        set_reason("D3D pass compilation failed");
         logoutf("hdrout api D3DCompile vs hr 0x%08X", (unsigned)hr);
         return false;
     }
@@ -1062,26 +1124,26 @@ static bool make_flip_shader()
     if(err) err->Release();
     err = NULL;
     code = NULL;
-    if(FAILED(hr)) { set_reason("vertex shader D3D echoue"); return false; }
+    if(FAILED(hr)) { set_reason("D3D vertex shader failed"); return false; }
     hr = compile(src, strlen(src), "hdrout", NULL, NULL, "ps", "ps_4_0", D3DCOMPILE_OPTIMIZATION_LEVEL1, 0, &code, &err);
     if(FAILED(hr) || !code)
     {
         if(err) logoutf("hdrout hlsl ps %s", (const char *)err->GetBufferPointer());
         if(err) err->Release();
-        set_reason("compilation du passage D3D echouee");
+        set_reason("D3D pass compilation failed");
         return false;
     }
     hr = g_dev->CreatePixelShader(code->GetBufferPointer(), code->GetBufferSize(), NULL, &g_ps);
     code->Release();
     if(err) err->Release();
-    if(FAILED(hr)) { set_reason("pixel shader D3D echoue"); return false; }
+    if(FAILED(hr)) { set_reason("D3D pixel shader failed"); return false; }
 
     D3D11_SAMPLER_DESC sd;
     memset(&sd, 0, sizeof(sd));
     sd.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
     sd.AddressU = sd.AddressV = sd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
     hr = g_dev->CreateSamplerState(&sd, &g_samp);
-    if(FAILED(hr)) { set_reason("sampler D3D echoue"); return false; }
+    if(FAILED(hr)) { set_reason("D3D sampler failed"); return false; }
 
     D3D11_RASTERIZER_DESC rd;
     memset(&rd, 0, sizeof(rd));
@@ -1089,18 +1151,18 @@ static bool make_flip_shader()
     rd.CullMode = D3D11_CULL_NONE;
     rd.DepthClipEnable = TRUE;
     hr = g_dev->CreateRasterizerState(&rd, &g_rast);
-    if(FAILED(hr)) { set_reason("rasterizer D3D echoue"); return false; }
+    if(FAILED(hr)) { set_reason("D3D rasterizer failed"); return false; }
 
     D3D11_BLEND_DESC bd;
     memset(&bd, 0, sizeof(bd));
     bd.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
     hr = g_dev->CreateBlendState(&bd, &g_blend);
-    if(FAILED(hr)) { set_reason("blend D3D echoue"); return false; }
+    if(FAILED(hr)) { set_reason("D3D blend failed"); return false; }
 
     D3D11_DEPTH_STENCIL_DESC dd;
     memset(&dd, 0, sizeof(dd));
     hr = g_dev->CreateDepthStencilState(&dd, &g_depth);
-    if(FAILED(hr)) { set_reason("depth D3D echoue"); return false; }
+    if(FAILED(hr)) { set_reason("D3D depth failed"); return false; }
     return true;
 }
 
@@ -1120,7 +1182,7 @@ static bool make_share(int w, int h)
     HRESULT hr = g_dev->CreateTexture2D(&td, NULL, &g_shared);
     if(FAILED(hr) || !g_shared)
     {
-        set_reason("texture partagee FP16 echouee");
+        set_reason("shared FP16 texture failed");
         logoutf("hdrout api CreateTexture2D hr 0x%08X", (unsigned)hr);
         return false;
     }
@@ -1132,7 +1194,7 @@ static bool make_share(int w, int h)
     hr = g_dev->CreateShaderResourceView(g_shared, &sv, &g_srv);
     if(FAILED(hr))
     {
-        set_reason("vue D3D echouee");
+        set_reason("D3D view failed");
         logoutf("hdrout api SRV hr 0x%08X", (unsigned)hr);
         return false;
     }
@@ -1143,7 +1205,7 @@ static bool make_share(int w, int h)
     hr = g_dev->CreateTexture2D(&td, NULL, &g_staging);
     if(FAILED(hr))
     {
-        set_reason("texture de lecture echouee");
+        set_reason("readback texture failed");
         logoutf("hdrout api staging hr 0x%08X", (unsigned)hr);
         return false;
     }
@@ -1151,7 +1213,7 @@ static bool make_share(int w, int h)
     g_dxobj = pReg(g_dx, g_shared, g_gltex, GL_TEXTURE_2D, WGL_ACCESS_READ_WRITE_NV);
     if(!g_dxobj)
     {
-        set_reason("enregistrement GL-D3D echoue");
+        set_reason("GL-D3D registration failed");
         logoutf("hdrout api wglDXRegisterObjectNV gl 0x%x", int(glGetError()));
         return false;
     }
@@ -1161,7 +1223,7 @@ static bool make_share(int w, int h)
 static bool make_chain(int w, int h)
 {
     if(!ensure_child()) return false;
-    MoveWindow(g_child, 0, 0, w, h, FALSE);
+    place_child(true);
     if(g_parent)
     {
         RECT rc;
@@ -1189,17 +1251,18 @@ static bool make_chain(int w, int h)
     {
         sd.Scaling = DXGI_SCALING_NONE;
         hr = g_factory->CreateSwapChainForHwnd(g_dev, g_child, &sd, NULL, NULL, &g_swap);
+        if(SUCCEEDED(hr)) logoutf("hdrout swap chain without DXGI_SCALING_STRETCH: a %dx%d picture smaller than the screen will not be stretched", w, h);
     }
     if(FAILED(hr) || !g_swap)
     {
-        set_reason("swapchain flip FP16 echouee");
+        set_reason("FP16 flip swap chain failed");
         logoutf("hdrout api CreateSwapChainForHwnd hr 0x%08X", (unsigned)hr);
         return false;
     }
     hr = g_swap->QueryInterface(IID_IDXGISwapChain3, (void **)&g_swap3);
     if(FAILED(hr) || !g_swap3)
     {
-        set_reason("IDXGISwapChain3 indisponible");
+        set_reason("IDXGISwapChain3 unavailable");
         logoutf("hdrout api SwapChain3 hr 0x%08X", (unsigned)hr);
         return false;
     }
@@ -1211,20 +1274,20 @@ static bool make_chain(int w, int h)
     logoutf("hdrout api SetColorSpace1 G10_scRGB hr 0x%08X", g_sethr);
     if(FAILED(hr))
     {
-        set_reason("espace scRGB refuse");
+        set_reason("scRGB colour space refused");
         return false;
     }
     hr = g_swap->GetBuffer(0, IID_ID3D11Texture2D, (void **)&g_back);
     if(FAILED(hr) || !g_back)
     {
-        set_reason("tampon de presentation absent");
+        set_reason("no presentation buffer");
         logoutf("hdrout api GetBuffer hr 0x%08X", (unsigned)hr);
         return false;
     }
     hr = g_dev->CreateRenderTargetView(g_back, NULL, &g_rtv);
     if(FAILED(hr) || !g_rtv)
     {
-        set_reason("vue du tampon absente");
+        set_reason("no buffer view");
         logoutf("hdrout api RTV hr 0x%08X", (unsigned)hr);
         return false;
     }
@@ -1254,9 +1317,9 @@ static bool lock_share()
     if(!g_dx || !g_dxobj || !pLock) return false;
     if(!pLock(g_dx, 1, &g_dxobj))
     {
-        logoutf("hdrout api wglDXLockObjectsNV echoue");
+        logoutf("hdrout api wglDXLockObjectsNV failed");
         hflush();
-        abandon_hdr("verrou wglDXLockObjectsNV echoue");
+        abandon_hdr("wglDXLockObjectsNV lock failed");
         return false;
     }
     g_locked = true;
@@ -1267,13 +1330,13 @@ static bool lock_share()
     GLenum st = glCheckFramebufferStatus_(GL_FRAMEBUFFER);
     if(st != GL_FRAMEBUFFER_COMPLETE)
     {
-        logoutf("hdrout fbo incomplet 0x%x", int(st));
+        logoutf("hdrout fbo incomplete 0x%x", int(st));
         glBindFramebuffer_(GL_FRAMEBUFFER, 0);
         if(pUnlock && g_dx && g_dxobj && !pUnlock(g_dx, 1, &g_dxobj))
-            logoutf("hdrout api wglDXUnlockObjectsNV echoue");
+            logoutf("hdrout api wglDXUnlockObjectsNV failed");
         g_locked = false;
         g_ui = false;
-        abandon_hdr("FBO de presentation incomplet");
+        abandon_hdr("presentation FBO incomplete");
         return false;
     }
     glViewport(0, 0, g_w, g_h);
@@ -1310,7 +1373,7 @@ static bool sync_ready()
         pClientWaitSync = (PFNGLCLIENTWAITSYNCPROC)wglGetProcAddress("glClientWaitSync");
         pDeleteSync = (PFNGLDELETESYNCPROC)wglGetProcAddress("glDeleteSync");
         logoutf("hdrout transport: glFenceSync %s glClientWaitSync %s glDeleteSync %s",
-                pFenceSync ? "ok" : "absent", pClientWaitSync ? "ok" : "absent", pDeleteSync ? "ok" : "absent");
+                pFenceSync ? "ok" : "missing", pClientWaitSync ? "ok" : "missing", pDeleteSync ? "ok" : "missing");
     }
     return pFenceSync && pClientWaitSync && pDeleteSync;
 }
@@ -1336,7 +1399,7 @@ static void sync_limit()
         GLenum r = pClientWaitSync(g_fence_prev, GL_SYNC_FLUSH_COMMANDS_BIT, 1000000000ull);
         if(r != GL_ALREADY_SIGNALED && r != GL_CONDITION_SATISFIED)
         {
-            if(g_sync_timeouts++ < 4) logoutf("hdrout transport: attente de la barriere GL resultat 0x%X, glFinish de secours", unsigned(r));
+            if(g_sync_timeouts++ < 4) logoutf("hdrout transport: GL fence wait result 0x%X, fallback glFinish", unsigned(r));
             glFinish();
         }
         perf_add(8, perf_now() - t0);
@@ -1369,9 +1432,9 @@ static bool unlock_share()
     g_ui = false;
     if(!ok)
     {
-        logoutf("hdrout api wglDXUnlockObjectsNV echoue");
+        logoutf("hdrout api wglDXUnlockObjectsNV failed");
         hflush();
-        abandon_hdr("deverrouillage wglDXUnlockObjectsNV echoue");
+        abandon_hdr("wglDXUnlockObjectsNV unlock failed");
         return false;
     }
     return true;
@@ -1393,10 +1456,10 @@ static bool ensure_size()
             g_ready = false;
             g_open_failed = true;
             hide_child();
-            log_state("repli");
+            log_state("fallback");
             return false;
         }
-        logoutf("hdrout cibles %dx%d", g_w, g_h);
+        logoutf("hdrout targets %dx%d", g_w, g_h);
         hflush();
     }
     return lock_share();
@@ -1464,7 +1527,7 @@ static void write_diag_bmp(const D3D11_MAPPED_SUBRESOURCE &map)
     FILE *f = fopen(path, "wb");
     if(!f)
     {
-        logoutf("hdrout bmp absent %s", path);
+        logoutf("hdrout bmp missing %s", path);
         return;
     }
     int rowb = g_w * 3;
@@ -1506,7 +1569,7 @@ static void write_diag_bmp(const D3D11_MAPPED_SUBRESOURCE &map)
         fwrite(row.getbuf(), 1, stride, f);
     }
     fclose(f);
-    logoutf("hdrout bmp diagnostic ecrete au blanc de reference, pas une mesure: %s", path);
+    logoutf("hdrout bmp diagnostic clipped at reference white, not a measurement: %s", path);
 }
 
 static void read_presented()
@@ -1516,7 +1579,7 @@ static void read_presented()
     D3D11_MAPPED_SUBRESOURCE map;
     memset(&map, 0, sizeof(map));
     HRESULT hr = g_ctx->Map(g_staging, 0, D3D11_MAP_READ, 0, &map);
-    logoutf("hdrout api Map lecture hr 0x%08X pitch %u", (unsigned)hr, map.RowPitch);
+    logoutf("hdrout api Map read hr 0x%08X pitch %u", (unsigned)hr, map.RowPitch);
     if(FAILED(hr))
     {
         hflush();
@@ -1524,7 +1587,7 @@ static void read_presented()
     }
     int py = g_h - 1 - MIRE_GY;
     int alt = MIRE_GY;
-    logoutf("hdrout lecture cible swapchain RGBA16F scRGB avant Present. 1.0 = 80 nits. Pas une mesure de la dalle.");
+    logoutf("hdrout reading the RGBA16F scRGB swap chain target before Present. 1.0 = 80 nits. Not a panel measurement.");
     int pass = 0;
     loopi(5)
     {
@@ -1534,10 +1597,10 @@ static void read_presented()
         float err = fabsf(got[0] - MIRE_V[i]);
         bool ok = err <= 0.02f && fabsf(got[1] - MIRE_V[i]) <= 0.02f && fabsf(got[2] - MIRE_V[i]) <= 0.02f;
         if(ok) pass++;
-        logoutf("hdrout mire %d x %d y %d expect %.3f got %.6f %.6f %.6f %s autre_y %d %.6f",
+        logoutf("hdrout patch %d x %d y %d expect %.3f got %.6f %.6f %.6f %s other_y %d %.6f",
                 i, MIRE_X[i], py, MIRE_V[i], got[0], got[1], got[2], ok ? "PASS" : "FAIL", alt, other[0]);
     }
-    logoutf("hdrout mire bilan %d/5", pass);
+    logoutf("hdrout patch result %d/5", pass);
     if(pass != 5)
     {
         int y;
@@ -1545,13 +1608,13 @@ static void read_presented()
         {
             float p[4];
             sample_px(map, 16, y, p);
-            logoutf("hdrout balayage haut y %d %.4f", y, p[0]);
+            logoutf("hdrout sweep top y %d %.4f", y, p[0]);
         }
         for(y = max(0, g_h - 20); y < g_h; y++)
         {
             float p[4];
             sample_px(map, 16, y, p);
-            logoutf("hdrout balayage bas y %d %.4f", y, p[0]);
+            logoutf("hdrout sweep bottom y %d %.4f", y, p[0]);
         }
     }
     g_readn++;
@@ -1596,7 +1659,7 @@ static void read_curve_swap()
     D3D11_MAPPED_SUBRESOURCE map;
     memset(&map, 0, sizeof(map));
     HRESULT hr = g_ctx->Map(g_staging, 0, D3D11_MAP_READ, 0, &map);
-    logoutf("restitution swapchain Map hr 0x%08X. RGBA16F scRGB avant Present. 1 = 80 nits. Pas une mesure de la dalle.", (unsigned)hr);
+    logoutf("hdrout check swapchain Map hr 0x%08X. RGBA16F scRGB before Present. 1 = 80 nits. Not a panel measurement.", (unsigned)hr);
     if(FAILED(hr))
     {
         hflush();
@@ -1611,7 +1674,7 @@ static void read_curve_swap()
     float dTop = fabsf(atTop[0] - g_patch_gl[4][0]) + fabsf(atTop[1] - g_patch_gl[4][1]) + fabsf(atTop[2] - g_patch_gl[4][2]);
     float dBot = fabsf(atBot[0] - g_patch_gl[4][0]) + fabsf(atBot[1] - g_patch_gl[4][1]) + fabsf(atBot[2] - g_patch_gl[4][2]);
     if(dBot + 0.0001f < dTop) use = cy;
-    logoutf("restitution swap ligne %d ecart_scene1 haut %d=%.4f bas %d=%.4f", use, yTop, dTop, cy, dBot);
+    logoutf("hdrout check swap row %d scene1_gap top %d=%.4f bottom %d=%.4f", use, yTop, dTop, cy, dBot);
     int pass = 0, i;
     for(i = 0; i < PATCH_N; i++)
     {
@@ -1623,11 +1686,11 @@ static void read_curve_swap()
         float d2 = fabsf(got[2] - g_patch_gl[i][2]);
         bool ok = d0 <= 0.02f && d1 <= 0.02f && d2 <= 0.02f;
         if(ok) pass++;
-        logoutf("restitution swap %s x %d y %d gl %.5f %.5f %.5f got %.5f %.5f %.5f %s",
+        logoutf("hdrout check swap %s x %d y %d gl %.5f %.5f %.5f got %.5f %.5f %.5f %s",
                 PATCH_NAME[i], cx, use, g_patch_gl[i][0], g_patch_gl[i][1], g_patch_gl[i][2],
                 got[0], got[1], got[2], ok ? "PASS" : "FAIL");
     }
-    logoutf("restitution swapchain bilan %d/%d (compare a la lecture GL, pas a la dalle)", pass, PATCH_N);
+    logoutf("hdrout check swapchain result %d/%d (compared with the GL readback, not the panel)", pass, PATCH_N);
     g_ctx->Unmap(g_staging, 0);
     hflush();
 }
@@ -1657,7 +1720,7 @@ static bool present_dx()
 {
     if(!g_ctx || !g_srv || !g_swap || !g_vs)
     {
-        abandon_hdr("presentateur incomplet");
+        abandon_hdr("presenter incomplete");
         return false;
     }
     double t0 = perf_now();
@@ -1665,7 +1728,7 @@ static bool present_dx()
     // the optimised path keeps the view made with the swap chain.
     if((!hdroutsync || !g_rtv || !g_back) && !acquire_back())
     {
-        abandon_hdr("tampon de presentation absent");
+        abandon_hdr("no presentation buffer");
         return false;
     }
     perf_d3d_begin();
@@ -1710,9 +1773,9 @@ static bool present_dx()
     if(hdroutsim == 1 && g_okpresents >= 1)
     {
         hdroutsim = 0;
-        logoutf("hdrout SIMULATION: echec controle de Present apres %d Present reussis. Present n'est pas appele. Aucune perte de peripherique. HDR Windows, VRR, gamma et le pilote ne sont pas modifies. Pas une certification de panne materielle.", g_okpresents);
+        logoutf("hdrout SIMULATION: controlled Present failure after %d successful Presents. Present is not called. No device loss. Windows HDR, VRR, gamma and the driver are not changed. Not proof of a hardware fault.", g_okpresents);
         hflush();
-        abandon_hdr("simulation: Present echoue");
+        abandon_hdr("simulation: Present failed");
         return false;
     }
     apply_framelatency();
@@ -1728,7 +1791,7 @@ static bool present_dx()
     }
     if(FAILED(hr))
     {
-        defformatstring(why, "Present echoue 0x%08X", (unsigned)hr);
+        defformatstring(why, "Present failed 0x%08X", (unsigned)hr);
         abandon_hdr(why);
         return false;
     }
@@ -1956,7 +2019,7 @@ static void jour_update(float ref, float peak)
         if(T < c) T = c;
         g_jour_tab[i] = logf(jour_cinv(T, ref, peak) / Y);
     }
-    logoutf("hdrout jour lot8 table ref=%.1f pic=%.1f k=%.2f nits/scene lnG %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f",
+    logoutf("hdrout day lot8 table ref=%.1f peak=%.1f k=%.2f nits/scene lnG %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f",
             ref, peak, k, g_jour_tab[0], g_jour_tab[1], g_jour_tab[2], g_jour_tab[3], g_jour_tab[4], g_jour_tab[5], g_jour_tab[6], g_jour_tab[7],
             g_jour_tab[8], g_jour_tab[9], g_jour_tab[10], g_jour_tab[11], g_jour_tab[12], g_jour_tab[13], g_jour_tab[14], g_jour_tab[15],
             g_jour_tab[16], g_jour_tab[17], g_jour_tab[18], g_jour_tab[19], g_jour_tab[20], g_jour_tab[21], g_jour_tab[22], g_jour_tab[23]);
@@ -2085,9 +2148,9 @@ static void log_signal(const char *tag, float r, float g, float b, float expmul,
     expected_sc(r, g, b, expmul, ref, peak, 0, 0, shoulder, o);
     expected_sc(r, g, b, expmul, ref, peak, 0, 1, shoulder, c);
     expected_sc(r, g, b, expmul, ref, peak, 0, 2, shoulder, p);
-    logoutf("restitution signal %s avant rgb %.5f %.5f %.5f Y %.5f chroma %.3f expY %.5f gt1 %d",
+    logoutf("hdrout check signal %s before rgb %.5f %.5f %.5f Y %.5f chroma %.3f expY %.5f gt1 %d",
             tag, r, g, b, Y, chroma3(r, g, b), Y * expmul, (Y * expmul > 1.f) ? 1 : 0);
-    logoutf("restitution signal %s nits origine %.2f corrige %.2f proposition %.2f chroma_prop %.3f",
+    logoutf("hdrout check signal %s nits origin %.2f corrected %.2f proposal %.2f chroma_prop %.3f",
             tag, luma3(o[0], o[1], o[2]) * 80.f, luma3(c[0], c[1], c[2]) * 80.f, luma3(p[0], p[1], p[2]) * 80.f,
             chroma3(p[0], p[1], p[2]));
 }
@@ -2109,7 +2172,7 @@ static void log_curve_checks(float ref, float peak, float shoulder)
         if(fabsf(prop[i][0] - prop[i][1]) > 0.0002f || fabsf(prop[i][0] - prop[i][2]) > 0.0002f) gray = 0;
         if(nits + 0.02f < prev) mono = 0;
         prev = nits;
-        logoutf("restitution controle gris courbe %d Y %.2f nits %.2f (courbe %d %.2f)", cur, ys[i], nits, prevcur, luma3(lotp[0], lotp[1], lotp[2]) * 80.f);
+        logoutf("hdrout check grey curve %d Y %.2f nits %.2f (curve %d %.2f)", cur, ys[i], nits, prevcur, luma3(lotp[0], lotp[1], lotp[2]) * 80.f);
     }
     // Curve 2 shares the lot 1 shoulder; curve 3 shares curve 2 up to scene 0.12;
     // curve 4 shares curve 3 up to scene LOT6_Y0.
@@ -2121,14 +2184,14 @@ static void log_curve_checks(float ref, float peak, float shoulder)
         float d = fabsf(prop[i][0] - lot1[0]) + fabsf(prop[i][1] - lot1[1]) + fabsf(prop[i][2] - lot1[2]);
         if(d > 0.002f) shoulder_same = 0;
     }
-    if(cur >= 4) logoutf("restitution controle courbe 4: identique a la courbe lot5 jusqu'a la scene 0.05 : %d", shoulder_same);
-    else if(cur >= 3) logoutf("restitution controle courbe 3: identique a la courbe lot4 jusqu'a la scene 0.10 : %d", shoulder_same);
+    if(cur >= 4) logoutf("hdrout check curve 4: same as the lot5 curve up to scene 0.05: %d", shoulder_same);
+    else if(cur >= 3) logoutf("hdrout check curve 3: same as the lot4 curve up to scene 0.10: %d", shoulder_same);
     float n1 = luma3(prop[6][0], prop[6][1], prop[6][2]) * 80.f;
     float n2 = luma3(prop[7][0], prop[7][1], prop[7][2]) * 80.f;
     float n4 = luma3(prop[8][0], prop[8][1], prop[8][2]) * 80.f;
     float n8 = luma3(prop[9][0], prop[9][1], prop[9][2]) * 80.f;
     int hdr = (n2 > n1 + 2.f && n4 > n2 + 2.f && n8 > n4 + 2.f && n8 < peak) ? 1 : 0;
-    logoutf("restitution controle fini %d neutres %d monotone %d hdr_au_dela_du_blanc %d epaule_identique %d scene1 %.1f scene2 %.1f scene4 %.1f scene8 %.1f pic %.1f",
+    logoutf("hdrout check finite %d neutral %d monotonic %d hdr_above_white %d same_shoulder %d scene1 %.1f scene2 %.1f scene4 %.1f scene8 %.1f peak %.1f",
             finite, gray, mono, hdr, shoulder_same, n1, n2, n4, n8, peak);
 }
 
@@ -2141,13 +2204,13 @@ static void analyse_scene(GLuint tex, bool yflip, float expmul, float ref, float
     glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &th);
     glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, &fmt);
     const char *map = game::getclientmap();
-    logoutf("restitution scene carte=%s format_gl 0x%x taille %d %d yflip %d exp %.6f ref %.1f pic %.1f apercu %d corrige %d epaule %.4f",
+    logoutf("hdrout check scene map=%s gl_format 0x%x size %d %d yflip %d exp %.6f ref %.1f peak %.1f preview %d corrected %d shoulder %.4f",
             map ? map : "", int(fmt), int(tw), int(th), yflip ? 1 : 0, expmul, ref, peak, preview, corrected, shoulder);
-    logoutf("restitution exposition une fois: mul = 2^EV = %.6f, applique dans ce passage, pas dans la texture. Blanc SDR Windows %.1f nits non utilise.",
+    logoutf("hdrout check exposure once: mul = 2^EV = %.6f, applied in this pass, not in the texture. Windows SDR white %.1f nits not used.",
             expmul, g_sdr_nits);
     if(tw < 8 || th < 8 || tw > 4096 || th > 4096)
     {
-        logoutf("restitution scene lecture refusee");
+        logoutf("hdrout check scene read refused");
         hflush();
         return;
     }
@@ -2157,7 +2220,7 @@ static void analyse_scene(GLuint tex, bool yflip, float expmul, float ref, float
     int gerr = int(glGetError());
     if(gerr)
     {
-        logoutf("restitution scene glGetTexImage err 0x%x", gerr);
+        logoutf("hdrout check scene glGetTexImage err 0x%x", gerr);
         delete[] buf;
         hflush();
         return;
@@ -2234,30 +2297,30 @@ static void analyse_scene(GLuint tex, bool yflip, float expmul, float ref, float
             stoneDist = dist; stonex = x; stoney = y; stoner = p[0]; stoneg = p[1]; stoneb = p[2];
         }
     }
-    logoutf("restitution histogramme pas=2 n=%d min %.5f p01 %.4f p10 %.4f p50 %.4f p90 %.4f p99 %.4f max %.4f moy %.4f part_gt1 %.4f part_gt2 %.4f part_gt4 %.4f nan %d",
+    logoutf("hdrout check histogram step=2 n=%d min %.5f p01 %.4f p10 %.4f p50 %.4f p90 %.4f p99 %.4f max %.4f mean %.4f share_gt1 %.4f share_gt2 %.4f share_gt4 %.4f nan %d",
             n, n ? miny : -1.f, hist_pct(hist, bins, n, cap, 0.01f), hist_pct(hist, bins, n, cap, 0.10f),
             hist_pct(hist, bins, n, cap, 0.50f), hist_pct(hist, bins, n, cap, 0.90f), hist_pct(hist, bins, n, cap, 0.99f),
             n ? maxy : -1.f, n ? float(sum / n) : -1.f,
             n ? float(n1) / float(n) : 0.f, n ? float(n2) / float(n) : 0.f, n ? float(n4) / float(n) : 0.f, nbad);
-    logoutf("restitution lumiere max tex %d %d rgb %.4f %.4f %.4f Y %.4f (avant exposition)", maxx, maxyi, maxr, maxg, maxb, maxy);
-    if(skyx >= 0) logoutf("restitution zone ciel critere=haut_bleu tex %d %d rgb %.4f %.4f %.4f", skyx, skyy, skyr, skyg, skyb);
-    else logoutf("restitution zone ciel absente selon le critere");
-    if(vegx >= 0) logoutf("restitution zone vegetation critere=exces_vert tex %d %d rgb %.4f %.4f %.4f", vegx, vegy, vegr, vegg, vegb);
-    else logoutf("restitution zone vegetation absente selon le critere");
-    if(stonex >= 0) logoutf("restitution zone pierre critere=peu_saturee_centre tex %d %d rgb %.4f %.4f %.4f", stonex, stoney, stoner, stoneg, stoneb);
-    else logoutf("restitution zone pierre absente selon le critere");
+    logoutf("hdrout check brightest tex %d %d rgb %.4f %.4f %.4f Y %.4f (before exposure)", maxx, maxyi, maxr, maxg, maxb, maxy);
+    if(skyx >= 0) logoutf("hdrout check zone sky rule=top_blue tex %d %d rgb %.4f %.4f %.4f", skyx, skyy, skyr, skyg, skyb);
+    else logoutf("hdrout check zone sky not found by the rule");
+    if(vegx >= 0) logoutf("hdrout check zone vegetation rule=green_excess tex %d %d rgb %.4f %.4f %.4f", vegx, vegy, vegr, vegg, vegb);
+    else logoutf("hdrout check zone vegetation not found by the rule");
+    if(stonex >= 0) logoutf("hdrout check zone stone rule=low_saturation_centre tex %d %d rgb %.4f %.4f %.4f", stonex, stoney, stoner, stoneg, stoneb);
+    else logoutf("hdrout check zone stone not found by the rule");
     if(hiN > 0)
     {
-        logoutf("restitution zone bande_haute n %d critere=sy>=0.78", hiN);
+        logoutf("hdrout check zone top_band n %d rule=sy>=0.78", hiN);
         log_signal("bande_haute", float(hiR / hiN), float(hiG / hiN), float(hiB / hiN), expmul, ref, peak, shoulder);
     }
-    else logoutf("restitution zone bande_haute absente");
+    else logoutf("hdrout check zone top_band not found");
     if(waN > 0)
     {
-        logoutf("restitution zone bande_murs n %d critere=milieu_peu_sature", waN);
+        logoutf("hdrout check zone wall_band n %d rule=middle_low_saturation", waN);
         log_signal("bande_murs", float(waR / waN), float(waG / waN), float(waB / waN), expmul, ref, peak, shoulder);
     }
-    else logoutf("restitution zone bande_murs absente");
+    else logoutf("hdrout check zone wall_band not found");
 
     static const char *rname[8] = {
         "haut_centre", "haut_gauche", "milieu_centre", "milieu_gauche", "milieu_droite", "bas_centre", "arme", "bas_gauche"
@@ -2272,11 +2335,11 @@ static void analyse_scene(GLuint tex, bool yflip, float expmul, float ref, float
         int trow = clamp(int(ty * float(th - 1) + 0.5f), 0, th - 1);
         const float *p = &buf[(size_t(trow) * size_t(tw) + tx) * 4];
         float Y = luma3(p[0], p[1], p[2]);
-        logoutf("restitution region %s avant tex %d %d rgb %.5f %.5f %.5f Y %.5f", rname[i], tx, trow, p[0], p[1], p[2], Y);
+        logoutf("hdrout check region %s before tex %d %d rgb %.5f %.5f %.5f Y %.5f", rname[i], tx, trow, p[0], p[1], p[2], Y);
         log_signal(rname[i], p[0], p[1], p[2], expmul, ref, peak, shoulder);
     }
     delete[] buf;
-    logoutf("restitution zones: ciel/vegetation/pierre sont des criteres de pixels, pas une identification certaine du decor.");
+    logoutf("hdrout check zones: sky/vegetation/stone are pixel rules, not a reliable identification of the scenery.");
     hflush();
 }
 
@@ -2285,7 +2348,7 @@ static void read_curve_gl(float expmul, float ref, float peak, int preview, int 
     int cy = patch_cy();
     int pass = 0, i;
     g_patch_mode = preview ? 1 : corrected;
-    logoutf("restitution mire GL apres transformation. scRGB, 1 = 80 nits. Pas une mesure de la dalle. apercu %d courbe %d", preview, corrected);
+    logoutf("hdrout check GL patches after the transform. scRGB, 1 = 80 nits. Not a panel measurement. preview %d curve %d", preview, corrected);
     for(i = 0; i < PATCH_N; i++)
     {
         int cx = patch_cx(i);
@@ -2300,16 +2363,16 @@ static void read_curve_gl(float expmul, float ref, float peak, int preview, int 
         float d2 = fabsf(got[2] - g_patch_expect[i][2]);
         bool ok = d0 <= 0.02f && d1 <= 0.02f && d2 <= 0.02f;
         if(ok) pass++;
-        logoutf("restitution mire %s x %d y %d scene %.3f %.3f %.3f expect_sc %.5f %.5f %.5f got_sc %.5f %.5f %.5f nits_got %.2f %.2f %.2f %s",
+        logoutf("hdrout check patch %s x %d y %d scene %.3f %.3f %.3f expect_sc %.5f %.5f %.5f got_sc %.5f %.5f %.5f nits_got %.2f %.2f %.2f %s",
                 PATCH_NAME[i], cx, cy, PATCH_RGB[i][0], PATCH_RGB[i][1], PATCH_RGB[i][2],
                 g_patch_expect[i][0], g_patch_expect[i][1], g_patch_expect[i][2],
                 got[0], got[1], got[2], got[0] * 80.f, got[1] * 80.f, got[2] * 80.f, ok ? "PASS" : "FAIL");
     }
-    logoutf("restitution mire GL bilan %d/%d", pass, PATCH_N);
+    logoutf("hdrout check GL patches result %d/%d", pass, PATCH_N);
     if(PATCH_N >= 8)
     {
         float a = g_patch_gl[5][0], b = g_patch_gl[6][0], c = g_patch_gl[7][0];
-        logoutf("restitution hautes_lumieres hdr_2 %.5f hdr_4 %.5f hdr_8 %.5f distinctes %d",
+        logoutf("hdrout check highlights hdr_2 %.5f hdr_4 %.5f hdr_8 %.5f distinct %d",
                 a, b, c, (b > a + 0.05f && c > b + 0.05f) ? 1 : 0);
     }
     hflush();
@@ -2329,12 +2392,12 @@ static void read_regions_after()
         int py = clamp(int(rsy[i] * float(g_h - 1) + 0.5f), 0, g_h - 1);
         if(in_mire(px, py))
         {
-            logoutf("restitution region %s apres masquee par la mire %d %d", rname[i], px, py);
+            logoutf("hdrout check region %s after hidden by the patches %d %d", rname[i], px, py);
             continue;
         }
         float got[4];
         read_fbo(px, py, got);
-        logoutf("restitution region %s apres ecran %d %d sc %.5f %.5f %.5f nits %.2f %.2f %.2f",
+        logoutf("hdrout check region %s after screen %d %d sc %.5f %.5f %.5f nits %.2f %.2f %.2f",
                 rname[i], px, py, got[0], got[1], got[2], got[0] * 80.f, got[1] * 80.f, got[2] * 80.f);
     }
     hflush();
@@ -2355,7 +2418,7 @@ static void capture_log(const char *kind, const char *rel, int w, int h)
     float yaw = camera1 ? camera1->yaw : 0.f;
     float pitch = camera1 ? camera1->pitch : 0.f;
     int incomplete = 0;
-    logoutf("capture ecrite type=%s fichier=%s taille %d %d mode=%s variante=%s courbe=%d lumiere_lot4=%d flammes_lot5=%d ciel_lot6_actif=%d correction_lumiere_active=%d eclairage_rt=%d hwrt=%d ngx=%d exp=%.3f ref=%d max=%.1f dbg=%d cam %.2f %.2f %.2f yaw %.2f pitch %.2f",
+    logoutf("hdrout capture written type=%s file=%s size %d %d mode=%s variant=%s curve=%d light_lot4=%d flames_lot5=%d sky_lot6_active=%d light_fix_active=%d rt_lighting=%d hwrt=%d ngx=%d exp=%.3f ref=%d max=%.1f dbg=%d cam %.2f %.2f %.2f yaw %.2f pitch %.2f",
             kind, rel, w, h, mode_name(), curve_name(), hdroutcurve, hdroutlumiere, hdroutflamme, hdrout_skyfix_level(),
             (hwrthdr && hdrout_lightfix_wanted()) ? 1 : 0, rt_lighting() ? 1 : 0, hwrt, hwrtngxmodeapplied(),
             hwrthdrexp, hdroutref, used_max_nits(&incomplete), hdrlightdbg, cx, cy, cz, yaw, pitch);
@@ -2454,7 +2517,7 @@ static void hdrout_capture(const char *name)
     copystring(g_capname, name && name[0] ? name : "capture");
     for(char *s = g_capname; *s; s++) if(*s == '/' || *s == '\\' || *s == ':' || iscubespace(*s)) *s = '_';
     g_capture = 1;
-    logoutf("capture demandee %s", g_capname);
+    logoutf("hdrout capture requested %s", g_capname);
     hflush();
 }
 COMMANDN(hdroutcapture, hdrout_capture, "s");
@@ -2465,7 +2528,7 @@ bool hdrout_compose(GLuint tex, bool yflip)
     if(want) g_mesure = 0;
     if(!tex || !ensure_size())
     {
-        if(want) logoutf("restitution mesure abandonnee: cible absente");
+        if(want) logoutf("hdrout check measurement dropped: no target");
         return false;
     }
     int incomplete = 0;
@@ -2482,7 +2545,7 @@ bool hdrout_compose(GLuint tex, bool yflip)
         float cz = camera1 ? camera1->o.z : 0.f;
         float yaw = camera1 ? camera1->yaw : 0.f;
         float pitch = camera1 ? camera1->pitch : 0.f;
-        logoutf("restitution mesure debut ngx %d rt %d nrd %d cam %.2f %.2f %.2f yaw %.2f pitch %.2f",
+        logoutf("hdrout check measurement start ngx %d rt %d nrd %d cam %.2f %.2f %.2f yaw %.2f pitch %.2f",
                 hwrtngxmodeapplied(), getvar("hwrt"), getvar("hwrtnrd"), cx, cy, cz, yaw, pitch);
         analyse_scene(tex, yflip, expmul, ref, mx, preview, corrected, shoulder);
     }
@@ -2513,16 +2576,16 @@ bool hdrout_compose(GLuint tex, bool yflip)
     if(!chain)
     {
         chain = 1;
-        logoutf("hdrout chaine: scene lineaire non ecrete, exposition une fois, puis la variante. Blanc SDR Windows lu, non applique.");
-        logoutf("hdrout origine: scene * blanc de reference, plafond de luminance au pic, division par 80. Pas d'ajout au noir.");
-        logoutf("hdrout corrige: Narkowicz sur la luminance jusqu'a la scene 1 (scene 1 = %.3f * blanc), puis epaule vers le pic. Teinte conservee, pas de saturation par canal.", nark_f(1.f));
-        logoutf("hdrout proposition: meme valeur au blanc de scene 1 et meme epaule. En dessous, l'entree de cette courbe est ouverte (facteur 1.80) puis rattrapee entre 0.40 et 0.92. Pas un changement d'exposition, de blanc, de pic, de HUD, ni une saturation.");
-        logoutf("hdrout lot4: courbe 2 du lot3 inchangee. En eclairage classique, la couleur de la lumiere (lightmap, lumieres dynamiques, modeles) prend la chromaticite de pow(lumiere, 2.2), a luminance egale. Lumiere neutre inchangee, textures inchangees. Lot3 = meme chaine sans cette correction.");
-        logoutf("hdrout lot5 courbe 3: courbe 2 jusqu'a la scene %.2f. Au-dela, contraste local (diaphragmes de sortie par diaphragme de scene) qui passe de celui de la courbe 2 a %.2f, au lieu de descendre vers 0.2 entre la scene 0.5 et 1, puis limite douce au pic. Continue, pente continue, monotone.", LOT5_YA, LOT5_SM);
-        logoutf("hdrout lot5 lumiere (hdroutlumiere 2): eclairage classique, couleur du lot4, et luminance de la lumiere surexposee (multiplicateur de l'albedo 2 x lumiere) : au-dessus de 1.25, pow(L, 2.2) comme a l'ecran historique ; sous 0.8 inchangee ; rampe C1 entre les deux. Pas en RT.");
-        logoutf("hdrout lot5 flammes: flammes additives sommees a part, encodees comme sur l'ecran 8 bits, puis composees une fois : teinte de la somme ecretee (image SDR de la flamme), luminance au-dela du blanc selon la densite. Classique et RT, HDR interne seulement.");
-        logoutf("hdrout lot6 courbe 4: courbe 3 jusqu'a la scene %.2f (ombres et tons sombres du lot5). Au-dela, gain d'eclat lisse en log jusqu'a %.2f a la scene %.2f, puis limite douce au pic. Pas d'exposition : les noirs et les ombres ne bougent pas.", LOT6_Y0, LOT6_GAIN, LOT6_Y1);
-        logoutf("hdrout lot6 ciel (hdroutciel): 1 = teintes du ciel, des nuages et du dome de brouillard decodees (couleurs d'affichage 8 bits) ; 2 = en plus, le ciel bleu sature (luminance d'une ombre) prend le gain d'eclat du lot6 ; nuages et sommets neutres suivent la courbe ; pixels de ciel sombres inchanges. HDR natif seulement : SDR de base et apercu restent ceux du lot5.");
+        logoutf("hdrout chain: linear scene, not clipped, exposure once, then the variant. Windows SDR white read, not applied.");
+        logoutf("hdrout origin: scene * reference white, luminance capped at the peak, divided by 80. Nothing added to black.");
+        logoutf("hdrout corrected: Narkowicz on luminance up to scene 1 (scene 1 = %.3f * white), then a shoulder to the peak. Hue kept, no per-channel clipping.", nark_f(1.f));
+        logoutf("hdrout proposal: same value at scene 1 white and same shoulder. Below it, the curve input is opened (factor 1.80) then caught up between 0.40 and 0.92. No change of exposure, white, peak or HUD, and no saturation.");
+        logoutf("hdrout lot4: lot3 curve 2 unchanged. With classic lighting, the light colour (lightmap, dynamic lights, models) takes the chromaticity of pow(light, 2.2) at equal luminance. Neutral light and textures unchanged. Lot3 = same chain without this fix.");
+        logoutf("hdrout lot5 curve 3: curve 2 up to scene %.2f. Above, local contrast (output stops per scene stop) goes from that of curve 2 to %.2f instead of falling towards 0.2 between scene 0.5 and 1, then a soft limit at the peak. Continuous, continuous slope, monotonic.", LOT5_YA, LOT5_SM);
+        logoutf("hdrout lot5 light (hdroutlumiere 2): classic lighting, lot4 colour, and luminance of overexposed light (albedo multiplier 2 x light): above 1.25, pow(L, 2.2) as on the historical screen; below 0.8 unchanged; C1 ramp in between. Not with RT.");
+        logoutf("hdrout lot5 flames: additive flames summed apart, encoded as on the 8-bit screen, then composited once: hue of the clipped sum (SDR picture of the flame), luminance above white from the density. Classic and RT, internal HDR only.");
+        logoutf("hdrout lot6 curve 4: curve 3 up to scene %.2f (lot5 shadows and dark tones). Above, a log-smooth brightness gain up to %.2f at scene %.2f, then a soft limit at the peak. No exposure change: blacks and shadows do not move.", LOT6_Y0, LOT6_GAIN, LOT6_Y1);
+        logoutf("hdrout lot6 sky (hdroutciel): 1 = sky, cloud and fog dome hues decoded (8-bit display colours); 2 = also, the saturated blue sky (shadow luminance) takes the lot6 brightness gain; clouds and neutral tops follow the curve; dark sky pixels unchanged. Native HDR only: base SDR and preview stay as in lot5.");
         {
             static const float ys[9] = { 0.03f, 0.10f, 0.25f, 0.50f, 1.f, 2.f, 4.f, 8.f, 16.f };
             string line = "";
@@ -2534,9 +2597,9 @@ bool hdrout_compose(GLuint tex, bool yflip)
                 defformatstring(part, " %.2f:%.1f/%.1f", ys[i], a[1] * 80.f, b[1] * 80.f);
                 concatstring(line, part);
             }
-            logoutf("hdrout nits scene:lot5/lot6 a ref %.0f pic %.0f%s", ref, mx, line);
+            logoutf("hdrout nits scene:lot5/lot6 at ref %.0f peak %.0f%s", ref, mx, line);
         }
-        logoutf("hdrout apercu: Narkowicz par canal, place au blanc de reference, sans OETF sRGB. Les hautes lumieres y sont ecrasees.");
+        logoutf("hdrout preview: per-channel Narkowicz, placed at reference white, no sRGB OETF. Highlights are flattened there.");
         hflush();
     }
     g_frame_kind = hdrout ? 2 : 1;
@@ -2573,14 +2636,14 @@ bool hdrout_present()
     if(hdroutread && !g_locked)
     {
         hdroutread = 0;
-        logoutf("hdrout lecture refusee: presentation SDL 8 bits, pas de cible FP16 presentee. raison=%s", g_reason);
+        logoutf("hdrout read refused: 8-bit SDL presentation, no FP16 target presented. reason=%s", g_reason);
         hflush();
     }
     if(!g_locked && (g_mesure || g_present_patches))
     {
         g_mesure = 0;
         g_present_patches = 0;
-        logoutf("restitution mesure refusee: pas de transformation HDR sur cette image");
+        logoutf("hdrout check measurement refused: no HDR transform on this frame");
         hflush();
     }
     if(!g_locked)
@@ -2604,6 +2667,7 @@ bool hdrout_present()
         g_mire->set();
         screenquad(1, 1);
     }
+    place_child(false);
     // A locked surface is the HDR presentation, including the loading overlay
     // which does not pass through the scene compose. It is not an error fallback.
     if(g_frame_kind < 0) g_frame_kind = hdrout ? 2 : 1;
@@ -2627,7 +2691,7 @@ bool hdrout_present()
     {
         g_frame_kind = -1;
         g_lastkind = 0;
-        note_effective("repli");
+        note_effective("fallback");
     }
     else
     {
@@ -2641,7 +2705,7 @@ bool hdrout_present()
 
 static void hdrout_status()
 {
-    log_state("commande");
+    log_state("command");
 }
 
 static void hdrout_sonde()
@@ -2653,18 +2717,18 @@ static void hdrout_labwin(int *mode)
 {
     if(!g_parent)
     {
-        logoutf("hdrout lab fenetre absente");
+        logoutf("hdrout lab no window");
         return;
     }
     if(mode && *mode)
     {
         ShowWindow(g_parent, SW_MINIMIZE);
-        logoutf("hdrout lab minimise");
+        logoutf("hdrout lab minimised");
     }
     else
     {
         ShowWindow(g_parent, SW_RESTORE);
-        logoutf("hdrout lab restaure");
+        logoutf("hdrout lab restored");
     }
     hflush();
 }
@@ -2707,7 +2771,7 @@ static void hdrout_hud_label()
 static void hdrout_mesures()
 {
     g_mesure = 1;
-    logoutf("restitution mesure demandee courbe=%s exp=%.3f ref=%d max=%d hud=%d",
+    logoutf("hdrout check measurement requested curve=%s exp=%.3f ref=%d max=%d hud=%d",
             curve_name(), hwrthdrexp, hdroutref, hdroutmax, hdrouthud);
     hflush();
 }
@@ -2755,8 +2819,8 @@ static void hdrout_variante(int *v)
     for(int i = 0; i < int(sizeof(known) / sizeof(known[0])); i++) if(n == known[i]) ok = true;
     if(!ok) n = n > 8 ? 8 : 0;
     set_chain(n);
-    logoutf("hdrout variante console %s courbe %d lumiere_lot4 %d flammes_lot5 %d ciel_lot6 %d couleur_lot7 %d jour_lot8 %d dose_couleur %d", curve_name(), hdroutcurve, hdroutlumiere, hdroutflamme, hdroutciel, hdroutcouleur, hdroutjour, hdroutjourcouleur);
-    log_state("variante");
+    logoutf("hdrout variant console %s curve %d light_lot4 %d flames_lot5 %d sky_lot6 %d colour_lot7 %d day_lot8 %d colour_dose %d", curve_name(), hdroutcurve, hdroutlumiere, hdroutflamme, hdroutciel, hdroutcouleur, hdroutjour, hdroutjourcouleur);
+    log_state("variant");
 }
 
 static void hdrout_variant_cmd()
@@ -2856,7 +2920,7 @@ bool hdrout_preview_begin(int x, int y, int w, int h, bool background)
         glBindFramebuffer_(GL_FRAMEBUFFER, g_fbo);
         if(st != GL_FRAMEBUFFER_COMPLETE)
         {
-            logoutf("hdrout apercu modele: cible 8 bits incomplete 0x%x, dessin direct", int(st));
+            logoutf("hdrout model preview: 8-bit target incomplete 0x%x, drawing directly", int(st));
             preview_release();
             return false;
         }
@@ -2906,7 +2970,7 @@ void hdrout_preview_end()
     if(!logged)
     {
         logged = 1;
-        logoutf("hdrout apercu modele: cible 8 bits %dx%d composee comme le HUD (%.0f nits)", g_pvw, g_pvh, hud_nits());
+        logoutf("hdrout model preview: 8-bit target %dx%d composited like the HUD (%.0f nits)", g_pvw, g_pvh, hud_nits());
     }
 }
 
@@ -2967,7 +3031,7 @@ static void hdrout_resolve()
         // SDR (or a failed presenter): release it, once the child is hidden,
         // i.e. after an SDR frame has been presented over it.
         else if((!want || !g_ready) && !g_child_on && presenter_allocated())
-            presenter_release(want ? "echec" : "sortie sdr");
+            presenter_release(want ? "failed" : "sdr output");
     }
     int eff = (want && g_ready) ? 1 : 0;
     // Native HDR asked for (saved choice) but not running: say it once in the console.
@@ -2990,8 +3054,8 @@ static void hdrout_resolve()
     hdrout = out;
     // FP16 <-> RGBA8 scene, native-only sky/colour/day, RT on/off: the
     // DLAA/DLSS history must not blend the previous picture into this one.
-    if(scene) hwrttemporalreset("hdrout sortie effective");
-    logoutf("hdrout preference=%d demande=%s effectif=%s pret=%d raison=%s", hdroutpref,
+    if(scene) hwrttemporalreset("hdrout effective output");
+    logoutf("hdrout preference=%d requested=%s effective=%s ready=%d reason=%s", hdroutpref,
             want ? "hdr_natif" : "sdr", eff ? (out ? "hdr_natif" : "apercu_sdr_surface_hdr") : "sdr",
             g_ready ? 1 : 0, g_reason[0] ? g_reason : "ok");
     hflush();
@@ -3004,7 +3068,7 @@ static void hdrout_pref_changed()
     // after launch, or an earlier presentation error): try once more.
     if(hdroutpref == 1 && !g_ready && !g_locked && screen && !g_disabled)
     {
-        presenter_release("nouvel essai");
+        presenter_release("retry");
         probe_output();
         g_open_failed = false;
     }
@@ -3017,11 +3081,11 @@ static const char *reason_ui()
     if(g_ready) return "";
     const char *r = g_reason;
     if(!r[0]) return "Native HDR output not started.";
-    if(strstr(r, "Windows HDR inactif")) return "Windows HDR is off for this screen (Windows: Display settings > Use HDR).";
+    if(strstr(r, "Windows HDR off")) return "Windows HDR is off for this screen (Windows: Display settings > Use HDR).";
     if(strstr(r, "simulation")) return "Simulated failure (test): native HDR unavailable.";
-    if(strstr(r, "WGL_NV_DX_interop") || strstr(r, "aucun GPU commun") || strstr(r, "interop"))
+    if(strstr(r, "WGL_NV_DX_interop") || strstr(r, "no GPU shared") || strstr(r, "interop"))
         return "Native HDR needs the NVIDIA OpenGL/Direct3D bridge, not available on this GPU/driver.";
-    if(strstr(r, "Present") || strstr(r, "verrou") || strstr(r, "deverrouillage") || strstr(r, "presentat"))
+    if(strstr(r, "Present") || strstr(r, "lock failed") || strstr(r, "unlock failed") || strstr(r, "presentation") || strstr(r, "presenter"))
         return "Native HDR stopped after a presentation error. Choose Native HDR again to retry.";
     return "Native HDR output could not start on this system.";
 }
@@ -3059,7 +3123,7 @@ static void probe_output()
     HRESULT hr = CreateDXGIFactory1(IID_IDXGIFactory1, (void **)&fac1);
     if(FAILED(hr) || !fac1)
     {
-        set_reason("fabrique DXGI absente");
+        set_reason("no DXGI factory");
         logoutf("hdrout api CreateDXGIFactory1 hr 0x%08X", (unsigned)hr);
         return;
     }
@@ -3099,9 +3163,9 @@ static void probe_output()
         query_output(pick, mon);
         pick->Release();
     }
-    else set_reason("sortie DXGI introuvable");
+    else set_reason("DXGI output not found");
     fac1->Release();
-    logoutf("hdrout lecture de l'ecran (sans peripherique D3D11, interop, fenetre ni swapchain) %s hdr_dxgi=%d pic=%.0f nits",
+    logoutf("hdrout screen probe (no D3D11 device, interop, window or swap chain) %s hdr_dxgi=%d peak=%.0f nits",
             g_output[0] ? g_output : "?", g_hdr, g_max_nits);
 }
 
@@ -3131,8 +3195,8 @@ void hdrout_start()
     if(!screen)
     {
         g_disabled = true;
-        set_reason("fenetre SDL absente");
-        log_state("demarrage");
+        set_reason("no SDL window");
+        log_state("startup");
         return;
     }
     SDL_SysWMinfo info;
@@ -3140,8 +3204,8 @@ void hdrout_start()
     if(!SDL_GetWindowWMInfo(screen, &info) || info.subsystem != SDL_SYSWM_WINDOWS)
     {
         g_disabled = true;
-        set_reason("HWND SDL indisponible");
-        log_state("demarrage");
+        set_reason("SDL HWND unavailable");
+        log_state("startup");
         return;
     }
     g_parent = info.info.win.window;
@@ -3159,14 +3223,14 @@ void hdrout_start()
             narrow(mi.szDevice, g_output, sizeof(g_output));
             read_display_path(mi.szDevice);
         }
-        set_reason("desactive par hdrout-off.txt");
-        logoutf("hdrout desactive: hdrout-off.txt present, aucune surface D3D/DXGI creee (OpenGL seul)");
-        log_state("demarrage");
+        set_reason("disabled by hdrout-off.txt");
+        logoutf("hdrout disabled: hdrout-off.txt present, no D3D/DXGI surface created (OpenGL only)");
+        log_state("startup");
         return;
     }
     probe_output();
-    logoutf("hdrout presentateur differe t=%u ms: aucun peripherique D3D11, interop, fenetre ni swapchain avant la lecture de la config, puis seulement si la sortie doit etre en HDR natif", SDL_GetTicks());
-    log_state("demarrage");
+    logoutf("hdrout presenter deferred t=%u ms: no D3D11 device, interop, window or swap chain before the config is read, then only if the output must be native HDR", SDL_GetTicks());
+    log_state("startup");
 }
 
 static void perf_release();
@@ -3198,11 +3262,14 @@ static void presenter_release(const char *why)
     if(g_factory) { g_factory->Release(); g_factory = NULL; }
     if(g_child) { DestroyWindow(g_child); g_child = NULL; }
     g_child_on = false;
+    if(g_bars) { DestroyWindow(g_bars); g_bars = NULL; }
+    g_bars_on = g_bars_want = false;
+    g_cx = g_cy = g_cw = g_ch = -1;
     g_ready = false;
     g_w = g_h = 0;
     if(had)
     {
-        logoutf("hdrout presentateur libere (%s) t=%u ms: swapchain, fenetre enfant, interop et peripherique D3D11 detruits", why ? why : "", SDL_GetTicks());
+        logoutf("hdrout presenter released (%s) t=%u ms: swap chain, child window, interop and D3D11 device destroyed", why ? why : "", SDL_GetTicks());
         hflush();
     }
 }
@@ -3211,13 +3278,13 @@ static bool presenter_open_inner()
 {
     if(!g_parent)
     {
-        set_reason("HWND SDL indisponible");
+        set_reason("SDL HWND unavailable");
         return false;
     }
     if(!g_hdr)
     {
         // Read at startup (or again when Native HDR is chosen): nothing to open.
-        if(!g_reason[0] || !strcmp(g_reason, "ok")) set_reason("Windows HDR inactif sur cet ecran");
+        if(!g_reason[0] || !strcmp(g_reason, "ok")) set_reason("Windows HDR off on this screen");
         return false;
     }
     if(!load_wgl()) return false;
@@ -3225,7 +3292,7 @@ static bool presenter_open_inner()
     HRESULT hr = CreateDXGIFactory1(IID_IDXGIFactory1, (void **)&fac1);
     if(FAILED(hr) || !fac1)
     {
-        set_reason("fabrique DXGI absente");
+        set_reason("no DXGI factory");
         logoutf("hdrout api CreateDXGIFactory1 hr 0x%08X", (unsigned)hr);
         return false;
     }
@@ -3233,7 +3300,7 @@ static bool presenter_open_inner()
     if(FAILED(hr) || !g_factory)
     {
         fac1->Release();
-        set_reason("IDXGIFactory2 absente");
+        set_reason("IDXGIFactory2 missing");
         logoutf("hdrout api Factory2 hr 0x%08X", (unsigned)hr);
         return false;
     }
@@ -3267,7 +3334,7 @@ static bool presenter_open_inner()
         {
             char name[160];
             narrow(desc.Description, name, sizeof(name));
-            logoutf("hdrout interop refuse sur %s", name);
+            logoutf("hdrout interop refused on %s", name);
             ctx->Release();
             dev->Release();
             ad->Release();
@@ -3278,7 +3345,7 @@ static bool presenter_open_inner()
         g_dx = dx;
         narrow(desc.Description, g_adapter, sizeof(g_adapter));
         formatstring(g_luid, "%08lX:%08lX", (unsigned long)desc.AdapterLuid.HighPart, (unsigned long)desc.AdapterLuid.LowPart);
-        logoutf("hdrout interop ouvert niveau 0x%x", int(fl));
+        logoutf("hdrout interop open, level 0x%x", int(fl));
         query_output(ad, mon);
         ad->Release();
         opened = true;
@@ -3287,15 +3354,15 @@ static bool presenter_open_inner()
     fac1->Release();
     if(!opened)
     {
-        set_reason("aucun GPU commun a OpenGL et D3D11");
+        set_reason("no GPU shared by OpenGL and D3D11");
         return false;
     }
     if(!g_hdr) return false;
     const char *sim = getenv("SAUER_HDROUT_SIM");
     if(sim && !strcmp(sim, "init"))
     {
-        logoutf("hdrout SIMULATION: indisponibilite HDR a l'initialisation. La chaine n'est pas creee. Aucun reglage Windows, VRR, gamma ou pilote n'est modifie. Pas une perte de peripherique. Pas une certification de panne materielle.");
-        set_reason("simulation: HDR indisponible a l'initialisation");
+        logoutf("hdrout SIMULATION: HDR unavailable at start-up. The chain is not created. No Windows, VRR, gamma or driver setting is changed. Not a device loss. Not proof of a hardware fault.");
+        set_reason("simulation: HDR unavailable at start-up");
         return false;
     }
     if(!make_flip_shader() || !make_shaders() || !build_targets(screenw, screenh)) return false;
@@ -3309,22 +3376,22 @@ static bool presenter_open_inner()
 static bool presenter_open()
 {
     if(g_ready) return true;
-    if(presenter_allocated()) presenter_release("reouverture");
-    logoutf("hdrout ouverture du presentateur HDR natif t=%u ms (preference=%d)", SDL_GetTicks(), hdroutpref);
+    if(presenter_allocated()) presenter_release("reopen");
+    logoutf("hdrout opening the native HDR presenter t=%u ms (preference=%d)", SDL_GetTicks(), hdroutpref);
     bool ok = presenter_open_inner();
     if(!ok)
     {
         g_open_failed = true;
-        presenter_release("echec ouverture");
+        presenter_release("open failed");
     }
-    log_state(ok ? "ouverture" : "ouverture echouee");
+    log_state(ok ? "open" : "open failed");
     return ok;
 }
 
 void hdrout_shutdown()
 {
     if(!g_tried && !presenter_allocated()) return;
-    presenter_release("arret");
+    presenter_release("shutdown");
     g_syncload = false;
     perf_release();
     g_pvshader = NULL;
@@ -3414,7 +3481,7 @@ static bool perf_glload()
             pGenQueries(PERF_Q * 4, &g_pq[0][0]);
             g_pqok = true;
         }
-        logoutf("hdrout perf: requetes GL %s", g_pqok ? "ok" : "absentes (temps GPU non mesures)");
+        logoutf("hdrout perf: GL queries %s", g_pqok ? "ok" : "missing (GPU times not measured)");
     }
     return g_pqok;
 }
@@ -3564,7 +3631,7 @@ static void perf_finish()
 {
     double drift = g_pqok ? (perf_gpu_clock() - g_poff) : 0;
     int n = g_pn;
-    logoutf("hdrout perf fenetre %s images %d duree_s %.2f mode %s transport %s variante_lot %d ngx %d rt %d taille %dx%d maxfps %d vsync %d requetes_gl_perdues %d d3d_perdues %d derive_horloge_ms %.4f",
+    logoutf("hdrout perf window %s frames %d duration_s %.2f mode %s transport %s variant_lot %d ngx %d rt %d size %dx%d maxfps %d vsync %d gl_queries_lost %d d3d_lost %d clock_drift_ms %.4f",
             g_pname, n, g_psec, mode_name(), hdroutsync ? "optimise" : "reference_lot8", variant_lot(), hwrtngxmodeapplied(),
             rt_lighting() ? 1 : 0, screenw, screenh, getvar("maxfps"), getvar("vsync"), g_plost, g_pd3dlost, drift * 1000.0);
     float *tmp = n > 0 ? new float[n] : NULL;
@@ -3583,9 +3650,9 @@ static void perf_finish()
             tmp[m++] = r.v[k];
             sum += r.v[k];
         }
-        if(!m) { logoutf("hdrout perf %s %s aucune", g_pname, PERF_NAME[k]); continue; }
+        if(!m) { logoutf("hdrout perf %s %s none", g_pname, PERF_NAME[k]); continue; }
         qsort(tmp, m, sizeof(float), perf_cmpf);
-        logoutf("hdrout perf %s %s n %d mediane %.4f p10 %.4f p90 %.4f p99 %.4f moyenne %.4f ms",
+        logoutf("hdrout perf %s %s n %d median %.4f p10 %.4f p90 %.4f p99 %.4f mean %.4f ms",
                 g_pname, PERF_NAME[k], m, tmp[m / 2], tmp[m / 10], tmp[(m * 9) / 10], tmp[(m * 99) / 100], sum / m);
     }
     delete[] tmp;
@@ -3606,7 +3673,7 @@ static void perf_finish()
         }
         fclose(fp);
     }
-    logoutf("hdrout perf fin %s fichier %s", g_pname, fp ? rel : "non ecrit");
+    logoutf("hdrout perf end %s file %s", g_pname, fp ? rel : "not written");
     hflush();
     g_pstate = 0;
 }
@@ -3683,7 +3750,7 @@ void hdrout_perf_swapend(bool surface, double sdlswap)
 
 static void hdrout_perfwin(char *name, int *sec)
 {
-    if(g_pstate || g_parm) { conoutf(CON_WARN, "hdrout perf: fenetre deja en cours"); return; }
+    if(g_pstate || g_parm) { conoutf(CON_WARN, "hdrout perf: a window is already running"); return; }
     copystring(g_pname, name && name[0] ? name : "perf");
     for(char *c = g_pname; *c; c++) if(*c == '/' || *c == '\\' || *c == ':' || iscubespace(*c)) *c = '_';
     g_psec = clamp(*sec, 2, 60);
@@ -3696,9 +3763,9 @@ static void hdrout_on_sync()
 {
     sync_drop_fences();
     g_sync_timeouts = 0;
-    logoutf("hdrout transport %s (hdroutsync %d). Image, calibration et variante inchangees.",
-            hdroutsync ? "optimise: pas de glFinish, barriere GL a une image, tampon D3D conserve"
-                       : "reference lot8: glFinish avant deverrouillage, tampon D3D repris a chaque image",
+    logoutf("hdrout transport %s (hdroutsync %d). Picture, calibration and variant unchanged.",
+            hdroutsync ? "optimised: no glFinish, one-frame GL fence, D3D buffer kept"
+                       : "lot8 reference: glFinish before unlock, D3D buffer fetched every frame",
             hdroutsync);
     hflush();
 }
@@ -3748,7 +3815,7 @@ static void fresh_check()
     else g_fresh_bad++;
     if(g_fresh_left <= 0)
     {
-        logoutf("hdrout fraicheur transport %s images %d image_courante %d image_precedente %d autre %d (marqueur GL avant deverrouillage, relu dans le tampon D3D avant Present)",
+        logoutf("hdrout transport freshness %s frames %d current_frame %d previous_frame %d other %d (GL marker before unlock, read back from the D3D buffer before Present)",
                 hdroutsync ? "optimise" : "reference_lot8", g_fresh_n, g_fresh_ok, g_fresh_old, g_fresh_bad);
         hflush();
     }

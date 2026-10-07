@@ -1654,7 +1654,7 @@ static bool assistforbiddencmd(const char *name)
         "connect", "lanconnect", "disconnect", "reconnect", "say", "sayteam", "echo", "map", "savemap", "sendmap", "getmap",
         "demo", "recorddemo", "stopdemo", "kick", "ban", "setmaster", "auth", "sauth", "dauth", "servcmd", "rcon",
         "textsave", "textload", "tupdateapply", "tupdaterestart", "tmodelinstall", "tmodeluse", "tmodeldelete",
-        "tmodelsaveapi", "tmodelclearapi", "assistantask", "assistantapply", "assistantundo" };
+        "tmodelsaveapi", "tmodelclearapi", "assistantask", "assistantapply", "assistantundo", "importsettingsfrom" };
     loopi(sizeof(bad)/sizeof(bad[0])) if(!strcasecmp(name, bad[i])) return true;
     return false;
 }

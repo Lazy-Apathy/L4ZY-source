@@ -263,7 +263,7 @@ namespace game
     void updateworld()        // main game update loop
     {
         if(!maptime) { maptime = lastmillis; maprealtime = totalmillis; return; }
-        if(!curtime) { gets2c(); if(player1->clientnum>=0) c2sinfo(); return; }
+        if(!curtime) { gets2c(); updatespecqueue(); if(player1->clientnum>=0) c2sinfo(); return; }
 
         physicsframe();
         ai::navigate();
@@ -277,6 +277,7 @@ namespace game
         ai::update();
         moveragdolls();
         gets2c();
+        updatespecqueue();
         updatemovables(curtime);
         updatemonsters(curtime);
         if(connected)
@@ -501,6 +502,7 @@ namespace game
     VARP(killfeedfade, 1, 5, 20);
     VARP(killfeedmax, 1, 5, 5);
     VARP(reacttime, 0, 1, 1); // vue / viseur ms on your kills and deaths
+    VARP(reacttimeall, 0, 0, 1); // also other players' frags, as sent by their killer (compatible server)
 
     VARP(killstreak, 0, 1, 1);
     VARP(killstreakothers, 0, 1, 1);
@@ -552,7 +554,11 @@ namespace game
     };
     static vector<streakpopup> streakpopups;
 
-    static void clearkillfeed() { killfeedlines.setsize(0); }
+    // frags between two other players, so that one relayed react time fills at most one frag
+    struct recentfrag { int actorcn, victimcn, millis; bool done; };
+    static vector<recentfrag> recentfrags;
+
+    static void clearkillfeed() { killfeedlines.setsize(0); recentfrags.setsize(0); }
 
     // per-opponent score for this match: "kills-deaths" against that player
     VARP(killfeedvs, 0, 1, 1);
@@ -1006,6 +1012,58 @@ namespace game
         finishreact(actor, player1->clientnum, clamp(fovms, 0, FRAGRT_MAXMS), clamp(xhms, 0, FRAGRT_MAXMS), false);
     }
 
+    static const int FRAGRTALL_MAXAGE = 3000;
+
+    // React times of a frag between two other players, measured by the killer
+    // himself: fills that frag's kill feed line (and one console line when frags
+    // go to the console). Unknown, late or repeated messages are ignored.
+    void applyfragrtall(int actor, int victim, int fovms, int xhms)
+    {
+        if(!reacttimeall || !player1 || demoplayback || !clanmodactive()) return;
+        if(actor == victim || actor == player1->clientnum || victim == player1->clientnum) return;
+        int best = -1;
+        loopvrev(recentfrags)
+        {
+            recentfrag &r = recentfrags[i];
+            if(lastmillis - r.millis > FRAGRTALL_MAXAGE) break;
+            if(r.actorcn == actor && r.victimcn == victim && !r.done) { best = i; break; }
+        }
+        if(best < 0) return;
+        recentfrag &r = recentfrags[best];
+        r.done = true;
+        fovms = clamp(fovms, 0, FRAGRT_MAXMS);
+        xhms = clamp(xhms, 0, FRAGRT_MAXMS);
+        loopvrev(killfeedlines)
+        {
+            killfeedline &e = killfeedlines[i];
+            if(e.actorcn != actor || e.victimcn != victim || e.millis != r.millis) continue;
+            e.fovms = fovms;
+            e.xhms = xhms;
+            e.showreact = true;
+            e.approx = e.pending = false;
+            break;
+        }
+        if(killfeed && !killfeedconsole) return;
+        fpsent *a = getclient(actor), *v = getclient(victim);
+        if(!a || !v) return;
+        fpsent *h = followingplayer(player1);
+        int contype = v==h || a==h ? CON_FRAG_SELF : CON_FRAG_OTHER;
+        const char *aname, *vname;
+        if(m_teammode && teamcolorfrags)
+        {
+            aname = teamcolorname(a, "you");
+            vname = teamcolorname(v, "you");
+        }
+        else
+        {
+            aname = colorname(a, NULL, "", "", "you");
+            vname = colorname(v, NULL, "", "", "you");
+        }
+        string rtxt;
+        formatreact(rtxt, sizeof(rtxt), fovms, xhms, false);
+        conoutf(contype, "\f2%s fragged %s %s", aname, vname, rtxt);
+    }
+
     static void rotatekdlog()
     {
         kdprev.setsize(0);
@@ -1092,6 +1150,16 @@ namespace game
             e.victimcn = victim->clientnum;
             e.fovms = e.xhms = e.waitmillis = 0;
             e.showreact = e.approx = e.pending = false;
+        }
+
+        if(!suicide && !teamkill && actor->type!=ENT_INANIMATE && victim!=player1 && actor!=player1)
+        {
+            while(recentfrags.length() >= 32) recentfrags.remove(0);
+            recentfrag &r = recentfrags.add();
+            r.actorcn = actor->clientnum;
+            r.victimcn = victim->clientnum;
+            r.millis = lastmillis;
+            r.done = false;
         }
 
         int fovms = 0, xhms = 0, waitmillis = 0;
@@ -2188,15 +2256,20 @@ namespace game
                 draw_text(colorname(f), w*1800/h - fw - pw, specy - fh, (color>>16)&0xFF, (color>>8)&0xFF, color&0xFF);
                 hudrect(w*1800/h - fw - pw, specy - fh, fw, fh);
             }
+            // small grey "HD" left of the watched player's name while his exact aim is shown
             const char *st = demohd::hudstatus();
-            if(st && st[0])
+            if(f && st && st[0])
             {
                 int sw, sh;
                 text_bounds(st, sw, sh);
-                int hdcol = (strstr(st, "HD") && !strstr(st, "unavailable")) ? 0x80FF80 : 0xC0C0C0;
-                if(strstr(st, "vanilla") || strstr(st, "free cam") || strstr(st, "off")) hdcol = 0xC0C0C0;
-                draw_text(st, w*1800/h - sw - pw, specy - th - fh - sh - 8, (hdcol>>16)&0xFF, (hdcol>>8)&0xFF, hdcol&0xFF);
-                hudrect(w*1800/h - sw - pw, specy - th - fh - sh - 8, sw, sh);
+                float sc = 0.6f;
+                float sx = w*1800/h - fw - pw - (sw + pw/2)*sc, sy = specy - fh + fh*(1 - sc)/2;
+                pushhudmatrix();
+                hudmatrix.translate(sx, sy, 0);
+                hudmatrix.scale(sc, sc, 1);
+                flushhudmatrix();
+                draw_text(st, 0, 0, 0xA0, 0xA0, 0xA0);
+                pophudmatrix();
             }
         }
 

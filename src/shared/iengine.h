@@ -298,10 +298,13 @@ enum
 {
     DL_SHRINK = 1<<0,
     DL_EXPAND = 1<<1,
-    DL_FLASH  = 1<<2
+    DL_FLASH  = 1<<2,
+    DL_SHARP  = 1<<3  // a brief, focused muzzle flash (the rifle): the RT weapon lights may shape it apart; GL ignores it
 };
 
-extern void adddynlight(const vec &o, float radius, const vec &color, int fade = 0, int peak = 0, int flags = 0, float initradius = 0, const vec &initcolor = vec(0, 0, 0), physent *owner = NULL);
+// rtcolor: 0xRRGGBB tint of the light in the RT weapon lights (a custom trail
+// colour; only its hue is used), -1 = none. GL ignores it.
+extern void adddynlight(const vec &o, float radius, const vec &color, int fade = 0, int peak = 0, int flags = 0, float initradius = 0, const vec &initcolor = vec(0, 0, 0), physent *owner = NULL, int rtcolor = -1);
 extern void dynlightreaching(const vec &target, vec &color, vec &dir, bool hud = false);
 extern void removetrackeddynlights(physent *owner = NULL);
 
@@ -372,6 +375,11 @@ extern void regular_particle_splash(int type, int num, int fade, const vec &p, i
 extern void regular_particle_flame(int type, const vec &p, float radius, float height, int color, int density = 3, float scale = 2.0f, float speed = 200.0f, float fade = 600.0f, int gravity = -15);
 extern void particle_splash(int type, int num, int fade, const vec &p, int color = 0xFFFFFF, float size = 1.0f, int radius = 150, int gravity = 2);
 extern void particle_trail(int type, int fade, const vec &from, const vec &to, int color = 0xFFFFFF, float size = 1.0f, int gravity = 20);
+// Copied into every particle created while it is set. PTAG_WEAPONSMOKE marks
+// weapon smoke (rifle trail, rocket and grenade puffs) whatever its colour:
+// the ray-traced smoke shadow follows that mark, not the trail colour.
+enum { PTAG_NONE = 0, PTAG_WEAPONSMOKE = 1 };
+extern int particletag;
 extern void particle_text(const vec &s, const char *t, int type, int fade = 2000, int color = 0xFFFFFF, float size = 2.0f, int gravity = 0, int offset = 0);
 extern void particle_textcopy(const vec &s, const char *t, int type, int fade = 2000, int color = 0xFFFFFF, float size = 2.0f, int gravity = 0);
 extern void particle_texticon(const vec &s, int ix, int iy, float offset, int type, int fade = 2000, int color = 0xFFFFFF, float size = 2.0f, int gravity = 0);
@@ -480,7 +488,7 @@ extern void hwrtpreloadmodel(const char *name);
 extern void hwrtbeginscenemodels();
 extern void hwrtendscenemodels();
 extern void hwrtnotescenemodel(const char *mdl, const vec &o, float yaw, float pitch, int flags, dynent *d);
-extern void hwrtnotesmokepuff(const vec &o, float radius, int opacity);
+extern void hwrtnotesmokepuff(const vec &o, float radius, int life, uint seed);
 extern void hwrtcollectsmokesprites();
 
 // ragdoll
