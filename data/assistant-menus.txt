@@ -65,8 +65,11 @@
 == Menus
 1. checkbox "2D Menus" gui2d | checkbox "Click Tab" guiclicktab | checkbox "Menu Fade In" guifadein
 == Resolution
-1. {if "Borderless" chosen (windowmode 2) and not "Borderless at the Resolution below (stretched, Windows unchanged)" ticked (borderlessres) or fsaa > 0} note: Borderless uses the monitor size unless Borderless at the Resolution below is ticked (Display Mode, above).
-2. [ text "4:3" / button "320x240" : screenres 320 240 / button "640x480" : screenres 640 480 / button "800x600" : screenres 800 600 / button "1024x768" : screenres 1024 768 / button "1152x864" : screenres 1152 864 / button "1280x960" : screenres 1280 960 / button "1400x1050" : screenres 1400 1050 / button "1600x1200" : screenres 1600 1200 / button "1792x1344" : screenres 1792 1344 / button "1856x1392" : screenres 1856 1392 / button "1920x1440" : screenres 1920 1440 / button "2048x1536" : screenres 2048 1536 / button "2800x2100" : screenres 2800 2100 / button "3200x2400" : screenres 3200 2400 ] | [ text "16:10" / button "320x200" : screenres 320 200 / button "640x400" : screenres 640 400 / button "1024x640" : screenres 1024 640 / button "1280x800" : screenres 1280 800 / button "1440x900" : screenres 1440 900 / button "1600x1000" : screenres 1600 1000 / button "1680x1050" : screenres 1680 1050 / button "1920x1200" : screenres 1920 1200 / button "2048x1280" : screenres 2048 1280 / button "2560x1600" : screenres 2560 1600 / button "2880x1800" : screenres 2880 1800 / button "3200x2000" : screenres 3200 2000 / button "3840x2400" : screenres 3840 2400 ] | [ text "16:9" / button "1024x600" : screenres 1024 600 / button "1280x720" : screenres 1280 720 / button "1366x768" : screenres 1366 768 / button "1600x900" : screenres 1600 900 / button "1920x1080" : screenres 1920 1080 / button "2048x1152" : screenres 2048 1152 / button "2560x1440" : screenres 2560 1440 / button "2880x1620" : screenres 2880 1620 / button "3200x1800" : screenres 3200 1800 / button "3840x2160" : screenres 3840 2160 ] | [ text "5:4" / button "600x480" : screenres 600 480 / button "1280x1024" : screenres 1280 1024 / button "1600x1280" : screenres 1600 1280 / button "2560x2048" : screenres 2560 2048 ] | [ text "5:3" / button "800x480" : screenres 800 480 / button "1280x768" : screenres 1280 768 / text "Custom" / field scr_w | field scr_h ]
+1. {if "Borderless" chosen (windowmode 2) and not "Borderless at the Resolution below (stretched, Windows unchanged)" ticked (borderlessres) or fsaa > 0} status: Borderless: the game uses the monitor size (<desktopw>x<desktoph>).
+2. {if "Borderless" chosen (windowmode 2) and not "Borderless at the Resolution below (stretched, Windows unchanged)" ticked (borderlessres) or fsaa > 0} note: The resolution below applies in Exclusive Fullscreen or Windowed, or in Borderless
+3. {if "Borderless" chosen (windowmode 2) and not "Borderless at the Resolution below (stretched, Windows unchanged)" ticked (borderlessres) or fsaa > 0} note: with Borderless at the Resolution below ticked (Display Mode, above).
+4. {if "Exclusive Fullscreen" chosen (windowmode 1)} note: Exclusive Fullscreen: the monitor switches to the resolution you pick.
+5. [ text "4:3" / button "320x240" : screenres 320 240 / button "640x480" : screenres 640 480 / button "800x600" : screenres 800 600 / button "1024x768" : screenres 1024 768 / button "1152x864" : screenres 1152 864 / button "1280x960" : screenres 1280 960 / button "1400x1050" : screenres 1400 1050 / button "1600x1200" : screenres 1600 1200 / button "1792x1344" : screenres 1792 1344 / button "1856x1392" : screenres 1856 1392 / button "1920x1440" : screenres 1920 1440 / button "2048x1536" : screenres 2048 1536 / button "2800x2100" : screenres 2800 2100 / button "3200x2400" : screenres 3200 2400 ] | [ text "16:10" / button "320x200" : screenres 320 200 / button "640x400" : screenres 640 400 / button "1024x640" : screenres 1024 640 / button "1280x800" : screenres 1280 800 / button "1440x900" : screenres 1440 900 / button "1600x1000" : screenres 1600 1000 / button "1680x1050" : screenres 1680 1050 / button "1920x1200" : screenres 1920 1200 / button "2048x1280" : screenres 2048 1280 / button "2560x1600" : screenres 2560 1600 / button "2880x1800" : screenres 2880 1800 / button "3200x2000" : screenres 3200 2000 / button "3840x2400" : screenres 3840 2400 ] | [ text "16:9" / button "1024x600" : screenres 1024 600 / button "1280x720" : screenres 1280 720 / button "1366x768" : screenres 1366 768 / button "1600x900" : screenres 1600 900 / button "1920x1080" : screenres 1920 1080 / button "2048x1152" : screenres 2048 1152 / button "2560x1440" : screenres 2560 1440 / button "2880x1620" : screenres 2880 1620 / button "3200x1800" : screenres 3200 1800 / button "3840x2160" : screenres 3840 2160 ] | [ text "5:4" / button "600x480" : screenres 600 480 / button "1280x1024" : screenres 1280 1024 / button "1600x1280" : screenres 1600 1280 / button "2560x2048" : screenres 2560 2048 ] | [ text "5:3" / button "800x480" : screenres 800 480 / button "1280x768" : screenres 1280 768 / text "Custom" / field -> screenres | field -> screenres ]
 
 ## gfx | Graphics | Options > Graphics
 == Lighting
@@ -105,16 +108,18 @@
 5. {if "Smoke shadows" ticked (hwrtsmokeshadow)} note: Smoke shadow density (percent, default: 100):
 6. {if "Smoke shadows" ticked (hwrtsmokeshadow)} slider hwrtsmokeshadowdensity
 7. note: Uncheck my shadow if it looks dirty or ugly indoors.
-== Anti-Aliasing {only if DLSS/FSR built in}
-1. note: Native, NVIDIA DLAA / DLSS, or AMD FSR. Quality uses more internal pixels than Performance.
-2. choice hwrtngxmode: "Native"=0, "DLAA"=1, "DLSS Quality"=2, "DLSS Balanced"=3, "DLSS Performance"=4
-3. {if FSR built in} choice hwrtngxmode: "FSR Native"=5, "FSR Quality"=6, "FSR Balanced"=7, "FSR Performance"=8
-4. {if FSR built in and hwrtdlssraison() != ""} status: <hwrtdlssraison>
-5. {if FSR built in and hwrtfsrraison() != ""} status: <hwrtfsrraison>
-6. {if FSR built in and hwrtngxmode >= 6 and hwrtfsrraison() = ""} note: FSR sharpening after upscaling (0 = off, 10 = like DLSS):
-7. {if FSR built in and hwrtngxmode >= 6 and hwrtfsrraison() = ""} slider hwrtfsrsharpness
-8. {if hwrtngxfallback() = 1} status: Using Native: <AA_modename $hwrtngxmode> did not start. Your choice is kept.
-9. {if hwrtngxfallback() = 1 and hwrtngxreason() != ""} note: <hwrtngxreason>
+== Anti-Aliasing
+1. checkbox "FXAA in Native (smoother edges, softer textures)" lookfxaa
+2. note: Off (default): Native is as sharp as stock Sauerbraten. Never added to Temporal AA, DLAA, DLSS or FSR.
+3. {if DLSS/FSR built in} note: Native, NVIDIA DLAA / DLSS, or AMD FSR. Quality uses more internal pixels than Performance.
+4. {if DLSS/FSR built in} choice hwrtngxmode: "Native"=0, "DLAA"=1, "DLSS Quality"=2, "DLSS Balanced"=3, "DLSS Performance"=4
+5. {if DLSS/FSR built in and FSR built in} choice hwrtngxmode: "FSR Native"=5, "FSR Quality"=6, "FSR Balanced"=7, "FSR Performance"=8
+6. {if DLSS/FSR built in and FSR built in and hwrtdlssraison() != ""} status: <hwrtdlssraison>
+7. {if DLSS/FSR built in and FSR built in and hwrtfsrraison() != ""} status: <hwrtfsrraison>
+8. {if DLSS/FSR built in and FSR built in and hwrtngxmode >= 6 and hwrtfsrraison() = ""} note: FSR sharpening after upscaling (0 = off, 10 = like DLSS):
+9. {if DLSS/FSR built in and FSR built in and hwrtngxmode >= 6 and hwrtfsrraison() = ""} slider hwrtfsrsharpness
+10. {if DLSS/FSR built in and hwrtngxfallback() = 1} status: Using Native: <AA_modename $hwrtngxmode> did not start. Your choice is kept.
+11. {if DLSS/FSR built in and hwrtngxfallback() = 1 and hwrtngxreason() != ""} note: <hwrtngxreason>
 == RT Sky Denoise {only if NRD built in}
 1. note: Ray tracing only. Filters the ray-traced sky light. NRD works with Native, DLSS and FSR.
 2. choice hwrtnrd: "Sauer filter"=0, "NRD"=1

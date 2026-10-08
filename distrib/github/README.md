@@ -226,7 +226,8 @@ The game reads your mouse once the GPU has caught up, instead of queueing frames
 
 | Setting | What it does | Default |
 |---|---|---|
-| `looktaa` | Temporal AA (otherwise FXAA in Native) | `0` |
+| `looktaa` | Temporal AA | `0` |
+| `lookfxaa` | FXAA in Native (Options → Graphics → *Anti-Aliasing*): smoother edges, softer textures. Off = as sharp as stock Sauerbraten | `0` |
 | `lookselfshadow` | your own body casts a sun shadow in first person (classic shadows) | `1` |
 | `gtao` | Ambient Occlusion, classic lighting only (Options → Graphics → *Lighting*): `0` off, `1` Low, `2` High. Slightly darker corners and wall bases; players are never darkened | `1` |
 
@@ -507,7 +508,13 @@ Idea from p1xbraten; written for L4ZY.
 
 Each release is listed on the [Releases](https://github.com/Lazy-Apathy/L4ZY/releases) page, newest first.
 
-### 2026.10.7.1 (test)
+### 2026.10.8.1 (test)
+
+- Sharper image in Native: the FXAA filter that softened textures and player models is now off by default. If you liked the smoother edges, tick *FXAA in Native* in Options → Graphics → *Anti-Aliasing*.
+- Exclusive fullscreen: choosing a resolution now applies it right away; the *Custom* fields apply at once too.
+- Borderless: the Resolution section now says when the game uses the monitor size, and how to play at another resolution (*Borderless at the Resolution below*).
+
+### 2026.10.7.1 (stable)
 
 - Ray tracing: weapon lights redone. Short muzzle flashes sized to each weapon (your gun lights up with them), rockets and grenades light their path in flight, and an explosion's light lasts as long as the explosion itself.
 - New projectile colours for rockets and grenades (glow in flight and explosion), separately for *Me*, *Others* and *All*; with ray tracing, the light follows the projectile colour, and muzzle flashes follow the trail colour (Options → HUD → *Weapon Trails: Colours*).

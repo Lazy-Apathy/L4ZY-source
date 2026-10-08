@@ -141,6 +141,7 @@ extern bool renderedgame;
 extern const matrix4 viewmatrix;
 extern matrix4 cammatrix, projmatrix, camprojmatrix, invcammatrix, invcamprojmatrix, lastcamprojmatrix;
 extern int looktaa;
+extern int lookfxaa;
 extern int hwrtdlaajitter;
 extern int hwrtdlaajitterrt;
 extern int hwrtdlaa;

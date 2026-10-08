@@ -2352,6 +2352,13 @@ VARFP(looktaa, 0, 0, 1, {
     if(!initing && identexists("LOOK_apply")) execute("LOOK_apply");
 });
 
+// FXAA in Native, off by default. The pass also averages texture detail that is
+// not an edge, so the scene looked softer than stock Sauerbraten. Drawn only
+// when this is 1, Temporal AA is off and DLAA/DLSS/FSR is not the image shown.
+VARFP(lookfxaa, 0, 0, 1, {
+    if(!initing && identexists("LOOK_apply")) execute("LOOK_apply");
+});
+
 static bool looktaausable()
 {
     if(!looktaa || minimized) return false;

@@ -802,6 +802,20 @@ static bool windowflagsexclusive()
     return screen && (SDL_GetWindowFlags(screen) & SDL_WINDOW_FULLSCREEN) != 0;
 }
 
+// Exclusive fullscreen: SDL shows scr_w x scr_h in the closest display mode
+// at least that large. True when the window already has that mode's size (or
+// when no mode is that large: there is nothing better to switch to).
+static bool exclusivesizeapplied(int w, int h, SDL_DisplayMode &got)
+{
+    SDL_DisplayMode want;
+    SDL_zero(want);
+    SDL_zero(got);
+    want.w = scr_w;
+    want.h = scr_h;
+    if(!SDL_GetClosestDisplayMode(currentdisplayindex(), &want, &got)) return true;
+    return w == got.w && h == got.h;
+}
+
 static bool windowcoversdesktop()
 {
     if(!screen) return false;
@@ -825,10 +839,14 @@ void applywindowmode()
     getdisplaybounds(bounds);
 
     bool already = false;
+    SDL_DisplayMode exclusivemode;
+    SDL_zero(exclusivemode);
     switch(windowmode)
     {
         case WM_EXCLUSIVE:
-            already = exclusive;
+            // Already exclusive is not enough: a new resolution (screenres) must
+            // still change the display mode. SDL_SetWindowSize below does it.
+            already = exclusive && exclusivesizeapplied(w, h, exclusivemode);
             break;
         case WM_BORDERLESS:
             already = !exclusive && (flags & SDL_WINDOW_BORDERLESS) && w == bounds.w && h == bounds.h;
@@ -861,12 +879,22 @@ void applywindowmode()
     switch(windowmode)
     {
         case WM_EXCLUSIVE:
+        {
             SDL_SetWindowResizable(screen, SDL_FALSE);
             SDL_SetWindowBordered(screen, SDL_TRUE);
+            // While the window is exclusive, this alone switches the display mode.
             SDL_SetWindowSize(screen, scr_w, scr_h);
             SDL_SetWindowFullscreen(screen, SDL_WINDOW_FULLSCREEN);
             initwindowpos = true;
+            SDL_DisplayMode cur;
+            if(SDL_GetWindowDisplayMode(screen, &cur) == 0)
+            {
+                logoutf("video: exclusive %dx%d asked, display mode %dx%d %d Hz", scr_w, scr_h, cur.w, cur.h, cur.refresh_rate);
+                if(cur.w != scr_w || cur.h != scr_h)
+                    conoutf("\f2%dx%d is not a mode of this monitor: exclusive fullscreen uses %dx%d.", scr_w, scr_h, cur.w, cur.h);
+            }
             break;
+        }
         case WM_BORDERLESS:
             SDL_SetWindowResizable(screen, SDL_FALSE);
             SDL_SetWindowBordered(screen, SDL_FALSE);
@@ -1087,7 +1115,13 @@ void screenres(int w, int h)
         }
         // Borderless keeps the monitor size. With borderlessres 1 it renders at
         // scr_w x scr_h and stretches; otherwise scr_w/scr_h wait for windowed/exclusive.
-        else updaterendersize();
+        else
+        {
+            updaterendersize();
+            if(!borderlessres || fsaa > 0)
+                conoutf("\f2Borderless uses the monitor size (%dx%d). %dx%d applies in Exclusive Fullscreen or Windowed, or with \"Borderless at the Resolution below\" (Options > Display).",
+                        desktopw, desktoph, scr_w, scr_h);
+        }
     }
     else
     {

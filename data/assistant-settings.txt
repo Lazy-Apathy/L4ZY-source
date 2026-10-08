@@ -286,6 +286,7 @@ lookao: old "Creases" soft shadows in corners, classic lighting only and only wh
 lookaoscale: strength of that ambient occlusion
 lookaoradius: size of that ambient occlusion
 looktaa: temporal anti-aliasing (smoother edges, a bit blurry)
+lookfxaa: FXAA in Native (smoother edges, but softer, blurrier textures). 0 by default: Native is then as sharp as stock Sauerbraten. Never used with Temporal AA, DLAA, DLSS or FSR
 motionblur: motion blur
 motionblurscale: strength of the motion blur
 motionblurmillis: -

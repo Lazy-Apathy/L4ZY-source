@@ -219,6 +219,7 @@ hwrtdynlights: lumieres tir flash canon bouche roquette grenade explosion eclair
 hwrtsmokeshadow: ombre fumee traine fusil roquette grenade soleil rt
 hwrtsmokeshadowdensity: ombre fumee densite force rt
 looktaa: anticrenelage temporel taa
+lookfxaa: fxaa anticrenelage crenelage flou net nettete lissage bords natif native
 gtao: occlusion ambiante ao gtao ssao coins recoins relief ombres contact
 lookao: ombres occlusion ssao
 lookselfshadow: ombre soleil

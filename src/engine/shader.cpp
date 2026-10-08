@@ -1373,15 +1373,23 @@ static bool postfxisfxaa(const postfxpass &p)
     return p.shader && p.shader->name && !strcmp(p.shader->name, "fxaa");
 }
 
+// FXAA is drawn only when it is asked for (lookfxaa), Temporal AA is off and
+// no DLAA/DLSS/FSR image is shown. A LOOK_keep alias saved in an old
+// config.cfg still stores the pass; this is what keeps it from being drawn.
+static bool fxaaskipped()
+{
+    return !lookfxaa || looktaa || hwrtngxmodeapplied();
+}
+
 // Draw-time policy. addpostfx only sees the applied mode at the moment the
 // pass is stored. LOOK_apply right after a mode request still runs while
 // that mode is 0, so a stored FXAA pass must be skipped here once DLAA/DLSS
 // is the image actually produced. Native and an NGX fallback (applied 0)
-// draw it again when looktaa is off.
+// draw it again when looktaa is off and lookfxaa is on.
 static bool postfxexecute(const postfxpass &p, bool presented)
 {
     if(presented && postfxisgrade(p)) return false;
-    if(postfxisfxaa(p) && (looktaa || hwrtngxmodeapplied())) return false;
+    if(postfxisfxaa(p) && fxaaskipped()) return false;
     return true;
 }
 
@@ -1392,14 +1400,15 @@ static void logfxaaexec()
 {
     int stored = 0, applied = hwrtngxmodeapplied();
     loopv(postfxpasses) if(postfxisfxaa(postfxpasses[i])) stored = 1;
-    int drawn = (stored && !looktaa && !applied) ? 1 : 0;
-    static int lstored = -1, ldrawn = -1, lapplied = -1, ltaa = -1;
-    if(lstored == stored && ldrawn == drawn && lapplied == applied && ltaa == looktaa) return;
+    int drawn = (stored && !fxaaskipped()) ? 1 : 0;
+    static int lstored = -1, ldrawn = -1, lapplied = -1, ltaa = -1, lfxaa = -1;
+    if(lstored == stored && ldrawn == drawn && lapplied == applied && ltaa == looktaa && lfxaa == lookfxaa) return;
     lstored = stored;
     ldrawn = drawn;
     lapplied = applied;
     ltaa = looktaa;
-    conoutf("hdr postfx fxaa dessine %d stocke %d applique %d looktaa %d", drawn, stored, applied, looktaa);
+    lfxaa = lookfxaa;
+    conoutf("hdr postfx fxaa dessine %d stocke %d applique %d looktaa %d lookfxaa %d", drawn, stored, applied, looktaa, lookfxaa);
 }
 
 void renderpostfx()
@@ -1545,7 +1554,7 @@ static bool addpostfx(const char *name, int outputbind, int outputscale, uint in
     // Temporal AA replaces FXAA. If DLAA/DLSS is already the applied image,
     // do not store another FXAA pass. A request that arrives before NGX is
     // applied can still store one; renderpostfx is what refuses to draw it.
-    if(!strcmp(name, "fxaa") && (looktaa || hwrtngxmodeapplied())) return true;
+    if(!strcmp(name, "fxaa") && fxaaskipped()) return true;
     Shader *s = useshaderbyname(name);
     if(!s)
     {
@@ -1590,8 +1599,8 @@ static void hwrthdrpostfxcmd()
             postfxrouteexec > 0 ? "fenetre" : (postfxrouteexec == 0 ? "fenetre_conservee" : "pas_encore"));
     int storedfxaa = 0, applied = hwrtngxmodeapplied();
     loopv(postfxpasses) if(postfxisfxaa(postfxpasses[i])) storedfxaa = 1;
-    conoutf("hdr postfx fxaa etat dessine %d stocke %d applique %d looktaa %d",
-            (storedfxaa && !looktaa && !applied) ? 1 : 0, storedfxaa, applied, looktaa);
+    conoutf("hdr postfx fxaa etat dessine %d stocke %d applique %d looktaa %d lookfxaa %d",
+            (storedfxaa && !fxaaskipped()) ? 1 : 0, storedfxaa, applied, looktaa, lookfxaa);
 }
 ICOMMAND(hwrthdrpostfx, "", (), hwrthdrpostfxcmd());
 
