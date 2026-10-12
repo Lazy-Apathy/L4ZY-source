@@ -23,6 +23,12 @@ VARP(hwrttimes, 0, 0, 1);
 // exactly as it was before either existed.
 VARP(hwrtreflections, 0, 1, 1);
 VARP(hwrtspecular, 0, 1, 1);
+// Frame-path optimisations that leave the image unchanged (shots/rt-performance-lot4).
+// Bit 1: CPU work of the RT dispatch before the GL -> Vulkan signal. Bit 2: the
+// same for the DLAA/DLSS/FSR evaluate. Bit 4: the three upscaler input packs in
+// one multiple-target pass. 0 = the previous path, for comparisons.
+VAR(hwrtperfpath, 0, 7, 7);
+bool hwrtdispatchsignals = false;
 
 hwrttimings hwrttime;
 
@@ -198,6 +204,14 @@ VARP(hwrtskytemporal, 0, 32, 128);
 // 3 = + the nearest-N finite lamps (also cut where the winning lamp changes
 // between two pixels), 4 = + sky (a body that close eats the hemisphere).
 VARP(hwrtshadowself, 0, 1, 4);
+// Which lights the OTHERS shadow: other players and bots, corpses, projectiles,
+// flags and pickups (instances tagged DYN). 0 none, 1 the sun and the sky,
+// 2 (default) + the logical sources (teleporters, lava, glowing jump pads:
+// the flags 3 lamps), 3 + the mapper lamps (radius 0 and nearest-N finite
+// ET_LIGHT), which is every light that casts. A mapper lamp is often an
+// invisible helper, so a body next to one throws a shadow with no source in
+// sight. The scenery (mapmodels), the world and my own body are not affected.
+VARP(hwrtshadowothers, 0, 2, 3);
 // Projected omni only: the pad / portal still glows. Jumppads default off.
 // Teleporters: every teleport ent, not only the default ring. Colour follows
 // a nearby glow pad or magic-circle tint. Toggling is live.
@@ -729,10 +743,17 @@ void hwrtrender()
     // Nothing between the two calls issues GL work, so this GL_TIME_ELAPSED span
     // is the GL queue standing still for the whole Vulkan round trip.
     hwrtbegingltime(HWRT_GLT_HANDOFF);
-    hwrtsignalgl();
+    // hwrtperfpath bit 1: the CPU side of the dispatch (lamp upload, dynamic
+    // entities, command recording) runs first and the GL signal goes out right
+    // before vkQueueSubmit, so the GPU does not sit between the two waiting for
+    // the CPU. Same commands, same image.
+    hwrtdispatchsignals = (hwrtperfpath & 1) != 0;
+    if(!hwrtdispatchsignals) hwrtsignalgl();
     hwrtlightrecorded = false;
     double tdisp = hwrtnow();
     bool dispatched = hwrtdispatch(mode);
+    // A dispatch that gave up before its submit never sent the signal either.
+    hwrtdispatchsignals = false;
     hwrttime.cpudispatch = float((hwrtnow() - tdisp) * 1000.0);
     if(!dispatched)
     {

@@ -1,8 +1,8 @@
 @echo off
 rem Rebuild the daily Sauer-RT client (x64). Requires w64devkit.
 rem Output: ..\bin64\sauerbraten.exe
-rem Uses the public NGX Vulkan gateway (dlaa-ngx.o / HWRT_NGX_GATEWAY),
-rem not Streamline. Does not rebuild bin64\ngx-sr or bin64\nrd DLLs.
+rem Uses the public NGX Vulkan gateway (dlaa-ngx.o / HWRT_NGX_GATEWAY).
+rem Does not rebuild bin64\ngx-sr or bin64\nrd DLLs.
 setlocal
 set "PATH=%LOCALAPPDATA%\w64devkit\w64devkit\bin;%PATH%"
 cd /d "%~dp0"

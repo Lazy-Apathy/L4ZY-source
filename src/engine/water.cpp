@@ -515,6 +515,515 @@ void preloadwatershaders(bool force)
     if(waterfallrefract) useshaderbyname(waterfallenv ? "waterfallenvrefract" : "waterfallrefract");
 }
 
+// Animated water (FFT waves). After J. Tessendorf, "Simulating Ocean Water"
+// (SIGGRAPH course notes): a Phillips spectrum of random wave amplitudes,
+// animated by the deep-water dispersion relation and turned into the surface
+// slope by one inverse FFT per frame (slope x in the real part, slope y in
+// the imaginary part: the spectrum is kept hermitian). Only the slope is
+// used: the water stays flat for the game and for GL's geometry. The slope
+// drives the normal of the above-water shaders ("...wave" variants,
+// glsl.cfg) and, on traced planes, the reflected ray (hitlight.comp).
+// The tile repeats; a second, rotated and enlarged copy of it is added to
+// hide the repetition. The waves fade out far away (a pixel covering several
+// texels would sparkle) and where the water gets shallow (shores).
+// Two independent options: waterwaves for the water GL reflects itself
+// (classic lighting, or RT without traced reflections), hwrtwaterwaves for
+// the planes the RT traces. With both at 0 every shader, texture and buffer
+// of the classic and RT paths is exactly as before.
+// The FFT runs on the GPU (GL fragment passes, radix-2 Stockham, no bit
+// reversal); the CPU FFT below is the fallback when float render targets
+// are missing or fail, and the reference the GPU one is checked against.
+static void waterwavesdirty();
+VARP(waterwaves, 0, 0, 1);                               // waves on the classic (GL-reflected) water
+VARP(hwrtwaterwaves, 0, 0, 1);                           // waves on the RT-traced water
+FVARP(waterwaveamp, 0.25f, 1, 3);                        // scales the slope (1: rms slope 0.1)
+FVARP(waterwavespeed, 0.25f, 1, 3);                      // time scale
+VARFP(waterwavesize, 64, 128, 256, waterwavesdirty());   // FFT grid, rounded down to 64, 128 or 256
+VARF(waterwavetile, 16, 128, 4096, waterwavesdirty());   // tile size in world units
+FVARF(waterwavewind, 0.5f, 3, 30, waterwavesdirty());   // wind speed, m/s
+VARF(waterwavewinddir, 0, 30, 359, waterwavesdirty());   // wind direction, degrees
+FVAR(waterwavedistort, 0, 8, 64);                       // slope -> distortion of the planar textures
+FVAR(waterwavelayer, 0, 0.6f, 2);                       // weight of the second, rotated layer
+FVAR(waterwavefade, 0, 1, 4);                           // far fade (0: none; 1: gone past 3 texels a pixel)
+FVAR(waterwaveshore, 0, 4, 64);                         // RT: full waves past this depth (units; 0: none)
+VARF(waterwavegpu, 0, 1, 1, waterwavesdirty());          // 0: CPU FFT
+VAR(waterwavestats, 0, 0, 1);                           // 1: cost in the console once a second
+
+static const float WAVE_UNITS_PER_M = 8.0f;    // a player is about 15 units, 1.8 m
+static const float WAVE_REPEAT = 40.0f;        // seconds; frequencies are multiples of 2pi/WAVE_REPEAT
+static const float WAVE_RMS_SLOPE = 0.1f;      // rms slope of the field at waterwaveamp 1
+static const float WAVE_LAYER_SCALE = 2.618f;  // second layer: enlarged copy...
+static const float WAVE_LAYER_ANGLE = 37.0f;   // ...rotated by this many degrees
+
+static int wavesn = 0, wavesbuilt = 0, wavesframe = -1, wavesrtframe = -1, wavesrtready = -1;
+static bool wavesneedbuild = true, wavesgpufailed = false, wavesgpuused = false;
+static vector<float> wavesh0;      // per k: h0(k) and conj(h0(-k)), 4 floats
+static vector<ushort> wavesomega;  // per k: quantised frequency, in units of 2pi/WAVE_REPEAT
+static vector<float> wavesbuf;     // CPU: n*n complex, the slope spectrum then the slope field
+static vector<float> wavesrt;      // slope field handed to the RT (n*n x, y)
+static vector<float> wavesphase;   // cos, sin for each quantised frequency
+static vector<int> wavesrev;       // bit reversal
+static vector<float> wavestw;      // twiddles, n/2 complex
+static GLuint wavestex = 0;        // the slope tile GL samples (RG32F, mipmapped)
+// GPU FFT: h0 (RGBA32F), quantised frequency (R32F), two RG32F ping-pong
+// targets; framebuffers for them and for wavestex; two readback buffers for
+// the RT copy (read one frame later, never stalls).
+static GLuint wavesgtex[4] = { 0, 0, 0, 0 }, wavesfb[3] = { 0, 0, 0 }, wavespbo[2] = { 0, 0 };
+static bool wavespbofull[2] = { false, false };
+static int wavespboslot = 0;
+static uint wavesrng = 0;
+
+static void waterwavesdirty() { wavesneedbuild = true; }
+
+static inline float wavesrand()
+{
+    // pcg-style hash, private: the game's own random sequence is never touched
+    wavesrng = wavesrng*747796405u + 2891336453u;
+    uint w = ((wavesrng >> ((wavesrng >> 28u) + 4u)) ^ wavesrng)*277803737u;
+    w = (w >> 22u) ^ w;
+    return (w + 0.5f)/4294967296.0f;
+}
+
+static void wavesgauss(float &a, float &b)
+{
+    float u1 = max(wavesrand(), 1e-7f), u2 = wavesrand();
+    float r = sqrtf(-2*logf(u1));
+    a = r*cosf(2*M_PI*u2);
+    b = r*sinf(2*M_PI*u2);
+}
+
+static void cleanupwavesgpu()
+{
+    if(wavesgtex[0]) glDeleteTextures(4, wavesgtex);
+    if(wavesfb[0]) glDeleteFramebuffers_(3, wavesfb);
+    if(wavespbo[0]) glDeleteBuffers_(2, wavespbo);
+    loopi(4) wavesgtex[i] = 0;
+    loopi(3) wavesfb[i] = 0;
+    loopi(2) { wavespbo[i] = 0; wavespbofull[i] = false; }
+}
+
+static void buildwaterwaves()
+{
+    int n = waterwavesize >= 256 ? 256 : (waterwavesize >= 128 ? 128 : 64);
+    if(n != wavesn)
+    {
+        wavesn = n;
+        wavesh0.setsize(0);
+        loopi(n*n*4) wavesh0.add(0);
+        wavesomega.setsize(0);
+        loopi(n*n) wavesomega.add(0);
+        wavesbuf.setsize(0);
+        loopi(n*n*2) wavesbuf.add(0);
+        wavesrt.setsize(0);
+        loopi(n*n*2) wavesrt.add(0);
+        wavesrev.setsize(0);
+        int bits = 0;
+        while((1<<bits) < n) bits++;
+        loopi(n)
+        {
+            int r = 0;
+            loopj(bits) if(i&(1<<j)) r |= 1<<(bits-1-j);
+            wavesrev.add(r);
+        }
+        wavestw.setsize(0);
+        loopi(n/2) { wavestw.add(cosf(2*M_PI*i/n)); wavestw.add(sinf(2*M_PI*i/n)); }
+        if(wavestex) { glDeleteTextures(1, &wavestex); wavestex = 0; }
+        wavesrtready = -1;
+    }
+    cleanupwavesgpu();
+    float L = waterwavetile, g = 9.81f*WAVE_UNITS_PER_M, V = waterwavewind*WAVE_UNITS_PER_M;
+    float Lw = V*V/g, small = 0.5f*L/n;
+    vec2 wind(cosf(waterwavewinddir*RAD), sinf(waterwavewinddir*RAD));
+    float w0 = 2*M_PI/WAVE_REPEAT;
+    // Phillips spectrum, with Tessendorf's suppression of the waves shorter
+    // than about a texel and a quarter of the energy against the wind.
+    wavesrng = 0x5eed1234u;
+    double energy = 0;
+    int maxq = 0;
+    loopj(n) loopi(n)
+    {
+        int mx = i < n/2 ? i : i-n, my = j < n/2 ? j : j-n;
+        vec2 k(2*M_PI*mx/L, 2*M_PI*my/L);
+        float kl = k.magnitude();
+        float *h = &wavesh0[(j*n+i)*4];
+        float ga, gb;
+        wavesgauss(ga, gb);
+        h[0] = h[1] = h[2] = h[3] = 0;
+        wavesomega[j*n+i] = 0;
+        // no wave at k = 0 nor on the Nyquist row and column (they would
+        // not stay real and would leak one slope into the other)
+        if(kl < 1e-6f || i == n/2 || j == n/2) continue;
+        float c = k.dot(wind)/kl;
+        float p = expf(-1/(kl*kl*Lw*Lw))/(kl*kl*kl*kl)*c*c*expf(-kl*kl*small*small);
+        if(c < 0) p *= 0.25f;
+        float a = sqrtf(p*0.5f);
+        h[0] = ga*a; h[1] = gb*a;
+        energy += 2*kl*kl*(h[0]*h[0] + h[1]*h[1]);
+        int q = int(sqrtf(g*kl)/w0);
+        q = min(q, 65535);
+        wavesomega[j*n+i] = ushort(q);
+        maxq = max(maxq, q);
+    }
+    // conj(h0(-k)) next to h0(k), so that H(k, t) stays hermitian
+    loopj(n) loopi(n)
+    {
+        float *h = &wavesh0[(j*n+i)*4];
+        const float *m = &wavesh0[((((n-j)&(n-1))*n) + ((n-i)&(n-1)))*4];
+        h[2] = m[0];
+        h[3] = -m[1];
+    }
+    // A fixed rms slope: waterwaveamp reads the same whatever the grid, tile or wind.
+    float scale = energy > 0 ? WAVE_RMS_SLOPE/sqrtf(float(energy)) : 0;
+    loopv(wavesh0) wavesh0[i] *= scale;
+    wavesphase.setsize(0);
+    loopi(maxq+1) { wavesphase.add(1); wavesphase.add(0); }
+    wavesbuilt = n;
+    wavesneedbuild = false;
+}
+
+// In-place radix-2 FFT (inverse sign) over n complex values spaced by stride.
+static void wavesfft(float *d, int stride)
+{
+    int n = wavesn;
+    loopi(n)
+    {
+        int r = wavesrev[i];
+        if(r > i)
+        {
+            float *a = &d[2*i*stride], *b = &d[2*r*stride];
+            swap(a[0], b[0]); swap(a[1], b[1]);
+        }
+    }
+    for(int len = 2; len <= n; len <<= 1)
+    {
+        int half = len/2, step = n/len;
+        for(int s = 0; s < n; s += len) loopk(half)
+        {
+            float wr = wavestw[2*k*step], wi = wavestw[2*k*step+1];
+            float *a = &d[2*(s+k)*stride], *b = &d[2*(s+k+half)*stride];
+            float br = b[0]*wr - b[1]*wi, bi = b[0]*wi + b[1]*wr;
+            b[0] = a[0] - br; b[1] = a[1] - bi;
+            a[0] += br; a[1] += bi;
+        }
+    }
+}
+
+// CPU: the slope field at time t into wavesbuf.
+static void wavescpu(float t)
+{
+    int n = wavesn;
+    float w0 = 2*M_PI/WAVE_REPEAT, L = waterwavetile;
+    for(int q = 0, nq = wavesphase.length()/2; q < nq; q++) { wavesphase[2*q] = cosf(q*w0*t); wavesphase[2*q+1] = sinf(q*w0*t); }
+    loopj(n)
+    {
+        int my = j < n/2 ? j : j-n;
+        float ky = 2*M_PI*my/L;
+        loopi(n)
+        {
+            int idx = j*n+i, mx = i < n/2 ? i : i-n;
+            float kx = 2*M_PI*mx/L;
+            const float *h = &wavesh0[idx*4], *e = &wavesphase[2*wavesomega[idx]];
+            // H = h0 e^{iwt} + conj(h0(-k)) e^{-iwt}; slope spectrum i kx H + i (i ky H)
+            float hr = h[0]*e[0] - h[1]*e[1] + h[2]*e[0] + h[3]*e[1],
+                  hi = h[0]*e[1] + h[1]*e[0] - h[2]*e[1] + h[3]*e[0];
+            wavesbuf[2*idx] = -kx*hi - ky*hr;
+            wavesbuf[2*idx+1] = kx*hr - ky*hi;
+        }
+    }
+    loopj(n) wavesfft(&wavesbuf[2*j*n], 1);
+    loopi(n) wavesfft(&wavesbuf[2*i], n);
+}
+
+// Timestamps: [0] water pass, [1] GPU FFT; 4 frames in flight.
+static PFNGLQUERYCOUNTERPROC wavesQueryCounter = NULL;
+static PFNGLGETQUERYOBJECTUI64VPROC wavesGetQueryObjectui64v = NULL;
+static GLuint wavesq[2][4][2];
+static bool wavesqpending[2][4];
+static int wavesqslot[2] = { 0, 0 };
+static double wavesstat[6] = { 0, 0, 0, 0, 0, 0 };   // cpu, gpu fft, its samples, water pass, its samples, gpu frames
+static int wavesstatframes = 0, wavesstatlast = 0;
+
+static bool wavestimers()
+{
+    if(wavesQueryCounter) return true;
+    wavesQueryCounter = (PFNGLQUERYCOUNTERPROC)getprocaddress("glQueryCounter");
+    wavesGetQueryObjectui64v = (PFNGLGETQUERYOBJECTUI64VPROC)getprocaddress("glGetQueryObjectui64v");
+    if(!wavesQueryCounter || !wavesGetQueryObjectui64v) { wavesQueryCounter = NULL; return false; }
+    loopk(2) loopi(4) { glGenQueries_(2, wavesq[k][i]); wavesqpending[k][i] = false; }
+    return true;
+}
+
+// which: 0 water pass, 1 GPU FFT; end: 0 at the start, 1 at the end.
+static void wavestimer(int which, int end)
+{
+    if(!waterwavestats || !wavestimers()) return;
+    int &slot = wavesqslot[which];
+    if(!end && wavesqpending[which][slot])
+    {
+        // read the oldest slot back first (4 frames later, it is ready)
+        GLint avail = 0;
+        glGetQueryObjectiv_(wavesq[which][slot][1], GL_QUERY_RESULT_AVAILABLE, &avail);
+        if(avail)
+        {
+            GLuint64 a = 0, b = 0;
+            wavesGetQueryObjectui64v(wavesq[which][slot][0], GL_QUERY_RESULT, &a);
+            wavesGetQueryObjectui64v(wavesq[which][slot][1], GL_QUERY_RESULT, &b);
+            wavesstat[which ? 1 : 3] += (b - a)/1e6;
+            wavesstat[which ? 2 : 4]++;
+        }
+        wavesqpending[which][slot] = false;
+    }
+    wavesQueryCounter(wavesq[which][slot][end], GL_TIMESTAMP);
+    if(end) { wavesqpending[which][slot] = true; slot = (slot+1)&3; }
+}
+
+static void wavestatprint()
+{
+    if(!waterwavestats || totalmillis - wavesstatlast < 1000) return;
+    wavesstatlast = totalmillis;
+    int fr = max(wavesstatframes, 1);
+    conoutf("waves: gl %d rt %d n %d %s amp %.2f  cpu %.3f ms  gpu fft %.3f ms  gpu water pass %.3f ms",
+            waterwaves, hwrtwaterwaves, wavesn, wavesgpuused ? "gpu" : "cpu", waterwaveamp,
+            wavesstat[0]/fr, wavesstat[1]/max(wavesstat[2], 1.0), wavesstat[3]/max(wavesstat[4], 1.0));
+    loopi(6) wavesstat[i] = 0;
+    wavesstatframes = 0;
+}
+
+static bool wavesgpusetup()
+{
+    int n = wavesn;
+    glGenTextures(4, wavesgtex);
+    vector<float> omega;
+    loopi(n*n) omega.add(wavesomega[i]);
+    loopi(4)
+    {
+        glBindTexture(GL_TEXTURE_2D, wavesgtex[i]);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        if(i == 0) glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, n, n, 0, GL_RGBA, GL_FLOAT, wavesh0.getbuf());
+        else if(i == 1) glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, n, n, 0, GL_RED, GL_FLOAT, omega.getbuf());
+        else glTexImage2D(GL_TEXTURE_2D, 0, GL_RG32F, n, n, 0, GL_RG, GL_FLOAT, NULL);
+    }
+    glBindTexture(GL_TEXTURE_2D, 0);
+    GLint prevfb = 0;
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prevfb);
+    glGenFramebuffers_(3, wavesfb);
+    bool ok = true;
+    loopi(3)
+    {
+        glBindFramebuffer_(GL_FRAMEBUFFER, wavesfb[i]);
+        glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, i < 2 ? wavesgtex[2+i] : wavestex, 0);
+        if(glCheckFramebufferStatus_(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) ok = false;
+    }
+    glBindFramebuffer_(GL_FRAMEBUFFER, prevfb);
+    glGenBuffers_(2, wavespbo);
+    loopi(2)
+    {
+        glBindBuffer_(GL_PIXEL_PACK_BUFFER, wavespbo[i]);
+        glBufferData_(GL_PIXEL_PACK_BUFFER, n*n*2*sizeof(float), NULL, GL_STREAM_READ);
+        wavespbofull[i] = false;
+    }
+    glBindBuffer_(GL_PIXEL_PACK_BUFFER, 0);
+    if(!ok)
+    {
+        conoutf(CON_WARN, "water waves: no float render target, the FFT stays on the CPU");
+        cleanupwavesgpu();
+    }
+    return ok;
+}
+
+// GPU: spectrum then 2 log2(n) passes, the last one into wavestex.
+static bool wavesgpu(float t)
+{
+    static Shader *spec = NULL, *pass = NULL;
+    if(!spec || !spec->loaded()) spec = useshaderbyname("wavefftspectrum");
+    if(!pass || !pass->loaded()) pass = useshaderbyname("wavefftpass");
+    if(!spec || !pass || !spec->loaded() || !pass->loaded()) return false;
+    if(!wavesgtex[0] && !wavesgpusetup()) return false;
+    int n = wavesn;
+    wavestimer(1, 0);
+    GLint prevfb = 0, vp[4];
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prevfb);
+    glGetIntegerv(GL_VIEWPORT, vp);
+    GLboolean depth = glIsEnabled(GL_DEPTH_TEST), blend = glIsEnabled(GL_BLEND), cull = glIsEnabled(GL_CULL_FACE), scissor = glIsEnabled(GL_SCISSOR_TEST);
+    glDisable(GL_DEPTH_TEST); glDisable(GL_BLEND); glDisable(GL_CULL_FACE); glDisable(GL_SCISSOR_TEST);
+    glViewport(0, 0, n, n);
+    glBindFramebuffer_(GL_FRAMEBUFFER, wavesfb[0]);
+    spec->set();
+    LOCALPARAMF(fftspec, n, 2*M_PI/waterwavetile, 2*M_PI/WAVE_REPEAT*t);
+    glActiveTexture_(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, wavesgtex[1]);
+    glActiveTexture_(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, wavesgtex[0]);
+    screenquad();
+    int bits = 0;
+    while((1<<bits) < n) bits++;
+    int passes = 2*bits, src = 0;
+    loopi(passes)
+    {
+        int axis = i < bits ? 0 : 1, ns = 1<<(i < bits ? i : i-bits);
+        glBindFramebuffer_(GL_FRAMEBUFFER, wavesfb[i == passes-1 ? 2 : 1-src]);
+        pass->set();
+        LOCALPARAMF(fftpass, n, ns, axis);
+        glBindTexture(GL_TEXTURE_2D, wavesgtex[2+src]);
+        screenquad();
+        src = 1-src;
+    }
+    if(hwrtwaterwaves)
+    {
+        // RT copy: last frame's readback is ready, this frame's is queued.
+        int prev = wavespboslot^1;
+        if(wavespbofull[prev])
+        {
+            glBindBuffer_(GL_PIXEL_PACK_BUFFER, wavespbo[prev]);
+            const float *p = (const float *)glMapBuffer_(GL_PIXEL_PACK_BUFFER, GL_READ_ONLY);
+            if(p)
+            {
+                memcpy(wavesrt.getbuf(), p, n*n*2*sizeof(float));
+                glUnmapBuffer_(GL_PIXEL_PACK_BUFFER);
+                wavesrtready = rtreflframe;
+            }
+            wavespbofull[prev] = false;
+        }
+        glBindBuffer_(GL_PIXEL_PACK_BUFFER, wavespbo[wavespboslot]);
+        glReadPixels(0, 0, n, n, GL_RG, GL_FLOAT, NULL);
+        glBindBuffer_(GL_PIXEL_PACK_BUFFER, 0);
+        wavespbofull[wavespboslot] = true;
+        wavespboslot ^= 1;
+    }
+    glBindFramebuffer_(GL_FRAMEBUFFER, prevfb);
+    glViewport(vp[0], vp[1], vp[2], vp[3]);
+    if(depth) glEnable(GL_DEPTH_TEST);
+    if(blend) glEnable(GL_BLEND);
+    if(cull) glEnable(GL_CULL_FACE);
+    if(scissor) glEnable(GL_SCISSOR_TEST);
+    glBindTexture(GL_TEXTURE_2D, wavestex);
+    glGenerateMipmap_(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    wavestimer(1, 1);
+    return true;
+}
+
+static int wavescheckpending = 0;
+static void wavescheck(float t);
+
+static bool waterwavesactive()
+{
+    return wavestex && wavesframe == rtreflframe && !drawtex;
+}
+
+// Once a frame, before the traced lighting and the water: the slope field at
+// the current time in wavestex; hwrtwavewrite() copies it for the RT.
+void updatewaterwaves()
+{
+    if(!waterwaves && !hwrtwaterwaves) return;
+    if(!hasTRG || !hasTF || !glGenerateMipmap_) return;
+    Uint64 t0 = SDL_GetPerformanceCounter();
+    if(wavesneedbuild || wavesbuilt != wavesn || !wavesn) { buildwaterwaves(); wavesgpufailed = false; }
+    int n = wavesn;
+    float t = fmodf(lastmillis/1000.0f*waterwavespeed, WAVE_REPEAT);
+    if(!wavestex)
+    {
+        glGenTextures(1, &wavestex);
+        glBindTexture(GL_TEXTURE_2D, wavestex);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        if(hasAF) glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, 8);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RG32F, n, n, 0, GL_RG, GL_FLOAT, NULL);
+        glGenerateMipmap_(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        cleanupwavesgpu();
+    }
+    wavesgpuused = waterwavegpu && !wavesgpufailed && hasFBO && wavesgpu(t);
+    if(waterwavegpu && !wavesgpuused && !wavesgpufailed)
+    {
+        conoutf(CON_WARN, "water waves: GPU FFT unavailable, using the CPU");
+        wavesgpufailed = true;
+    }
+    if(!wavesgpuused)
+    {
+        wavescpu(t);
+        glBindTexture(GL_TEXTURE_2D, wavestex);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, n, n, GL_RG, GL_FLOAT, wavesbuf.getbuf());
+        glGenerateMipmap_(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        if(hwrtwaterwaves) { memcpy(wavesrt.getbuf(), wavesbuf.getbuf(), n*n*2*sizeof(float)); wavesrtready = rtreflframe; }
+    }
+    wavesframe = rtreflframe;
+    if(waterwavestats)
+    {
+        wavesstat[0] += (SDL_GetPerformanceCounter() - t0)*1000.0/SDL_GetPerformanceFrequency();
+        wavesstatframes++;
+    }
+    if(wavescheckpending) wavescheck(t);
+}
+
+// Check (console): the GPU field of this frame against the CPU FFT at the
+// same time. waterwavecheck at the next frame, with the waves on.
+ICOMMAND(waterwavecheck, "", (), wavescheckpending = 1);
+
+static void wavescheck(float t)
+{
+    wavescheckpending = 0;
+    if(!wavesgpuused) { conoutf("waves check: the FFT runs on the CPU"); return; }
+    int n = wavesn;
+    wavescpu(t);
+    vector<float> out;
+    loopi(n*n*2) out.add(0);
+    glBindTexture(GL_TEXTURE_2D, wavestex);
+    glGetTexImage(GL_TEXTURE_2D, 0, GL_RG, GL_FLOAT, out.getbuf());
+    glBindTexture(GL_TEXTURE_2D, 0);
+    float err = 0, rms = 0;
+    loopi(n*n*2) { err = max(err, fabsf(out[i] - wavesbuf[i])); rms += wavesbuf[i]*wavesbuf[i]; }
+    conoutf("waves check: n %d  gpu vs cpu max error %.2e  rms slope %.4f", n, err, sqrtf(rms/(n*n)));
+}
+
+// Traced reflections: behind the light table (lights.cpp), [0] x on, y grid,
+// z 1/tile, w slope scale; [1] layer 2 rotation cos/sin, 1/(its tile), its
+// weight; [2] x far fade, y shore depth; then the n*n slopes (hitlight.comp
+// waveSlope). Off: only [0].x = 0. The slopes are the GPU field of the frame
+// before (read back without a stall) or the CPU field of this frame.
+void hwrtwavewrite(void *dst, int maxn)
+{
+    float *p = (float *)dst;
+    memset(p, 0, 12*sizeof(float));
+    if(!hwrtwaterwaves || !waterwavesactive() || wavesrtready < 0 || wavesn > maxn) return;
+    float a = WAVE_LAYER_ANGLE*RAD;
+    p[0] = 1; p[1] = wavesn; p[2] = 1.0f/waterwavetile; p[3] = waterwaveamp;
+    p[4] = cosf(a); p[5] = sinf(a); p[6] = 1.0f/(waterwavetile*WAVE_LAYER_SCALE); p[7] = waterwavelayer/WAVE_LAYER_SCALE;
+    p[8] = waterwavefade; p[9] = waterwaveshore;
+    memcpy(p + 12, wavesrt.getbuf(), wavesn*wavesn*2*sizeof(float));
+    wavesrtframe = rtreflframe;
+}
+
+static Shader *wavevariant(Shader *s)
+{
+    static Shader *from[16], *to[16];
+    static int num = 0;
+    if(!s) return s;
+    loopi(num) if(from[i] == s) { if(to[i] && to[i]->loaded()) return to[i]; num = i; break; }
+    defformatstring(name, "%swave", s->name);
+    Shader *w = useshaderbyname(name);
+    if(!w || !w->loaded()) return s;
+    if(num < 16) { from[num] = s; to[num] = w; num++; }
+    return w;
+}
+
+static void setwaveparams(bool rt)
+{
+    float a = WAVE_LAYER_ANGLE*RAD;
+    // w: the traced image is looked up with the planar distortion unless the
+    // traced rays already follow the waves.
+    bool rays = rt && wavesrtframe == rtreflframe;
+    LOCALPARAMF(waveparams, 1.0f/waterwavetile, waterwaveamp, waterwavedistort, rays ? 0.0f : 1.0f);
+    LOCALPARAMF(waveparams2, cosf(a), sinf(a), 1.0f/(waterwavetile*WAVE_LAYER_SCALE), waterwavelayer/WAVE_LAYER_SCALE);
+    LOCALPARAMF(waveparams3, float(waterwavetile)/max(wavesn, 1), waterwavefade);
+}
+
 void renderwater()
 {
     if(editmode && showmat && !drawtex) return;
@@ -613,6 +1122,21 @@ void renderwater()
         if(rtshaders[k] && rtshaders[k]->loaded()) rtshader = rtshaders[k];
     }
 
+    // FFT waves: the same shaders with the wave normal (glsl.cfg "...wave"),
+    // waterwaves on the planes GL reflects, hwrtwaterwaves on the traced ones.
+    bool waves = waterwavesactive() && drawtex != DRAWTEX_MINIMAP;
+    bool wavestat = waterwavestats && !glaring && !drawtex;
+    if(wavestat) wavestimer(0, 0);
+    Shader *abovewave = NULL, *rtwave = NULL;
+    if(waves)
+    {
+        abovewave = wavevariant(aboveshader);
+        rtwave = rtshader ? wavevariant(rtshader) : NULL;
+        glActiveTexture_(GL_TEXTURE5);
+        glBindTexture(GL_TEXTURE_2D, wavestex);
+        glActiveTexture_(GL_TEXTURE0);
+    }
+
     vec ambient(max(skylightcolor[0], ambientcolor[0]), max(skylightcolor[1], ambientcolor[1]), max(skylightcolor[2], ambientcolor[2]));
     float offset = -WATER_OFFSET;
     loopi(MAXREFLECTIONS)
@@ -636,12 +1160,16 @@ void renderwater()
         else
         {
             int rtgroup = rtrefl && rtshader ? rtreflectedgroup(i) : 0;
+            // the glare pass follows the option of the plane as the scene draws it
+            bool traced = rtgroup || (glaring && rtreflectedgroup(i));
+            bool wave = waves && (traced ? hwrtwaterwaves : waterwaves);
             if(rtgroup)
             {
-                rtshader->set();
+                (wave && rtwave ? rtwave : rtshader)->set();
                 LOCALPARAMF(rtrefl, 1.0f, float(rtgroup), rtinvw, rtinvh);
             }
-            else aboveshader->set();
+            else (wave ? abovewave : aboveshader)->set();
+            if(wave) setwaveparams(rtgroup != 0);
         }
 
         if(!glaring && drawtex != DRAWTEX_MINIMAP)
@@ -728,6 +1256,12 @@ void renderwater()
     }
 
     glEnable(GL_CULL_FACE);
+
+    if(wavestat)
+    {
+        wavestimer(0, 1);
+        wavestatprint();
+    }
 }
 
 void setupwaterfallrefract()
@@ -958,7 +1492,11 @@ void queryreflection(Reflection &ref, bool init)
 void queryreflections()
 {
     rplanes = 0;
-    if(!drawtex) rtreflframe++;
+    if(!drawtex)
+    {
+        rtreflframe++;
+        updatewaterwaves();
+    }
 
     static int lastsize = 0;
     int size = 1<<reflectsize;

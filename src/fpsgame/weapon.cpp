@@ -974,6 +974,7 @@ namespace game
 
     void shoteffects(int gun, const vec &from, const vec &to, fpsent *d, bool local, int id, int prevaction)     // create visual effect from a shot
     {
+        notereactshot(d);
         int sound = guns[gun].sound, pspeed = 25;
         switch(gun)
         {

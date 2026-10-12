@@ -206,6 +206,7 @@ extern void conoutf(int type, int tag, const char *s, ...) PRINTFARGS(3, 4);
 extern void conoutfv(int type, const char *fmt, va_list args);
 extern int conoutfid(int type, const char *s, ...) PRINTFARGS(2, 3);
 extern bool conreplaceid(int id, int type, const char *s, ...) PRINTFARGS(3, 4);
+extern bool conremoveid(int id);
 extern void clearchatlog();
 extern int chatloglen();
 extern bool chatlogfind(int num, int &uid, int &type);

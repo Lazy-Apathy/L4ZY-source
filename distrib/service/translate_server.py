@@ -61,6 +61,20 @@ NUM_CTX = 4096         # Qwen3 defaut ~32k : KV cache enorme, le jeu et le
 # modele confonde l'historique avec la phrase a traduire. L'historique va
 # dans le prompt SYSTEME, jamais dans le message user (sinon il repond "=").
 CONTEXT_LINES = 3
+# /tsayr, /tsayteamr: careful translation of one outgoing line with the model's
+# reasoning switched on for that request only (llama-server keeps --reasoning
+# off for everything else, nothing is reloaded). The reasoning is capped in
+# tokens and the whole request in seconds; on any failure nothing is sent.
+THINK_BUDGET = 512     # reasoning tokens, then llama-server forces the answer
+THINK_TIMEOUT = 25     # seconds, waiting for the GPU included
+CAREFUL_ADDENDUM = """
+CAREFUL MODE: the player asked for an exact translation of this line.
+- Think it through before answering: expand every abbreviation and typo \
+(jsuis = je suis, g = j'ai, c = c'est, dsl = désolé, stp = s'il te plaît), \
+work out what each part means in game chat, check that nothing is lost, \
+added or reversed, then pick natural {lang} chat wording.
+- Your final answer is still ONLY the translated line.
+"""
 HISTORY_IDLE = 120     # secondes sans chat -> on oublie le sujet precedent
 CACHE_SIZE = 2000
 # Paires /tfix et menu examples. Deux sortes :
@@ -403,6 +417,12 @@ FEWSHOT_FEMME_IN = {
 }
 
 SENTINEL = "="
+
+
+class CarefulFailed(Exception):
+    """/tsayr got no clean translation in time: the game sends nothing."""
+
+
 THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 
 def llama_ctx():
@@ -421,6 +441,80 @@ def llama_ctx():
 # section autour. Sans plan (ancienne installation) : le prompt reste tel quel.
 MENU_OVERVIEW_RE = re.compile(r"<menu-overview>\n?(.*?)</menu-overview>\n?", re.DOTALL)
 ASSIST_ANSWER_TOKENS = 400
+
+# Assistant des reglages : ce que le modele doit savoir du jeu et que les descriptions
+# des reglages ne disent pas (couleurs hex, RT, DLSS/FSR, NRD/SIGMA, profils, HDR...).
+# assistant-knowledge.txt : blocs "@ mots declencheurs" puis le texte ; on ajoute au
+# prompt les blocs dont les mots sont dans la question (le contexte du modele est petit).
+ASSIST_KNOWLEDGE_BUDGET = 1400
+ASSIST_SHORT_WORDS = {"rt", "ai", "ia", "hd", "aa", "3e", "gpu", "fps", "hex", "rgb", "nrd", "hud", "fsr"}
+_KNOWLEDGE = {"mtime": None, "blocks": []}
+
+
+def assistant_knowledge_blocks():
+    path = paths.CODE / "assistant-knowledge.txt"
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        return []
+    if _KNOWLEDGE["mtime"] != mtime:
+        blocks, cur = [], None
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            return []
+        for raw in lines:
+            line = raw.strip()
+            if line.startswith("@ "):
+                cur = {"words": line[2:].split(), "text": []}
+                blocks.append(cur)
+            elif not line or line.startswith("#"):
+                cur = None if not line else cur
+            elif cur is not None:
+                cur["text"].append(line)
+        for b in blocks:
+            b["text"] = " ".join(b["text"])
+        _KNOWLEDGE.update(mtime=mtime, blocks=[b for b in blocks if b["text"]])
+    return _KNOWLEDGE["blocks"]
+
+
+def assistant_question_words(text):
+    """mots d'une question, sans accents ; "i/s", "ips", "images par seconde" -> fps"""
+    t = menu_plan.norm(re.sub(r"\bi\s*/\s*s\b|\bips\b|images? par secondes?", " fps ", text, flags=re.I))
+    return [w for w in t.split() if len(w) >= 3 or w in ASSIST_SHORT_WORDS]
+
+
+def assistant_knowledge(question, earlier="", budget=ASSIST_KNOWLEDGE_BUDGET):
+    """les blocs de connaissances qui concernent la question (sinon les questions d'avant)"""
+    blocks = assistant_knowledge_blocks()
+    if not blocks:
+        return ""
+
+    def close(w, t):
+        # the same word or a close form (ombre / ombres), never a far one ("mode" is not "modeste")
+        return w == t or (len(t) >= 4 and len(w) >= 4 and abs(len(w) - len(t)) <= 2 and (w.startswith(t) or t.startswith(w)))
+
+    def score(words, block):
+        # how many words of the question this block knows
+        return sum(1 for w in set(words) if any(close(w, t) for t in block["words"]))
+
+    for text in (question, earlier):
+        words = assistant_question_words(text or "")
+        if not words:
+            continue
+        ranked = sorted(((score(words, b), k) for k, b in enumerate(blocks)), key=lambda x: (-x[0], x[1]))
+        out, used = [], 0
+        for s, k in ranked:
+            if s <= 0 or len(out) >= 3:
+                break
+            t = blocks[k]["text"]
+            if out and used + len(t) > budget:
+                continue
+            out.append(t)
+            used += len(t)
+        if out:
+            return "GAME KNOWLEDGE for this question (true facts about this game; use them, do not contradict them):\n" + "\n".join("- " + t for t in out)
+    return ""
 
 
 def assistant_menu_plan():
@@ -471,13 +565,22 @@ def assistant_system(prompt, catalog, question, history, plan, ctx=None):
     return system + ("\n\n" + extra if extra else "")
 
 
+# Assistant des reglages : demandes qu'il ne peut jamais satisfaire (le jeu refuse ces lignes de toute facon).
+ASSIST_FORBIDDEN_RE = re.compile(
+    r"\b(quit\w*|exit|ferme[rz]? le jeu|close the game|connect\w*|exec\w*|writecfg|alias|script\w*|"
+    r"supprim\w*|delete|efface[rz]?|fichiers?|files?|dis bonjour|rcon|kick|ban)\b", re.IGNORECASE)
+
 # Assistant des reglages : de quoi deviner la langue de la question.
 ASSIST_FR = set("""je tu il elle on nous vous mon ma mes ton ta tes le la les un une des du de et ou est sont
 comment pourquoi quoi quel quelle peux veux voudrais mets met change enleve enlève baisse monte augmente trop pas
-plus moins avec sans dans sur pour oui non merci stp svp ça ca c'est où son viseur souris touche""".split())
+plus moins avec sans dans sur pour oui non merci stp svp ça ca c'est où son viseur souris touche
+moi toi au aux ce cette ces mettre donne donner jveux j'veux veut fais fait faire active désactive desactive
+couleur rose vert bleu rouge jaune ombres ombre image écran ecran carte graphique quelle quels traduis""".split())
 ASSIST_EN = set("""i you my your the a an and or is are how why what which where can could would want please
 put set change turn remove lower raise too not more less with without in on for yes no thanks it this that
-crosshair mouse key sound volume bigger smaller louder quieter""".split())
+crosshair mouse key sound volume bigger smaller louder quieter to of me bind view show make get give does do
+what's i'm can't don't game colour color trail shadows shadow image picture graphics card use should see well
+when while hold blurry grainy profile third person enemies run command server files connect close""".split())
 # Qwen3 echo parfois son interrupteur de raisonnement en fin de ligne.
 # /non (colle au slash) = /no_think dont "no" a ete traduit ; "oui / non"
 # avec un espace apres le slash, lui, est un vrai "yes / no" : on le garde.
@@ -1478,7 +1581,7 @@ class Translator:
         messages.append({"role": "user", "content": text})
         return messages
 
-    def call_model(self, messages, temperature=None, max_tokens=None, think=False):
+    def call_model(self, messages, temperature=None, max_tokens=None, think=False, budget=0, timeout=120, info=None):
         if model_manager.is_loading():
             return ""
         url, model, key = model_manager.endpoint()
@@ -1493,6 +1596,14 @@ class Translator:
         }
         if DISABLE_THINKING and not key:
             payload["chat_template_kwargs"] = {"enable_thinking": bool(think)}
+            if think:
+                # Qwen3 settings for thinking mode (greedy decoding loops there)
+                payload["top_p"] = 0.95
+                payload["top_k"] = 20
+            if think and budget:
+                # per-request cap understood by llama-server; the reasoning
+                # itself comes back in reasoning_content, never in content
+                payload["thinking_budget_tokens"] = int(budget)
 
         data = json.dumps(payload).encode("utf-8")
         headers = {"Content-Type": "application/json"}
@@ -1500,15 +1611,16 @@ class Translator:
             headers["Authorization"] = "Bearer " + key
         req = urllib.request.Request(url, data=data, headers=headers)
         try:
-            with urllib.request.urlopen(req, timeout=120) as resp:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
                 body = json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as e:
             # Un serveur qui refuse chat_template_kwargs : on retire et on retente.
             if e.code == 400 and "chat_template_kwargs" in payload:
                 payload.pop("chat_template_kwargs", None)
+                payload.pop("thinking_budget_tokens", None)
                 data = json.dumps(payload).encode("utf-8")
                 req = urllib.request.Request(url, data=data, headers=headers)
-                with urllib.request.urlopen(req, timeout=120) as resp:
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
                     body = json.loads(resp.read().decode("utf-8"))
             else:
                 raise
@@ -1516,6 +1628,8 @@ class Translator:
         choices = body.get("choices") or []
         if not choices:
             return ""
+        if info is not None:
+            info["finish"] = choices[0].get("finish_reason") or ""
         msg = choices[0].get("message") or {}
         content = msg.get("content")
         if content is None:
@@ -1836,6 +1950,108 @@ class Translator:
         finally:
             self.gpu_lock.release()
 
+    def careful_messages(self, text, lang, speaker, ctx=None, femme=False):
+        """Same prompt and examples as /tsay, but the model is told to reason
+        first, and the example pairs are listed in the system prompt instead
+        of as past chat turns: after two dozen instant answers, Qwen3-8B
+        skips its reasoning even when it is switched on."""
+        messages = self.build_messages(text, lang, speaker, "out", None, femme)
+        system = messages[0]["content"].replace(", no thinking tags, no /no_think.", ".")
+        system += CAREFUL_ADDENDUM.format(lang=langlabel(lang))
+        turns = messages[1:-1]
+        pairs = [(turns[i]["content"], turns[i + 1]["content"]) for i in range(0, len(turns) - 1, 2)]
+        if pairs:
+            lines = "\n".join(f"{src}  =>  {dst}" for src, dst in pairs)
+            system += "\nExamples of good answers (line  =>  answer):\n" + lines + "\n"
+        if ctx:
+            chat = "\n".join(f"<{self._tag(spk)}> {msg}" for spk, msg in ctx)
+            system += CONTEXT_ADDENDUM.format(chat=chat, lang=langlabel(lang))
+        # Qwen3 soft switch: without it the model still answers some short
+        # lines instantly, with an empty reasoning
+        line = {"role": "user", "content": messages[-1]["content"] + " /think"}
+        return [{"role": "system", "content": system}, line]
+
+    def translate_careful(self, text, lang, speaker, femme=False):
+        """/tsayr: one outgoing line translated with reasoning on.
+        Returns the translation, or "" when there is nothing to translate.
+        Raises CarefulFailed when no clean answer came back in time: the
+        caller must then send nothing (never the original, never a draft)."""
+        deadline = time.time() + THINK_TIMEOUT
+        self.last_activity = time.time()
+        self.last_src_lang = ""
+        self.last_out_lang = langcode(lang)
+        text = self.decode_typos(text.strip())
+        if not text:
+            return ""
+        ctx = self.context_useful(text, self.capture(speaker, text))
+        self.stats["last_ctx"] = len(ctx)
+
+        # Fixed answers (corrections taught by the player, yes/no, slang)
+        # are already exact: no reason to make the player wait for them.
+        taught = self.learned_lookup(text, lang, "out", femme)
+        if taught is not None:
+            if not taught or taught == SENTINEL or taught.casefold() == text.casefold():
+                return ""
+            return taught
+        if self.trivial(text):
+            return ""
+        for mapped in (self.yesno(text, lang), self.slang(text, lang, bool(femme)),
+                       self.phrase(text, lang, bool(femme)), self.wave(text, lang)):
+            if mapped is not None:
+                return "" if mapped == SENTINEL else mapped
+        if self.looks_already_target(text, lang):
+            return ""
+
+        key = ("think", langcode(lang), bool(femme), text.casefold(),
+               tuple(msg.casefold() for _spk, msg in ctx))
+        hit = self.cache_get(key)
+        if hit is not None:
+            self.stats["cached"] += 1
+            return hit
+
+        if not self.gpu_lock.acquire(timeout=max(0.1, deadline - time.time())):
+            raise CarefulFailed("model busy")
+        try:
+            left = deadline - time.time()
+            if left < 2:
+                raise CarefulFailed("model busy")
+            info = {}
+            try:
+                raw = self.call_model(
+                    self.careful_messages(text, lang, speaker, ctx, femme),
+                    temperature=0.6, max_tokens=THINK_BUDGET + MAX_TOKENS,
+                    think=True, budget=THINK_BUDGET, timeout=left, info=info,
+                )
+            except (urllib.error.URLError, TimeoutError, OSError) as exc:
+                raise CarefulFailed(f"no answer ({exc})") from exc
+            self.stats["calls"] += 1
+        finally:
+            self.gpu_lock.release()
+
+        raw = raw or ""
+        if info.get("finish") == "length":
+            raise CarefulFailed("answer cut off")
+        # A server that leaves the reasoning in the text: keep only what
+        # follows it, and refuse a reasoning block that never closed.
+        low = raw.lower()
+        if "</think>" in low:
+            raw = raw[low.rfind("</think>") + len("</think>"):]
+        elif "<think>" in low:
+            raise CarefulFailed("reasoning did not finish")
+        out = re.sub(r"\s*/+\s*think\s*$", "", self.clean(raw, text), flags=re.I).strip()
+        if not out:
+            raise CarefulFailed("empty answer")
+        if self.invented(out, text, lang):
+            raise CarefulFailed("answer adds things that are not in the line")
+        # never send the line back (nearly) untranslated
+        src_words = set(re.findall(r"[^\W\d_]+", text.casefold(), re.UNICODE))
+        out_words = re.findall(r"[^\W\d_]+", out.casefold(), re.UNICODE)
+        copied = sum(1 for w in out_words if w in src_words)
+        if self.looks_foreign(out, lang) or (len(out_words) >= 3 and copied >= 0.7 * len(out_words)):
+            raise CarefulFailed("answer is still the original line")
+        self.cache_put(key, out)
+        return out
+
     def warmup(self):
         """Charge le modele et le prefixe reel (FR recu + EN apercu/tsay)
         pour que la premiere ligne en jeu ne coute pas plusieurs secondes.
@@ -2060,6 +2276,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             prompt = (paths.CODE / "assistant-prompt.txt").read_text(encoding="utf-8")
         except OSError:
             prompt = "You are the settings assistant of the game. Propose game settings as lines starting with CMD:."
+        knowledge = assistant_knowledge(question, " ".join(history[0::2]))
+        if knowledge:
+            prompt = prompt.rstrip() + "\n\n" + knowledge + "\n"
         system = assistant_system(prompt, catalog, question, history, assistant_menu_plan())
         messages = [{"role": "system", "content": system}]
         for i in range(0, len(history) - 1, 2):
@@ -2068,14 +2287,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
         # Rappel colle a la question : un petit modele oublie vite la langue
         # et la phrase d'accompagnement.
         words = set(re.findall(r"[^\W\d_]+", question.lower(), re.UNICODE))
-        fr = len(words & ASSIST_FR)
+        fr = len(words & ASSIST_FR) + (2 if re.search(r"[éèêàùçôîâ]", question.lower()) else 0)
         en = len(words & ASSIST_EN)
         if en > fr:
-            hint = "(Reply in English, in natural sentences, before any CMD line.)"
+            hint = "(Reply in English, in natural sentences, before any CMD line. If I clearly ask for a change, write the CMD line now.)"
         elif fr > en:
-            hint = "(Réponds en français, avec au moins une phrase naturelle avant toute ligne CMD.)"
+            hint = "(Réponds en français, avec au moins une phrase naturelle avant toute ligne CMD ; garde les noms des menus en anglais. Si je demande clairement un changement, écris la ligne CMD tout de suite.)"
         else:
-            hint = "(Reply in the language of this message, with at least one natural sentence before any CMD line.)"
+            hint = "(Reply in the language of this message, with at least one natural sentence before any CMD line. If I clearly ask for a change, write the CMD line now.)"
+        # ce que l'assistant ne fait jamais (quitter, se connecter, parler, fichiers, scripts) : le rappeler
+        # quand la question en parle ; le jeu refuse de toute facon ces lignes
+        if ASSIST_FORBIDDEN_RE.search(question):
+            hint += (" (Part of this is something you can never do: quit, connect, chat, files, scripts or console commands. Say so in one sentence, write no CMD line for it.)"
+                     if en >= fr else " (Une partie de la demande t'est interdite : quitter, se connecter, parler dans le chat, fichiers, scripts ou commandes. Dis-le en une phrase, sans ligne CMD pour ça.)")
         messages.append({"role": "user", "content": question + "\n\n" + hint})
         started = time.time()
         try:
@@ -2089,6 +2313,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         # la police du jeu n'a pas les guillemets / apostrophes typographiques
         for fancy, plain in (("’", "'"), ("‘", "'"), ("“", '"'), ("”", '"'), ("…", "..."), ("–", "-"), ("—", "-"), (" ", " "), (" ", " ")):
             out = out.replace(fancy, plain)
+        out = re.sub(r"(?<=\S)[ \t]*(CMD:)", r"\n\1", out)
         if not out:
             self.reply(503, "The AI model gave no answer, try again.".encode("utf-8"))
             return
@@ -2174,6 +2399,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         reply = params.get("reply", ["0"])[0] in ("1", "true", "yes")
         force = params.get("force", ["0"])[0] in ("1", "true", "yes")
         board = params.get("board", ["0"])[0] in ("1", "true", "yes")
+        think = params.get("think", ["0"])[0] in ("1", "true", "yes")
         last = params.get("last", [""])[0]
         lastspk = params.get("lastspk", [""])[0]
         if direction == "preview":
@@ -2197,6 +2423,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 print(f"  [board] {speaker or '?'}: {text.strip()} -> {guessed or '?'}")
             headers = [("X-Src-Lang", guessed)] if guessed else None
             self.reply(200, b"", headers)
+            return
+
+        if think and direction == "out" and not preview and not reply and not force:
+            self.do_careful(text, lang, speaker, femme)
             return
 
         start = time.time()
@@ -2238,6 +2468,27 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if src:
             headers.append(("X-Src-Lang", src))
         self.reply(200, out.encode("utf-8"), headers or None)
+
+    def do_careful(self, text, lang, speaker, femme):
+        """/tsayr: 200 + translation, 200 + empty (nothing to translate),
+        504 + one-line reason (the game then sends nothing)."""
+        start = time.time()
+        try:
+            out = TRANSLATOR.translate_careful(text, lang, speaker, femme)
+        except CarefulFailed as exc:
+            TRANSLATOR.stats["failed"] += 1
+            print(f"[{(time.time() - start) * 1000:6.0f} ms] [/tsayr->{langcode(lang)}] {speaker or '?'}: {text}  ECHEC ({exc})")
+            self.reply(504, str(exc).encode("utf-8"))
+            return
+        except Exception as exc:  # noqa: BLE001
+            TRANSLATOR.stats["failed"] += 1
+            print(f"  ERREUR backend /tsayr : {exc}", file=sys.stderr)
+            self.reply(504, b"no answer")
+            return
+        if VERBOSE:
+            arrow = f"-> {out}" if out else "(rien a traduire)"
+            print(f"[{(time.time() - start) * 1000:6.0f} ms] [/tsayr->{langcode(lang)}{' f' if femme else ''}] {speaker or '?'}: {text}  {arrow}")
+        self.reply(200, out.encode("utf-8"))
 
     def do_GET(self):
         parsed = urlparse(self.path)

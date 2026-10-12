@@ -26,7 +26,10 @@
 =ombres: shadow blobs
 =reflet: reflection envmap
 =reflets: reflection envmap
-=eau: water waterrefract waterreflect caustics
+=eau: water waterrefract waterreflect caustics waves
+=vagues: waves water
+=vague: waves water
+=ondulation: waves water
 =herbe: grass
 =sang: blood
 =cadavre: ragdoll dead
@@ -79,7 +82,7 @@
 =frag: frags killfeed
 =frags: frags killfeed
 =serie: streak killstreak
-=reaction: react reacttime reacttimeall
+=reaction: react reacttime reacttimeall reacttimemode
 =demo: demo record
 =demos: demo record demokeep
 =enregistrer: record recording
@@ -115,6 +118,30 @@
 =vitesse: sensitivity speed
 =lent: sensitivity
 =rapide: sensitivity
+# assistant : ce que les joueurs ecrivent (i/s, grain, hex, 3e personne...)
+=ips: fps
+=fluide: fps performance
+=fluidite: fps performance
+=saccade: fps performance lowlatency
+=saccades: fps performance lowlatency
+=rame: fps performance
+=bruitees: grainy noise denoiser
+=bruitee: grainy noise denoiser
+=grain: grainy noise denoiser
+=granuleux: grainy noise denoiser
+=grainy: grainy noise denoiser
+=noisy: grainy noise denoiser
+=floue: blurry dlss transformer
+=blurry: blurry dlss transformer
+=hex: colour hex
+=hexa: colour hex
+=hexadecimal: colour hex
+=rose: pink colour
+=troisieme: third person
+=spectateur: spectator spectate
+=debruiteur: denoiser nrd sigma
+=modeste: profile performance fps
+=weak: profile performance fps
 
 # --- extra words on settings ---
 soundvol: son general principal master volume
@@ -192,8 +219,10 @@ blood: sang gore
 ragdoll: cadavre physique corps
 hidedead: cacher morts corps
 killfeed: morts liste frags qui a tue
-reacttime: temps de reaction ms
+reacttime: temps de reaction ms chiffres nombres frags kill feed vue viseur seen aim juste
 reacttimeall: temps de reaction des autres joueurs frags autres ms
+reacttimemode: temps de reaction precis classique mesure juste exact seen aim vue viseur
+demohdvis: demo hd visibilite ennemis vus ecran enregistrer etude visibility record
 killfeedvs: compteur duel contre tue morte
 showvs: compteur duel contre tue morte
 showlang: langues langue
@@ -211,18 +240,39 @@ hdroutpref: hdr sdr sortie ecran
 hwrtngxmode: dlss dlaa fsr amd upscaling anticrenelage
 hwrtfsrsharpness: fsr nettete sharpening rcas
 hwrtreflections: reflets eau miroir reflexion rt
+hwrtquality: qualite rt prereglage preset performance fps rapide portable carte graphique moyenne basse haute
 hwrtspecular: brillance speculaire reflet lampe soleil rt
+hwrtskyrange: portee ciel rayons distance plafond lumiere ciel performance fps rapide rt
+hwrtrtadapt: adaptatif vrs rayons bords ecran lointain sombre mouvement rapide performance fps carte graphique moyenne rt
+hwrtskyopaque: feuillage feuilles arbres opaque ciel ombre performance fps rt
+hwrtdlsscnn: dlss dlaa cnn ancien modele transformer rapide performance fps tenseurs
+hwrtnrdlight: nrd debruitage denoiser leger ciel ombres performance fps rt
+hwrtvelstatic: vecteurs mouvement decors immobiles processeur cpu performance fps dlss dlaa fsr
 hwrtdiffupscale: textures lissage agrandissement bicubique lanczos pixels blocs escalier scintillement nettete rt
 hwrtdiffmipbias: detail distance lointain textures stable net sharper scintillement fourmillement aliasing crenelage dlaa dlss rt
 hwrtsmoothnormals: normales lissees lissage eclairage facettes marches relief sol mur roche pente sable rt
 hwrtdynlights: lumieres tir flash canon bouche roquette grenade explosion eclairage dynamique arme couleur traine rt
 hwrtsmokeshadow: ombre fumee traine fusil roquette grenade soleil rt
 hwrtsmokeshadowdensity: ombre fumee densite force rt
+hwrtshadowothers: ombre ombres autres joueurs bots cadavres roquettes grenades drapeaux objets double lampe teleporteur lave soleil rt
+hwrtsoftsigma: debruiteur ombres douces sigma nrd debruitage grain bruit penombre lisse soft shadow denoiser noise grainy rt
+hwrtsoftsigmahistory: stabilite debruiteur ombres douces sigma historique images temporel trainee soft shadow denoiser steadiness history rt
+hwrtsoftshadowrays: rayons ombres douces nombre de rayons grain bruit penombre lisse soft shadow rays noise grainy rt
+hwrtsoftshadows: ombres douces penombre soft shadows ombres nettes taille lumieres soleil lampes torches flammes teleporteur lave rt par defaut activer desactiver on off
 looktaa: anticrenelage temporel taa
 lookfxaa: fxaa anticrenelage crenelage flou net nettete lissage bords natif native
 gtao: occlusion ambiante ao gtao ssao coins recoins relief ombres contact
 lookao: ombres occlusion ssao
-lookselfshadow: ombre soleil
+lookselfshadow: ombre soleil classique
+hwrtshadowself: mon ombre ombre joueur propre ombre corps lampes ciel rt
+hwrtskyrays: rayons ciel grain bruit qualite vitesse
+hwrtskytemporal: lissage ciel images grain temporel
+hwrtskyfilter: flou ciel grain filtre
+hwrtsundisk: soleil disque ciel
+hwrtdlights: lampes ombres lampes proches
+hwrtglowdlights: teleporteurs lave lumieres lueur
+lookaoscale: ombre coins force
+lookaoradius: ombre coins taille
 invmouse: inverser souris
 consize: console lignes taille
 miniconfilter: chat console
@@ -232,7 +282,7 @@ matchkeep: videos garder nombre
 flagtimer: drapeau chrono compteur temps ctf porteur
 =deplacer: move hudedit
 =disposition: hudedit layout
-flagfeed: drapeau message annonce vol marque capture ctf gros
+flagfeed: drapeau message annonce vol marque capture ctf gros lache lacher perdu tombe retour rendu ramene returned reset
 # juste apres la derniere ligne actuelle "flagfeed: ...". Les sous-titres "# --- ..." sont a garder (le jeu les ignore).
 # --- display ---
 fsaa: anticrenelage antialiasing multisampling msaa crenelage escaliers bords
@@ -253,7 +303,7 @@ hdroutmax: pic luminosite crete nits hdr manuel automatique
 hdrouthud: luminosite hud interface hdr
 hwrtteleportlight: lumiere teleporteur rt
 hwrtjumppadlight: lumiere jumppad trampoline rt
-hwrtnrd: debruitage denoise denoiser ciel bruit grain filtre rt nrd
+hwrtnrd: debruitage denoise denoiser ciel bruit grain filtre rt nrd integre builtin sauer
 ragdollmillis: cadavre corps rester garder reapparition ragdoll
 deadpush: cadavre projection vitesse ragdoll mort
 shaderdetail: shaders detail qualite
@@ -261,10 +311,15 @@ waterrefract: eau refraction transparence
 waterreflect: eau reflet reflets miroir
 caustics: eau caustiques reflets lumiere fond
 vertwater: eau vagues animation
+waterwaves: eau vagues ondulation ondule reflets reflet animee anime realiste classique fft
+hwrtwaterwaves: eau vagues ondulation ondule reflets reflet animee anime realiste rt raytracing fft
+waterwaveamp: eau vagues amplitude force hauteur ondulation
+waterwavespeed: eau vagues vitesse rapide lent
+waterwavesize: eau vagues detail qualite fft grille
 waterfallrefract: cascade chute eau refraction
 waterfallenv: cascade chute eau reflet
-shadowmap: ombres douces ombre
-shadowmapsize: ombres douces qualite
+shadowmap: ombres classiques ombre eclairage classique carte ombres sans rt
+shadowmapsize: ombres classiques qualite resolution eclairage classique
 blobs: ombre ronde sol joueurs
 glare: eblouissement halo lueur lumiere
 motionblur: flou mouvement

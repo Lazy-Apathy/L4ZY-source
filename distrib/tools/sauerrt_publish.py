@@ -3,6 +3,9 @@
 
   python sauerrt_publish.py publish --version 2026.9.25.1 --channel test --target <dossier>
   python sauerrt_publish.py verify  --url https://.../channels/test/latest.json
+  python sauerrt_publish.py publish-github --version <v> --channel stable --pointer-only
+      (passage en stable : pointeur stable, puis page GitHub de la version
+       promue : plus de "Pre-release", texte "Channel: stable", "Latest")
 
 Regles (identiques depuis n'importe quel PC de dev) :
   1. une version publiee est immuable : si releases/<v>/manifest.json existe
@@ -205,14 +208,26 @@ def cmd_publish_github(a):
     import base64
     import urllib.error  # noqa: F401
     ver, repo, channel = a.version, a.repo, a.channel
-    local = OUT / ver
-    man = upd.validate_manifest(json.loads((local / "site" / "releases" / ver / "manifest.json").read_text(encoding="utf-8")))
     user, tok = gh_token()
     print(f"compte GitHub : {user}")
 
-    # canal : jamais en arriere
     ptr_path = f"channels/{channel}/latest.json"
     cur = gh("GET", f"/repos/{repo}/contents/{ptr_path}", tok)
+    if a.promote_only:
+        # Reparation : version deja annoncee en stable mais page GitHub restee
+        # en "Pre-release". Seule la page de la release change.
+        if channel != "stable":
+            die("--promote-only va avec --channel stable")
+        cv = json.loads(base64.b64decode(cur["content"]).decode("utf-8")).get("version", "0") if cur else "0"
+        if upd.is_newer(ver, cv):
+            die(f"le canal stable annonce {cv} : {ver} n'y est jamais passee")
+        promote_release(repo, tok, ver, latest=not a.not_latest)
+        return
+
+    local = OUT / ver
+    man = upd.validate_manifest(json.loads((local / "site" / "releases" / ver / "manifest.json").read_text(encoding="utf-8")))
+
+    # canal : jamais en arriere
     cur_sha = None
     if cur:
         cur_sha = cur["sha"]
@@ -233,6 +248,8 @@ def cmd_publish_github(a):
         raw = urllib.request.urlopen(urllib.request.Request(murl, headers={"User-Agent": "l4zy-publish"}), timeout=60).read()
         upd.validate_manifest(json.loads(raw.decode("utf-8")), expect_version=ver)
         write_pointer(repo, tok, channel, ver, murl, raw, cur_sha, ptr_path)
+        if channel == "stable":
+            promote_release(repo, tok, ver, latest=not a.not_latest)
         return
     if rel and any(x["name"] == manifest_name for x in rel.get("assets", [])):
         die(f"{tag} est deja publiee (immuable). Choisis un numero plus recent.")
@@ -266,6 +283,24 @@ def cmd_publish_github(a):
     # pointeur en dernier
     write_pointer(repo, tok, channel, ver, murl, raw, cur_sha, ptr_path)
     push_readme(repo, tok, f"README: L4ZY {ver}")
+
+
+def promote_release(repo, tok, ver, latest=True):
+    """Passage en stable d'une version publiee d'abord en test : sa release
+    perd "Pre-release", son texte dit "Channel: stable" et elle devient
+    "Latest". Ni tag, ni fichier joint, ni autre texte ne changent."""
+    tag = f"v{ver}"
+    rel = gh("GET", f"/repos/{repo}/releases/tags/{tag}", tok)
+    if not rel:
+        die(f"release {tag} introuvable")
+    body = rel.get("body") or ""
+    patch = {"prerelease": False, "make_latest": "true" if latest else "false"}
+    if "Channel: test" in body:
+        patch["body"] = body.replace("Channel: test", "Channel: stable", 1)
+    res = gh("PATCH", f"/repos/{repo}/releases/{rel['id']}", tok, data=patch)
+    if res.get("prerelease") or "Channel: test" in (res.get("body") or ""):
+        die(f"page {tag} pas mise a jour")
+    print(f"OK : page {tag} en stable" + (" (Latest)" if latest else ""))
 
 
 def write_pointer(repo, tok, channel, ver, murl, raw, cur_sha, ptr_path):
@@ -357,6 +392,9 @@ def main():
     g.add_argument("--repo", default="Lazy-Apathy/L4ZY")
     g.add_argument("--no-installer", action="store_true")
     g.add_argument("--pointer-only", action="store_true", help="annoncer une version deja publiee sur un autre canal")
+    g.add_argument("--promote-only", action="store_true",
+                   help="seulement la page GitHub d'une version deja annoncee en stable (Pre-release -> stable, Latest)")
+    g.add_argument("--not-latest", action="store_true", help="avec la promotion : ne pas marquer la version Latest")
     rd = sub.add_parser("readme-github", help="publier seulement distrib/github/README.md")
     rd.add_argument("--repo", default="Lazy-Apathy/L4ZY")
     v = sub.add_parser("verify")

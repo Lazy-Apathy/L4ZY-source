@@ -864,6 +864,13 @@ struct ctfclientmode : clientmode
         return m_hold ? "the flag" : teamcolor("your flag", ctfflagteam(f.team), "the enemy flag");
     }
 
+    // a flag event: the vanilla console line, also shown as a big flag message
+    void flagannounce(flag &f, const char *msg)
+    {
+        conoutf(CON_GAMEINFO, "%s", msg);
+        addflagfeed(msg, m_hold ? HICON_NEUTRAL_FLAG : (f.team==ctfteamflag(player1->team) ? HICON_BLUE_FLAG : HICON_RED_FLAG));
+    }
+
     void dropflag(fpsent *d, int i, int version, const vec &droploc)
     {
         if(!flags.inrange(i)) return;
@@ -879,7 +886,8 @@ struct ctfclientmode : clientmode
             f.droploc = vec(-1, -1, -1);
             f.interptime = 0;
         }
-        conoutf(CON_GAMEINFO, "%s dropped %s", teamcolorname(d), teamcolorflag(f));
+        defformatstring(msg, "%s dropped %s", teamcolorname(d), teamcolorflag(f));
+        flagannounce(f, msg);
         teamsound(d, S_FLAGDROP);
     }
 
@@ -922,7 +930,8 @@ struct ctfclientmode : clientmode
         f.interptime = 0;
         returnflag(i);
         if(m_protect && d->feetpos().dist(f.spawnloc) < FLAGRADIUS) d->flagpickup |= 1<<f.id;
-        conoutf(CON_GAMEINFO, "%s returned %s", teamcolorname(d), teamcolorflag(f));
+        defformatstring(msg, "%s returned %s", teamcolorname(d), teamcolorflag(f));
+        flagannounce(f, msg);
         teamsound(d, S_FLAGRETURN);
     }
 
@@ -948,7 +957,8 @@ struct ctfclientmode : clientmode
         returnflag(i, m_protect ? 0 : -1000);
         if(shouldeffect)
         {
-            conoutf(CON_GAMEINFO, "%s reset", teamcolorflag(f));
+            defformatstring(msg, "%s reset", teamcolorflag(f));
+            flagannounce(f, msg);
             teamsound(team == ctfteamflag(player1->team), S_FLAGRESET);
         }
     }
@@ -1008,8 +1018,7 @@ struct ctfclientmode : clientmode
         if(m_hold) formatstring(msg, "%s picked up the flag for %s", teamcolorname(d), teamcolor("your team", d->team, "the enemy team"));
         else if(m_protect || f.droptime) formatstring(msg, "%s picked up %s", teamcolorname(d), teamcolorflag(f));
         else formatstring(msg, "%s stole %s", teamcolorname(d), teamcolorflag(f));
-        conoutf(CON_GAMEINFO, "%s", msg);
-        addflagfeed(msg, m_hold ? HICON_NEUTRAL_FLAG : (f.team==ctfteamflag(player1->team) ? HICON_BLUE_FLAG : HICON_RED_FLAG));
+        flagannounce(f, msg);
         ownflag(i, d, lastmillis, m_hold ? ctfteamflag(d->team) : -1);
         teamsound(d, S_FLAGPICKUP);
     }

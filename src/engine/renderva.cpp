@@ -549,12 +549,30 @@ void renderreflectedmapmodels()
     }
 }
 
+// Which mapmodels the main view drew this frame (not a cubemap, the minimap, a
+// reflection, a refraction or the glare pass): the velocity pass of the
+// temporal upscalers draws only those. A mapmodel the main view left out
+// (outside the visible octree, or occluded) is not in the picture either.
+static vector<uint> mmmainframe;
+static uint mmmainstamp = 0;
+
+bool mapmodeldrawnthisframe(int i)
+{
+    return mmmainframe.inrange(i) && mmmainframe[i] == mmmainstamp;
+}
+
 void rendermapmodels()
 {
     static int skipoq = 0;
     bool doquery = !drawtex && oqfrags && oqmm;
     const vector<extentity *> &ents = entities::getents();
     findvisiblemms(ents, doquery);
+    bool mainview = !drawtex && !reflecting && !refracting && !glaring;
+    if(mainview)
+    {
+        mmmainstamp++;
+        while(mmmainframe.length() < ents.length()) mmmainframe.add(0);
+    }
 
     startmodelbatches();
     for(octaentities *oe = visiblemms; oe; oe = oe->next) if(oe->distance>=0)
@@ -572,6 +590,7 @@ void rendermapmodels()
             }        
             rendermapmodel(e);
             e.flags &= ~EF_RENDER;
+            if(mainview && mmmainframe.inrange(oe->mapmodels[i])) mmmainframe[oe->mapmodels[i]] = mmmainstamp;
         }
         if(rendered && oe->query) endmodelquery();
     }

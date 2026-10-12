@@ -209,7 +209,7 @@ $(filter engine/%,$(CLIENT_OBJS)): $(filter engine/%,$(CLIENT_PCH))
 $(filter fpsgame/%,$(CLIENT_OBJS)): $(filter fpsgame/%,$(CLIENT_PCH))
 
 $(filter engine/hwrt/%,$(CLIENT_OBJS)): engine/hwrt/hwrt.h
-engine/hwrt/trace.o: engine/hwrt/shaders/debug_comp.h engine/hwrt/shaders/silhouette_comp.h engine/hwrt/shaders/rtao_comp.h engine/hwrt/shaders/hitshade_comp.h engine/hwrt/shaders/hitlight_comp.h engine/hwrt/shaders/skycompose_comp.h
+engine/hwrt/trace.o: engine/hwrt/shaders/debug_comp.h engine/hwrt/shaders/silhouette_comp.h engine/hwrt/shaders/rtao_comp.h engine/hwrt/shaders/hitshade_comp.h engine/hwrt/shaders/hitlight_comp.h engine/hwrt/shaders/hitlight_norefl_comp.h engine/hwrt/shaders/hitlight_half_comp.h engine/hwrt/shaders/hitlight_half_norefl_comp.h engine/hwrt/shaders/skycompose_comp.h
 engine/hwrt/nrd.o: include/nrd_gateway/sauer_nrd.h
 engine/hwrt/fsr.o: include/fsr_gateway/sauer_fsr.h
 
@@ -221,7 +221,7 @@ NGX_CLIENT_OBJS= $(filter-out engine/hwrt/dlaa.o,$(CLIENT_OBJS)) engine/hwrt/dla
 engine/hwrt/dlaa-ngx.o: engine/hwrt/dlaa.cpp engine/hwrt/hwrt.h include/ngx_gateway/sauer_ngx.h
 	$(CXX) $(CXXFLAGS) $(CLIENT_INCLUDES) -DHWRT_NGX_GATEWAY -c -o $@ $<
 
-# Daily client uses the validated NGX gateway, not Streamline.
+# Daily client: the validated NGX gateway (bin64/ngx-hdr).
 client: libenet $(NGX_CLIENT_OBJS)
 	$(WINDRES) -I vcpp -i vcpp/mingw.rc -J rc -o vcpp/mingw.res -O coff
 	$(CXX) $(CXXFLAGS) -o $(WINBIN)/sauerbraten.exe vcpp/mingw.res $(NGX_CLIENT_OBJS) $(CLIENT_LIBS)

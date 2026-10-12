@@ -127,7 +127,7 @@ void main()
     rayQueryEXT q;
     // WORLD|MODEL|SELF: skip CASTER (smoke puffs). 0xFF made the rifle
     // smoke volume show up as a dark tube in the air.
-    rayQueryInitializeEXT(q, tlas, gl_RayFlagsOpaqueEXT, 0x07, origin, tmin, dir, tmax);
+    rayQueryInitializeEXT(q, tlas, gl_RayFlagsOpaqueEXT, 0x87, origin, tmin, dir, tmax);
     while(rayQueryProceedEXT(q))
     {
         if(rayQueryGetIntersectionTypeEXT(q, false) == gl_RayQueryCandidateIntersectionTriangleEXT)

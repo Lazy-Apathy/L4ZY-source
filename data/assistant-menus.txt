@@ -14,84 +14,172 @@
 == (top)
 1. button "Search settings..." > page settingsearch
 2. button "Settings assistant (AI)..." > page assistant
-3. button "Import settings from another client" > page importsettings
-4. text "What you see and hear"
-5. button "Display" > page display
-6. button "Graphics" > page gfx
-7. button "Sound" > page audio
-8. text "Controls"
-9. button "Mouse" > page mouse
-10. button "Keys" > page keys
-11. text "Game"
-12. button "HUD" > page hud
-13. button "Friends" > page friends
-14. button "Chat Translation" > page traduction
-15. button "Console" > page console
-16. button "Recording" > page record
-
-## importsettings | Import settings | Options > Import settings from another client
-== (top)
-1. text "Copies keys, name, options, servers and friends"
-2. text "from another client into L4ZY."
-3. {if importsrccount() = 0} note: No other client found in My Games.
-4. {if repeated for each i (count known in game: <importsrccount>)} button "<if (= $importsel $i) [result "> "] [result ""]><importsrclabel $i>" : importsel = <i>
-5. button "<if (= $importsel -1) [result "> "] [result ""]>Another folder (type it below)" : importsel = -1
-6. field importdir (Enter runs importsel = -1)
-7. note: Example: C:\Games\Sauerbraten (the folder that holds config.cfg)
-8. {if importsel >= -1 and importsel = -1} note: From: <guifieldtext importdir>
-9. {if importsel >= -1 and not (importsel = -1)} note: From: <importsrcfolder $importsel>
-10. {if importsel >= -1} button "<if (importrestartable) [result "Import and restart"] [result "Import at next start"]>" : importsettingsfrom $importsel (guifieldtext i...
-11. {if not (importsel >= -1)} note: Pick a client above.
-12. note: Your current settings are kept as config.cfg.before-import.bak
-13. {if not (strcmp(importlastresult() ))} note: Last time: <importlastresult>
+== What you see and hear
+1. button "Display" > page display
+2. button "Graphics" > page gfx
+3. button "Sound" > page audio
+== Controls
+1. button "Mouse" > page mouse
+2. button "Keys" > page keys
+== Game
+1. button "HUD" > page hud
+2. button "Friends and colours" > page friends
+3. button "Chat Translation" > page traduction
+4. button "Console and chat" > page console
+5. button "Recording" > page record
+== Settings file
+1. button "Import settings from another client" > page importsettings
+2. button "Edit autoexec.cfg" > page optionscfg
+3. {if MENU_resetask on} status: Really clear all your settings?
+4. {if MENU_resetask on} (button "Yes, restore defaults" : MENU_resetask = 0; exec "restore.cfg"; LOOK_r... | button "No" : MENU_resetask = 0)
+5. {if not (MENU_resetask on)} button "Restore defaults (clears all settings)..." : MENU_resetask = 1
 
 ## display | Display | Options > Display
 == (top)
+1. button "Screen" : concat displaytab "=" 0 | button "Resolution" : concat displaytab "=" 1 | button "Advanced" : concat displaytab "=" 2
+== Window {only if tab "Screen" open}
+1. choice windowmode: "Exclusive Fullscreen"=1, "Borderless"=2, "Windowed"=0 (one under the other)
+2. note: Borderless: Alt+Tab and a second screen work without closing the game.
+3. {if "Borderless" chosen (windowmode 2) and fsaa > 0} note: Borderless at a chosen resolution needs FSAA at -1 or 0 (Advanced).
+4. {if "Borderless" chosen (windowmode 2) and not (fsaa > 0)} checkbox "Borderless at the chosen resolution (stretched, Windows unchanged)" borderlessres
+5. {if "Borderless" chosen (windowmode 2) and not (fsaa > 0) and "Borderless at the chosen resolution (stretched, Windows unchanged)" ticked (borderlessres)} checkbox "Keep proportions (black bars)" borderlessaspect
+6. {if "Borderless" chosen (windowmode 2) and not "Borderless at the chosen resolution (stretched, Windows unchanged)" ticked (borderlessres) or fsaa > 0} status: Borderless: the game uses the monitor size (<desktopw>x<desktoph>).
+7. {if not ("Borderless" chosen (windowmode 2) and not "Borderless at the chosen resolution (stretched, Windows unchanged)" ticked (borderlessres) or fsaa > 0)} text "Resolution: <scr_w>x<scr_h> (Resolution tab)" (computed)
+== Picture {only if tab "Screen" open}
 1. slider "Field of View (default: 100)" fov
-2. checkbox "V-Sync" vsync
-3. "Low Latency (mouse read once the GPU catches up)" choice lowlatency: "Off"=0, "On"=1, "Strict (lowest latency, fewer FPS)"=2
-4. "Display Mode" choice windowmode: "Exclusive Fullscreen"=1, "Borderless"=2, "Windowed"=0 (one under the other)
-5. text "borderless: Alt+Tab / 2nd screen without closing"
-6. {if "Borderless" chosen (windowmode 2) and fsaa > 0} note: Borderless at a chosen resolution needs Full-Scene Anti-Aliasing at -1 or 0.
-7. {if "Borderless" chosen (windowmode 2) and not (fsaa > 0)} checkbox "Borderless at the Resolution below (stretched, Windows unchanged)" borderlessres
-8. {if "Borderless" chosen (windowmode 2) and not (fsaa > 0) and "Borderless at the Resolution below (stretched, Windows unchanged)" ticked (borderlessres)} checkbox "Keep proportions (black bars)" borderlessaspect
-9. slider "Gamma (default: 100)" gamma
-10. {if Windows HDR on for this screen} note: Windows HDR is on for this screen: gamma is not applied (it can blank an HDR screen).
-11. note: HDR: Options > Graphics > Display output
-12. slider "Full-Scene Anti-Aliasing (default: -1)" fsaa (values -1 0 2 4 8 16)
-13. slider "Z-Buffer Depth (default: 0)" depthbits (values 0 16 24 32)
-14. slider "Anisotropic Filtering (default: 0)" aniso (values 0 2 4 8 16)
-15. checkbox "Bilinear Filtering" bilinear | checkbox "Trilinear Filtering (Mipmaps)" trilinear
-== Menus
-1. checkbox "2D Menus" gui2d | checkbox "Click Tab" guiclicktab | checkbox "Menu Fade In" guifadein
-== Resolution
-1. {if "Borderless" chosen (windowmode 2) and not "Borderless at the Resolution below (stretched, Windows unchanged)" ticked (borderlessres) or fsaa > 0} status: Borderless: the game uses the monitor size (<desktopw>x<desktoph>).
-2. {if "Borderless" chosen (windowmode 2) and not "Borderless at the Resolution below (stretched, Windows unchanged)" ticked (borderlessres) or fsaa > 0} note: The resolution below applies in Exclusive Fullscreen or Windowed, or in Borderless
-3. {if "Borderless" chosen (windowmode 2) and not "Borderless at the Resolution below (stretched, Windows unchanged)" ticked (borderlessres) or fsaa > 0} note: with Borderless at the Resolution below ticked (Display Mode, above).
-4. {if "Exclusive Fullscreen" chosen (windowmode 1)} note: Exclusive Fullscreen: the monitor switches to the resolution you pick.
-5. [ text "4:3" / button "320x240" : screenres 320 240 / button "640x480" : screenres 640 480 / button "800x600" : screenres 800 600 / button "1024x768" : screenres 1024 768 / button "1152x864" : screenres 1152 864 / button "1280x960" : screenres 1280 960 / button "1400x1050" : screenres 1400 1050 / button "1600x1200" : screenres 1600 1200 / button "1792x1344" : screenres 1792 1344 / button "1856x1392" : screenres 1856 1392 / button "1920x1440" : screenres 1920 1440 / button "2048x1536" : screenres 2048 1536 / button "2800x2100" : screenres 2800 2100 / button "3200x2400" : screenres 3200 2400 ] | [ text "16:10" / button "320x200" : screenres 320 200 / button "640x400" : screenres 640 400 / button "1024x640" : screenres 1024 640 / button "1280x800" : screenres 1280 800 / button "1440x900" : screenres 1440 900 / button "1600x1000" : screenres 1600 1000 / button "1680x1050" : screenres 1680 1050 / button "1920x1200" : screenres 1920 1200 / button "2048x1280" : screenres 2048 1280 / button "2560x1600" : screenres 2560 1600 / button "2880x1800" : screenres 2880 1800 / button "3200x2000" : screenres 3200 2000 / button "3840x2400" : screenres 3840 2400 ] | [ text "16:9" / button "1024x600" : screenres 1024 600 / button "1280x720" : screenres 1280 720 / button "1366x768" : screenres 1366 768 / button "1600x900" : screenres 1600 900 / button "1920x1080" : screenres 1920 1080 / button "2048x1152" : screenres 2048 1152 / button "2560x1440" : screenres 2560 1440 / button "2880x1620" : screenres 2880 1620 / button "3200x1800" : screenres 3200 1800 / button "3840x2160" : screenres 3840 2160 ] | [ text "5:4" / button "600x480" : screenres 600 480 / button "1280x1024" : screenres 1280 1024 / button "1600x1280" : screenres 1600 1280 / button "2560x2048" : screenres 2560 2048 ] | [ text "5:3" / button "800x480" : screenres 800 480 / button "1280x768" : screenres 1280 768 / text "Custom" / field -> screenres | field -> screenres ]
+2. slider "Gamma (default: 100)" gamma
+3. {if Windows HDR on for this screen} note: Windows HDR is on for this screen: gamma is not applied.
+4. note: HDR: Options > Graphics > HDR screen
+== Speed and latency
+1. {if tab "Screen" open} checkbox "V-Sync" vsync
+2. {if tab "Screen" open} "Low Latency (mouse read once the GPU catches up)" choice lowlatency: "Off"=0, "On"=1, "Strict (lowest latency, fewer FPS)"=2
+3. {if tab "Resolution" open and "Borderless" chosen (windowmode 2) and not "Borderless at the chosen resolution (stretched, Windows unchanged)" ticked (borderlessres) or fsaa > 0} status: Borderless: the game uses the monitor size (<desktopw>x<desktoph>).
+4. {if tab "Resolution" open and "Borderless" chosen (windowmode 2) and not "Borderless at the chosen resolution (stretched, Windows unchanged)" ticked (borderlessres) or fsaa > 0} note: The resolution below applies in Exclusive Fullscreen or Windowed,
+5. {if tab "Resolution" open and "Borderless" chosen (windowmode 2) and not "Borderless at the chosen resolution (stretched, Windows unchanged)" ticked (borderlessres) or fsaa > 0} note: or in Borderless at the chosen resolution (Screen tab).
+6. {if tab "Resolution" open and "Exclusive Fullscreen" chosen (windowmode 1)} note: Exclusive Fullscreen: the monitor switches to the resolution you pick.
+7. {if tab "Resolution" open} ([ text "4:3" / button "320x240" : screenres 320 240 / button "640x480" : screenres 640 480 / button "800x600" : screenres 800 600 / button "1024x768" : screenres 1024 768 / button "1152x864" : screenres 1152 864 / button "1280x960" : screenres 1280 960 / button "1400x1050" : screenres 1400 1050 / button "1600x1200" : screenres 1600 1200 / button "1792x1344" : screenres 1792 1344 / button "1856x1392" : screenres 1856 1392 / button "1920x1440" : screenres 1920 1440 / button "2048x1536" : screenres 2048 1536 / button "2800x2100" : screenres 2800 2100 / button "3200x2400" : screenres 3200 2400 ] | [ text "16:10" / button "320x200" : screenres 320 200 / button "640x400" : screenres 640 400 / button "1024x640" : screenres 1024 640 / button "1280x800" : screenres 1280 800 / button "1440x900" : screenres 1440 900 / button "1600x1000" : screenres 1600 1000 / button "1680x1050" : screenres 1680 1050 / button "1920x1200" : screenres 1920 1200 / button "2048x1280" : screenres 2048 1280 / button "2560x1600" : screenres 2560 1600 / button "2880x1800" : screenres 2880 1800 / button "3200x2000" : screenres 3200 2000 / button "3840x2400" : screenres 3840 2400 ] | [ text "16:9" / button "1024x600" : screenres 1024 600 / button "1280x720" : screenres 1280 720 / button "1366x768" : screenres 1366 768 / button "1600x900" : screenres 1600 900 / button "1920x1080" : screenres 1920 1080 / button "2048x1152" : screenres 2048 1152 / button "2560x1440" : screenres 2560 1440 / button "2880x1620" : screenres 2880 1620 / button "3200x1800" : screenres 3200 1800 / button "3840x2160" : screenres 3840 2160 ] | [ text "5:4" / button "600x480" : screenres 600 480 / button "1280x1024" : screenres 1280 1024 / button "1600x1280" : screenres 1600 1280 / button "2560x2048" : screenres 2560 2048 ] | [ text "5:3" / button "800x480" : screenres 800 480 / button "1280x768" : screenres 1280 768 / text "Custom" / field -> screenres | field -> screenres ])
+== Texture filtering {only if tab "Advanced" open}
+1. slider "Anisotropic Filtering (default: 0)" aniso (values 0 2 4 8 16)
+2. checkbox "Bilinear Filtering" bilinear
+3. checkbox "Trilinear Filtering (Mipmaps)" trilinear
+== Rendering {only if tab "Advanced" open}
+1. slider "Full-Scene Anti-Aliasing (default: -1)" fsaa (values -1 0 2 4 8 16)
+2. slider "Z-Buffer Depth (default: 0)" depthbits (values 0 16 24 32)
+== Menus {only if tab "Advanced" open}
+1. checkbox "2D Menus" gui2d
+2. checkbox "Click Tab" guiclicktab
+3. checkbox "Menu Fade In" guifadein
 
 ## gfx | Graphics | Options > Graphics
-== Lighting
-1. note: Classic: original Sauerbraten lighting, no ray-tracing GPU needed. Ray tracing: RT lights, sun and sky.
+== (top)
+1. button "General" : concat gfxtab "=" 0 | button "Ray tracing" : concat gfxtab "=" 1 | button "Performance" : concat gfxtab "=" 5 | button "HDR screen" : concat gfxtab "=" 3 | button "Classic" : concat gfxtab "=" 4
+== Lighting {only if tab "General" open}
+1. note: Classic: original lighting, any GPU. Ray tracing: RT lights, sun and sky.
 2. choice hwrt: "Classic (no RT)"=0, "Ray tracing"=1
 3. {if hwrtraison() != ""} status: <hwrtraison>
-4. {if hwrtraison() != ""} note: It needs a graphics card with hardware ray tracing and an up-to-date graphics driver.
-5. {if "Ray tracing" chosen (hwrt 1) and RT lighting running} status: Ray-traced lighting is running.
-6. {if "Ray tracing" chosen (hwrt 1) and not (RT lighting running)} status: Ray tracing chosen, but RT lighting is not running yet (no map loaded, or it failed: see console).
-7. note: Classic lighting only. Slightly darker corners and wall bases; players are never darkened.
-8. "Ambient Occlusion" choice gtao: "Off"=0, "Low"=1, "High"=2
-9. {if gtao on and RT lighting running} note: Ambient Occlusion is not used with ray tracing: RT already traces the sky light.
-== Display output
-1. note: Native HDR sends a real HDR picture to an HDR screen. Windows HDR must already be on (it is never changed h...
-2. choice hdroutpref: "Automatic"=-1, "SDR"=0, "Native HDR"=1
-3. {if "Automatic" chosen (hdroutpref -1)} note: Automatic: Native HDR if Windows HDR is on and supported, otherwise SDR.
-4. {if Native HDR in use} status: In use: Native HDR
-5. {if not (Native HDR in use) and HDR preview in use} status: In use: HDR preview shown in SDR (diagnostic, not native HDR)
-6. {if not (Native HDR in use) and not (HDR preview in use)} text "In use: SDR"
-7. {if hdroutpref != 0 and hdroutdispo() = 0} note: <hdroutraison>
-== HDR calibration
-1. note: Used by Native HDR only. Kept across maps, outputs, anti-aliasing and lighting.
+4. {if hwrtraison() != ""} note: It needs a graphics card with hardware ray tracing and an up-to-date driver.
+5. {if "Ray tracing" chosen (hwrt 1) and RT lighting running} status: Ray-traced lighting is running. Its settings: Ray tracing tab.
+6. {if "Ray tracing" chosen (hwrt 1) and not (RT lighting running)} status: Ray tracing chosen, but not running yet (no map, or it failed: see console).
+7. {if not ("Ray tracing" chosen (hwrt 1))} note: Classic lighting settings: Classic tab.
+== Anti-Aliasing {only if tab "General" open}
+1. checkbox "Temporal AA" looktaa | checkbox "FXAA in Native (softer)" lookfxaa
+2. {if DLSS/FSR built in and hwrtngxmodeapplied() != 0} note: Temporal AA / FXAA unused while DLAA, DLSS or FSR is on.
+3. {if Native HDR in use} note: Temporal AA is not applied in Native HDR.
+4. {if DLSS/FSR built in} note: FXAA off (default) keeps Native sharp. Quality = more internal pixels.
+5. {if DLSS/FSR built in} choice hwrtngxmode: "Native"=0, "DLAA"=1, "DLSS Quality"=2, "DLSS Balanced"=3, "DLSS Performance"=4
+6. {if DLSS/FSR built in and FSR built in} choice hwrtngxmode: "FSR Native"=5, "FSR Quality"=6, "FSR Balanced"=7, "FSR Performance"=8
+7. {if DLSS/FSR built in and FSR built in and hwrtdlssraison() != ""} status: <hwrtdlssraison>
+8. {if DLSS/FSR built in and FSR built in and hwrtfsrraison() != ""} status: <hwrtfsrraison>
+9. {if DLSS/FSR built in and FSR built in and hwrtngxmode >= 6 and hwrtfsrraison() = ""} note: FSR sharpening after upscaling (0 = off, 10 = like DLSS):
+10. {if DLSS/FSR built in and FSR built in and hwrtngxmode >= 6 and hwrtfsrraison() = ""} slider hwrtfsrsharpness
+11. {if DLSS/FSR built in and hwrtngxfallback() = 1} status: Using Native: <AA_modename $hwrtngxmode> did not start. Your choice is kept.
+12. {if DLSS/FSR built in and hwrtngxfallback() = 1 and hwrtngxreason() != ""} note: <hwrtngxreason>
+== Players {only if tab "General" open}
+1. checkbox "Fullbright player models" fullbrightmodels on=60 | {if "Fullbright player models" ticked (fullbrightmodels)} choice fullbrightmodels: "Subtle"=60, "Bright"=100, "Overbright"=150, "Max"=200
+2. checkbox "Everyone uses my player model" forceplayermodels
+3. checkbox "Always use team skins (blue / red)" teamskins
+== Deaths
+1. {if tab "General" open} (checkbox "Blood" blood | checkbox "Hide dead players" hidedead)
+2. {if tab "General" open} checkbox "Ragdoll deaths" ragdoll | {if tab "General" open and "Ragdoll deaths" ticked (ragdoll)} checkbox "Keep after respawn" ragdollmillis on=10000
+3. {if tab "General" open} slider "Ragdoll push (velocity multiplier)" deadpush
+4. {if tab "Ray tracing" open and not "Ray tracing" chosen (hwrt 1)} status: Ray tracing is off: choose it in General > Lighting.
+5. {if tab "Ray tracing" open and not "Ray tracing" chosen (hwrt 1)} note: These settings only act with ray tracing.
+== Lights {only if tab "Ray tracing" open and not (not "Ray tracing" chosen (hwrt 1))}
+1. checkbox "Teleporters glow and light the room" hwrtteleportlight
+2. checkbox "Jump pads glow and light the room" hwrtjumppadlight
+3. checkbox "Weapons light the scene (flashes, rockets, explosions)" hwrtdynlights
+== Shadows {only if tab "Ray tracing" open and not (not "Ray tracing" chosen (hwrt 1))}
+1. note: My own shadow (first person): which lights draw it.
+2. choice hwrtshadowself: "None"=0, "The sun only (default)"=1, "+ glowing lights"=2
+3. choice hwrtshadowself: "+ nearby lamps (stretched)"=3, "+ the sky (dark patch around you)"=4
+4. note: Shadows of the others (players, bots, rockets, pickups): which lights.
+5. choice hwrtshadowothers: "None"=0, "The sun and the sky"=1, "+ glowing lights (default)"=2
+6. choice hwrtshadowothers: "+ the map's lamps (a hidden lamp can add a 2nd shadow)"=3
+7. checkbox "Weapon smoke casts shadows" hwrtsmokeshadow
+8. {if "Weapon smoke casts shadows" ticked (hwrtsmokeshadow)} note: Smoke shadow density (percent, default: 100):
+9. {if "Weapon smoke casts shadows" ticked (hwrtsmokeshadow)} slider hwrtsmokeshadowdensity
+10. "Soft shadows" choice hwrtsoftshadows: "Off"=0, "On (default)"=2
+11. {if hwrtsoftshadows = 1} note: Sun only (set in the console): choose On or Off to change it.
+12. {if "On (default)" chosen (hwrtsoftshadows 2)} note: Sun, lamps, torches, teleporters: blur with distance. ~1-2.5 ms (1440p).
+13. {if "On (default)" chosen (hwrtsoftshadows 2)} "Soft shadow rays" choice hwrtsoftshadowrays: "1"=1, "2 (default)"=2, "4"=4, "8"=8
+14. {if "On (default)" chosen (hwrtsoftshadows 2)} "Soft shadow denoiser" choice hwrtsoftsigma: "Off"=0, "On (NRD SIGMA, default)"=1
+15. {if "On (default)" chosen (hwrtsoftshadows 2) and "On (NRD SIGMA, default)" chosen (hwrtsoftsigma 1) and not "NRD (stronger, with Native, DLSS and FSR)" chosen (hwrtnrd 1)} note: Needs the NRD denoiser (Performance > Advanced).
+16. {if "On (default)" chosen (hwrtsoftshadows 2) and "On (NRD SIGMA, default)" chosen (hwrtsoftsigma 1)} "Denoiser steadiness" choice hwrtsoftsigmahistory: "0"=0, "3"=3, "5 (default)"=5, "7"=7
+== Surfaces
+1. {if tab "Ray tracing" open and not (not "Ray tracing" chosen (hwrt 1))} checkbox "Reflections on water and reflective surfaces" hwrtreflections
+2. {if tab "Ray tracing" open and not (not "Ray tracing" chosen (hwrt 1))} checkbox "Animated waves on water (ripples in the RT reflections)" hwrtwaterwaves
+3. {if tab "Ray tracing" open and not (not "Ray tracing" chosen (hwrt 1)) and "Animated waves on water (ripples in the RT reflections)" ticked (hwrtwaterwaves) and not "Reflections on water and reflective surfaces" ticked (hwrtreflections)} note: Needs the reflections above.
+4. {if tab "Ray tracing" open and not (not "Ray tracing" chosen (hwrt 1)) and "Animated waves on water (ripples in the RT reflections)" ticked (hwrtwaterwaves)} (field "Wave strength" waterwaveamp | button "-" : waterwaveamp (+fround $waterwaveamp -0.25) | button "+" : waterwaveamp (+fround $waterwaveamp 0.25) | field "Speed" waterwavespeed | button "-" : waterwavespeed (+fround $waterwavespeed -0.25) | button "+" : waterwavespeed (+fround $waterwavespeed 0.25))
+5. {if tab "Ray tracing" open and not (not "Ray tracing" chosen (hwrt 1)) and "Animated waves on water (ripples in the RT reflections)" ticked (hwrtwaterwaves)} "Wave detail" choice waterwavesize: "64"=64, "128 (default)"=128, "256"=256
+6. {if tab "Ray tracing" open and not (not "Ray tracing" chosen (hwrt 1)) and "Animated waves on water (ripples in the RT reflections)" ticked (hwrtwaterwaves)} note: Shared by RT and classic water. The water stays flat for the game.
+7. {if tab "Ray tracing" open and not (not "Ray tracing" chosen (hwrt 1))} checkbox "Shine of lamps and sun on glossy surfaces" hwrtspecular
+8. {if tab "Ray tracing" open and not (not "Ray tracing" chosen (hwrt 1))} checkbox "Smooth lighting across faceted floors and walls" hwrtsmoothnormals
+9. {if tab "Performance" open and not "Ray tracing" chosen (hwrt 1)} status: Ray tracing is off: choose it in General > Lighting.
+10. {if tab "Performance" open and not "Ray tracing" chosen (hwrt 1)} note: These settings only act with ray tracing.
+== Profile
+1. {if tab "Performance" open and not (not "Ray tracing" chosen (hwrt 1))} choice GFX_prof: "Ultra"=0, "High"=1, "Medium"=2, "Low"=3, "Custom"=4
+2. {if tab "Performance" open and not (not "Ray tracing" chosen (hwrt 1)) and <GFX_prof> = 0} note: Ultra: the full picture (default). Slow and pretty.
+3. {if tab "Performance" open and not (not "Ray tracing" chosen (hwrt 1)) and <GFX_prof> = 1} note: High: nearly the same picture, faster: CNN, solid leaves, still models.
+4. {if tab "Performance" open and not (not "Ray tracing" chosen (hwrt 1)) and <GFX_prof> = 2} note: Medium: + half-pixel sky, 3 lamps, adaptive rays, 1 soft shadow ray.
+5. {if tab "Performance" open and not (not "Ray tracing" chosen (hwrt 1)) and <GFX_prof> = 3} note: Low: + 2 lamps, 1 glow, softer far, no soft shadows. Darker, fastest.
+6. {if tab "Performance" open and not (not "Ray tracing" chosen (hwrt 1)) and <GFX_prof> = 4} note: Custom: your own mix. A profile sets both views below and soft shadows.
+7. {if tab "Performance" open} (button "Main choices" : concat gfxperftab "=" 0 | button "Advanced: sky, lamps, textures" : concat gfxperftab "=" 1)
+8. {if tab "Performance" open and tab "Main choices" open and "Ray tracing" chosen (hwrt 1)} "RT quality" choice hwrtquality: "Full (best)"=2, "Half sky"=1, "Half sky, 1 glow"=0
+9. {if tab "Performance" open and tab "Main choices" open and "Ray tracing" chosen (hwrt 1)} "DLSS model" choice hwrtdlsscnn: "Transformer (sharper, slower)"=0, "CNN (faster, softer)"=1
+10. {if tab "Performance" open and tab "Main choices" open and "Ray tracing" chosen (hwrt 1) and not hwrtngxmode >= 1 and hwrtngxmode <= 4} note: DLSS model: used with DLAA or DLSS (General > Anti-Aliasing).
+11. {if tab "Performance" open and tab "Main choices" open and "Ray tracing" chosen (hwrt 1)} "Leaves" choice hwrtskyopaque: "See-through (exact)"=0, "Solid (faster under trees)"=1
+12. {if tab "Performance" open and tab "Main choices" open and "Ray tracing" chosen (hwrt 1)} note: For sky light only: solid leaves give a denser shade below trees.
+13. {if tab "Performance" open and tab "Main choices" open and "Ray tracing" chosen (hwrt 1)} "NRD denoiser" choice hwrtnrdlight: "Full"=0, "Light (faster)"=1, "Lightest (more flicker)"=2
+14. {if tab "Performance" open and tab "Main choices" open and "Ray tracing" chosen (hwrt 1)} "Still models" choice hwrtvelstatic: "Drawn again (exact)"=0, "From depth (less CPU)"=1
+15. {if tab "Performance" open and tab "Main choices" open and "Ray tracing" chosen (hwrt 1)} note: Motion of still map models, used by DLAA, DLSS and FSR.
+16. {if tab "Performance" open and tab "Main choices" open and "Ray tracing" chosen (hwrt 1)} "Sky reach" choice hwrtskyrange: "Full"=0, "1024"=1024, "512"=512, "256"=256
+17. {if tab "Performance" open and tab "Main choices" open and "Ray tracing" chosen (hwrt 1)} note: Shorter is faster; a hall higher than that gets some sky light.
+18. {if tab "Performance" open and tab "Main choices" open and "Ray tracing" chosen (hwrt 1)} "Adaptive rays" choice hwrtrtadapt: "Off"=0, "On (fewer rays at edges, far, in motion)"=1
+== Sky light {only if tab "Performance" open and tab "Advanced: sky, lamps, textures" open}
+1. {if NRD built in} note: Denoiser (cleans the grain of the sky light):
+2. {if NRD built in} choice hwrtnrd: "Built-in filter"=0, "NRD (stronger, with Native, DLSS and FSR)"=1
+3. {if NRD built in and hwrtnrdfallback() = 1 and RT lighting running} status: NRD is unavailable here: the built-in filter is used.
+4. {if "Ray tracing" chosen (hwrt 1)} "Rays per pixel (NRD)" choice hwrtskyrays: "1"=1, "2"=2, "3"=3, "4"=4
+5. {if "Ray tracing" chosen (hwrt 1)} note: With NRD only: more = less grain, slower. Built-in filter: always 4.
+6. {if "Ray tracing" chosen (hwrt 1)} slider "Built-in filter: smoothing over frames (default: 32, 0 = off)" hwrtskytemporal
+7. {if "Ray tracing" chosen (hwrt 1)} checkbox "Blur between neighbouring pixels (both denoisers)" hwrtskyfilter
+8. {if "Ray tracing" chosen (hwrt 1)} checkbox "Draw the sun as a disk (instead of the map's sky picture)" hwrtsundisk
+== Lamps and textures {only if tab "Performance" open and tab "Advanced: sky, lamps, textures" open and "Ray tracing" chosen (hwrt 1)}
+1. "Lamps with a shadow" choice hwrtdlights: "1"=1, "2"=2, "3"=3, "4"=4
+2. slider "Glowing lights traced (teleporters, lava; default: 8)" hwrtglowdlights
+3. "Texture upscaling" choice hwrtdiffupscale: "Bicubic"=2, "Lanczos (sharper)"=3, "Nearest"=0
+4. "Texture detail far" choice hwrtdiffmipbias: "Stable (less shimmer)"=0, "Sharper"=-0.5
+== Display output {only if tab "HDR screen" open}
+1. note: Native HDR sends a real HDR picture to an HDR screen.
+2. note: Windows HDR must already be on (it is never changed here).
+3. choice hdroutpref: "Automatic"=-1, "SDR"=0, "Native HDR"=1
+4. {if "Automatic" chosen (hdroutpref -1)} note: Automatic: Native HDR if Windows HDR is on and supported, else SDR.
+5. {if Native HDR in use} status: In use: Native HDR
+6. {if not (Native HDR in use) and HDR preview in use} status: In use: HDR preview shown in SDR (diagnostic, not native HDR)
+7. {if not (Native HDR in use) and not (HDR preview in use)} text "In use: SDR"
+8. {if hdroutpref != 0 and hdroutdispo() = 0} note: <hdroutraison>
+== HDR calibration {only if tab "HDR screen" open}
+1. note: Native HDR only. Kept across maps, outputs, anti-aliasing and lighting.
 2. text "Exposure: <hwrthdrexp> EV (default 0)" (computed)
 3. button "-0.5" : hdroutexpstep -0.5 | button "-0.1" : hdroutexpstep -0.1 | button "+0.1" : hdroutexpstep 0.1 | button "+0.5" : hdroutexpstep 0.5 | button "Reset" : hwrthdrexp 0
 4. slider "Reference white: <hdroutref> nits (default 80)" hdroutref
@@ -100,163 +188,130 @@
 7. text "<hdrouthudlabel>"
 8. choice hdrouthud: "HUD follows reference white"=0 | {if "HUD follows reference white" chosen (hdrouthud 0)} button "Custom HUD brightness" : hdrouthud (max 40 $hdroutref)
 9. {if hdrouthud > 0} slider hdrouthud
-== Look
-1. checkbox "Temporal AA" looktaa | checkbox "My Shadow (Sun)" lookselfshadow
-2. {if DLSS/FSR built in and hwrtngxmodeapplied() != 0} note: Temporal AA / FXAA unused while DLAA, DLSS or FSR is on. They return on Native.
-3. {if Native HDR in use} note: Temporal AA is not applied in Native HDR.
-4. checkbox "Teleport light" hwrtteleportlight | checkbox "Jumppad light" hwrtjumppadlight | checkbox "Smoke shadows" hwrtsmokeshadow
-5. {if "Smoke shadows" ticked (hwrtsmokeshadow)} note: Smoke shadow density (percent, default: 100):
-6. {if "Smoke shadows" ticked (hwrtsmokeshadow)} slider hwrtsmokeshadowdensity
-7. note: Uncheck my shadow if it looks dirty or ugly indoors.
-== Anti-Aliasing
-1. checkbox "FXAA in Native (smoother edges, softer textures)" lookfxaa
-2. note: Off (default): Native is as sharp as stock Sauerbraten. Never added to Temporal AA, DLAA, DLSS or FSR.
-3. {if DLSS/FSR built in} note: Native, NVIDIA DLAA / DLSS, or AMD FSR. Quality uses more internal pixels than Performance.
-4. {if DLSS/FSR built in} choice hwrtngxmode: "Native"=0, "DLAA"=1, "DLSS Quality"=2, "DLSS Balanced"=3, "DLSS Performance"=4
-5. {if DLSS/FSR built in and FSR built in} choice hwrtngxmode: "FSR Native"=5, "FSR Quality"=6, "FSR Balanced"=7, "FSR Performance"=8
-6. {if DLSS/FSR built in and FSR built in and hwrtdlssraison() != ""} status: <hwrtdlssraison>
-7. {if DLSS/FSR built in and FSR built in and hwrtfsrraison() != ""} status: <hwrtfsrraison>
-8. {if DLSS/FSR built in and FSR built in and hwrtngxmode >= 6 and hwrtfsrraison() = ""} note: FSR sharpening after upscaling (0 = off, 10 = like DLSS):
-9. {if DLSS/FSR built in and FSR built in and hwrtngxmode >= 6 and hwrtfsrraison() = ""} slider hwrtfsrsharpness
-10. {if DLSS/FSR built in and hwrtngxfallback() = 1} status: Using Native: <AA_modename $hwrtngxmode> did not start. Your choice is kept.
-11. {if DLSS/FSR built in and hwrtngxfallback() = 1 and hwrtngxreason() != ""} note: <hwrtngxreason>
-== RT Sky Denoise {only if NRD built in}
-1. note: Ray tracing only. Filters the ray-traced sky light. NRD works with Native, DLSS and FSR.
-2. choice hwrtnrd: "Sauer filter"=0, "NRD"=1
-3. {if hwrtnrdfallback() = 1 and RT lighting running} status: Using the Sauer filter — NRD unavailable.
-== RT Reflections {only if "Ray tracing" chosen (hwrt 1)}
-1. note: Ray tracing only. Sharp ray-traced reflections on water and on surfaces the map made reflective.
-2. choice hwrtreflections: "Off"=0, "On"=1
-== RT Specular {only if "Ray tracing" chosen (hwrt 1)}
-1. note: Ray tracing only. Shine of the lamps and the sun on glossy surfaces, as in classic lighting.
-2. choice hwrtspecular: "Off"=0, "On"=1
-== RT Textures {only if "Ray tracing" chosen (hwrt 1)}
-1. note: Ray tracing only. Smooths small textures seen up close. Lanczos: a little sharper.
-2. "Upscaling" choice hwrtdiffupscale: "Bicubic"=2, "Lanczos"=3, "Nearest"=0
-3. note: Distant textures: Stable shimmers less in motion, Sharper keeps a little more detail.
-4. "Distance detail" choice hwrtdiffmipbias: "Stable"=0, "Sharper"=-0.5
-== RT Normals {only if "Ray tracing" chosen (hwrt 1)}
-1. note: Ray tracing only. Smooths lighting across faceted floors and walls, like classic lighting.
-2. choice hwrtsmoothnormals: "Off"=0, "On"=1
-== RT Weapon Lights {only if "Ray tracing" chosen (hwrt 1)}
-1. note: Ray tracing only. Muzzle flashes, rockets, grenades and explosions light the scene.
-2. choice hwrtdynlights: "Off"=0, "On"=1
-== Deaths
-1. checkbox "Blood" blood
-2. checkbox "Ragdoll Deaths" ragdoll | {if "Ragdoll Deaths" ticked (ragdoll)} checkbox "Keep After Respawn" ragdollmillis on=10000 | checkbox "Hide Dead Players" hidedead
-3. slider "Ragdoll Velocity Multiplier" deadpush
-== Players
-1. checkbox "Fullbright Player Models" fullbrightmodels on=60 | {if "Fullbright Player Models" ticked (fullbrightmodels)} choice fullbrightmodels: "Subtle"=60, "Bright"=100, "Overbright"=150, "Max"=200
-2. checkbox "Force Matching Player Models" forceplayermodels | checkbox "Always Use Team Skins" teamskins
-== Advanced
-1. text "Performance Key: Fast, Moderate, Slow and Pretty"
+== Shading (classic lighting) {only if tab "Classic" open}
+1. note: Slightly darker corners and wall bases; players are never darkened.
+2. "Ambient Occlusion" choice gtao: "Off"=0, "Low"=1, "High"=2
+3. {if gtao on and RT lighting running} note: Not used with ray tracing: RT already traces the sky light.
+4. {if "Off" chosen (gtao 0)} checkbox "Old corner shading" lookao | {if "Off" chosen (gtao 0) and "Old corner shading" ticked (lookao)} (field "Strength" lookaoscale | button "-" : lookaoscale (+fround $lookaoscale -0.05) | button "+" : lookaoscale (+fround $lookaoscale 0.05) | field "Size" lookaoradius | button "-" : lookaoradius (+fround $lookaoradius -0.05) | button "+" : lookaoradius (+fround $lookaoradius 0.05))
+5. {if "Off" chosen (gtao 0)} note: Used when Ambient Occlusion is Off (on by default).
+== Detail {only if tab "Classic" open}
+1. text "Speed: Fast, Moderate, Slow and Pretty"
 2. "Shaders" choice shaderdetail: "Low Detail"=1, "High Detail"=3
 3. text "Water" | checkbox "Refraction" waterrefract | checkbox "Reflection" waterreflect | checkbox "Caustics" caustics | checkbox "Animation" vertwater
-4. text "Waterfalls" | checkbox "Refraction" waterfallrefract | checkbox "Reflection" waterfallenv
-5. text "Soft Shadows" | checkbox "On" shadowmap | {if shadowmap on} choice shadowmapsize: "Medium Quality"=9, "High Quality"=10 | {if not (shadowmap on)} checkbox "Blob Shadows" blobs
-6. text "Glare" | checkbox "On" glare | {if glare on} choice glarepreset: "Subtle"=1, "Glowy"=2, "Soft"=3, "Intense"=4
-7. text "Motion Blur" | checkbox "On" motionblur | {if motionblur on} choice motionblurscale: "Subtle"=0.5, "Moderate"=0.65, "Intense"=0.8
-8. text "Grass" | checkbox "On" grass | {if grass on} choice grassdist: "Quick Fade"=128, "Moderate Fade"=256, "Slow Fade"=512
-9. text "Dynamic Lights" | checkbox "On" maxdynlights on=3 | {if maxdynlights on} choice maxdynlights: "Medium Quality"=3, "High Quality"=5
-10. text "Soft Particles" | checkbox "On" depthfx | {if depthfx on} choice depthfxsize: "Low Quality"=7, "Medium Quality"=10, "High Quality"=12
-11. text "Glass Reflection" | checkbox "On" glassenv
-12. text "Decals" | checkbox "On" decals | {if decals on} choice decalfade: "Quick Fade"=10000, "Slow Fade"=60000
-13. "Textures" choice maxtexsize: "Low Quality"=256, "Medium Quality"=512, "High Quality"=0
-14. text "Models" | checkbox "Reflection" envmapmodels | checkbox "Bump Map" bumpmodels
+4. text "Water waves" | checkbox "Animated (ripples in reflections and refraction)" waterwaves
+5. {if "Animated (ripples in reflections and refraction)" ticked (waterwaves)} (field "Wave strength" waterwaveamp | button "-" : waterwaveamp (+fround $waterwaveamp -0.25) | button "+" : waterwaveamp (+fround $waterwaveamp 0.25) | field "Speed" waterwavespeed | button "-" : waterwavespeed (+fround $waterwavespeed -0.25) | button "+" : waterwavespeed (+fround $waterwavespeed 0.25))
+6. {if "Animated (ripples in reflections and refraction)" ticked (waterwaves)} "Wave detail" choice waterwavesize: "64"=64, "128 (default)"=128, "256"=256
+7. {if "Animated (ripples in reflections and refraction)" ticked (waterwaves)} note: Shared by RT and classic water. The water stays flat for the game.
+8. text "Waterfalls" | checkbox "Refraction" waterfallrefract | checkbox "Reflection" waterfallenv
+9. status: Classic shadows | checkbox "On" shadowmap | {if shadowmap on} choice shadowmapsize: "Medium Quality"=9, "High Quality"=10 | {if not (shadowmap on)} checkbox "Blob Shadows" blobs
+10. text "My Shadow" | checkbox "Mine too, from the sun (with Classic shadows; RT: Ray tracing tab)" lookselfshadow
+11. status: Glare | checkbox "On" glare | {if glare on} choice glarepreset: "Subtle"=1, "Glowy"=2, "Soft"=3, "Intense"=4
+12. status: Motion Blur | checkbox "On" motionblur | {if motionblur on} choice motionblurscale: "Subtle"=0.5, "Moderate"=0.65, "Intense"=0.8
+13. status: Grass | checkbox "On" grass | {if grass on} choice grassdist: "Quick Fade"=128, "Moderate Fade"=256, "Slow Fade"=512
+14. status: Dynamic Lights | checkbox "On" maxdynlights on=3 | {if maxdynlights on} choice maxdynlights: "Medium Quality"=3, "High Quality"=5
+15. status: Soft Particles | checkbox "On" depthfx | {if depthfx on} choice depthfxsize: "Low Quality"=7, "Medium Quality"=10, "High Quality"=12
+16. status: Glass Reflection | checkbox "On" glassenv
+17. status: Decals | checkbox "On" decals | {if decals on} choice decalfade: "Quick Fade"=10000, "Slow Fade"=60000
+18. "Textures" choice maxtexsize: "Low Quality"=256, "Medium Quality"=512, "High Quality"=0
+19. text "Models" | checkbox "Reflection" envmapmodels | checkbox "Bump Map" bumpmodels
 
 ## audio | Sound | Options > Sound
 == (top)
+1. button "Volume and mix" : concat audiotab "=" 0 | button "3D sound and device" : concat audiotab "=" 1
+== Volume {only if tab "Volume and mix" open}
 1. slider "Master Volume" soundvol
 2. slider "Music Volume" musicvol
 3. checkbox "Hit Sound" hitsound
-4. note: Ping when you hit someone. Volume is Mix → Hits.
-== 3D Sound
-1. note: Headphones: hear whether a sound is ahead or behind, above or below (Steam Audio HRTF, sets 44100 Hz).
-2. note: Speakers: usual left/right sound. Your own sounds, menus, announcements and music are never changed.
-3. choice son3d: "Off"=0, "Headphones (HRTF)"=1, "Speakers"=2
-4. checkbox "Occlusion: walls muffle sounds (needs Headphones or Speakers)" son3docclusion
-5. {if son3d on and son3deffectif() = 0} status: 3D sound unavailable: <son3derreur>
-== Mix
+4. note: Ping when you hit someone. Its volume: Hits, below.
+== Mix {only if tab "Volume and mix" open}
 1. note: 100 = normal. 0 = mute. 200 = twice as loud.
-2. slider "Weapons (shots, explosions)" mixweapons
-3. slider "Hits (hit ping)" mixhits
-4. slider "Pain and Deaths" mixpain
-5. slider "Items (pickups)" mixitems
-6. slider "Announcements (quad, fight)" mixannounce
-7. slider "Flags (CTF / collect)" mixflags
-8. slider "Movement (jump, land)" mixmove
-9. slider "Map (ambient loops)" mixworld
-10. button "Reset Mix to 100" : mixreset
-== Device
+2. [ slider "Weapons (shots, explosions)" mixweapons / slider "Hits (hit ping)" mixhits / slider "Pain and Deaths" mixpain / slider "Items (pickups)" mixitems ] | [ slider "Announcements (quad, fight)" mixannounce / slider "Flags (CTF / collect)" mixflags / slider "Movement (jump, land)" mixmove / slider "Map (ambient loops)" mixworld ]
+3. button "Reset Mix to 100" : mixreset
+== 3D Sound {only if tab "3D sound and device" open}
+1. note: Headphones: hear if a sound is ahead or behind, above or below.
+2. note: (Steam Audio HRTF, sets 44100 Hz)
+3. note: Speakers: usual left/right sound.
+4. note: Your own sounds, menus, announcements and music are never changed.
+5. choice son3d: "Off"=0, "Headphones (HRTF)"=1, "Speakers"=2
+6. checkbox "Occlusion: walls muffle sounds (needs Headphones or Speakers)" son3docclusion
+7. {if son3d on and son3deffectif() = 0} status: 3D sound unavailable: <son3derreur>
+== Device {only if tab "3D sound and device" open}
 1. slider "Sound Channels" soundchans
 2. slider "Sound Frequency" soundfreq (values 11025 22050 44100)
 3. slider "Sound Buffer Length" soundbufferlen
 4. checkbox "Mumble Positional Audio" mumble
 
-## mouse | MOUSE | Options > Mouse
-== (top)
-1. checkbox "invert mouse" invmouse
-2. field "mouse sensitivity" sensitivity
-3. field "mouse DPI" mousedpi
+## mouse | Mouse | Options > Mouse
+== Mouse
+1. checkbox "Invert mouse" invmouse
+2. field "Sensitivity" sensitivity
+3. field "Mouse DPI" mousedpi
 4. text "<getcm360text>"
-5. field "set cm/360" -> setcm360
-6. text "Windows: turn off Enhance pointer precision or this lies"
-7. field "mouse UI sensitivity" guisens
-8. button "crosshair:" > page crosshair | button "image" > page crosshair
-9. slider "crosshair size" crosshairsize
+5. field "Set cm/360" -> setcm360
+6. note: Windows: turn off Enhance pointer precision, or cm/360 is wrong.
+== Menus
+1. field "Menu cursor speed" guisens
+== Crosshair
+1. button "Crosshair..." > page crosshair | button "image" > page crosshair
+2. note: Also in Options > HUD.
 
-## keys | KEYS | Options > Keys
+## keys | Keys | Options > Keys
 == (top)
-1. text "Basic binds. For more, use the bind command."
-2. text "Select an action, then press the keys (Esc when done):"
-3. [ key "Forward" -> forward / key "Backward" -> backward / key "Left" -> left / key "Right" -> right / key "Jump" -> jump / key "Attack" -> attack / key "Toggle Zoom" -> togglezoom / key "Chat" -> saycommand / key "Team Chat" -> sayteamcommand / key "Scoreboard" -> showscores / key "Console" -> toggleconsole / key "Expanded Chat" -> togglechat / key "Kills / Deaths" -> togglekilllog / key "Retry Translation" -> tretry / key "Mute Translation" -> toggletranslate / key "Match Record" -> togglematchrecord ] | [ key "Demo Record" -> toggledemorecord / key "Screenshot" -> screenshot / key "Edit Mode" -> edittoggle / key "Fist" -> setweapon FI / key "Shotgun" -> setweapon SG / key "Chaingun" -> setweapon CG / key "Rocket" -> setweapon RL / key "Rifle" -> setweapon RI / key "Grenade" -> setweapon GL / key "Pistol" -> setweapon PI / key "Next Weapon" -> weapon / key "Wheel Up" -> universaldelta 1 / key "Wheel Down" -> universaldelta -1 / key "Drop Flag" -> dropflag / key "Add Bot" -> addbot / key "Delete Bot" -> delbot ]
+1. button "Play" : concat keystab "=" 0 | button "Chat" : concat keystab "=" 1 | button "Game and demos" : concat keystab "=" 3 | button "Spectate and edit" : concat keystab "=" 2
+2. note: Click a field, press the keys (several are fine), then Esc.
+== Movement {only if tab "Play" open}
+1. [ key "Forward" -> forward / key "Backward" -> backward / key "Left" -> left ] | [ key "Right" -> right / key "Jump" -> jump ]
+== Weapons {only if tab "Play" open}
+1. [ key "Attack" -> attack / key "Zoom" -> togglezoom / key "Best weapon" -> weapon / key "Next weapon" -> nextweapon / key "Previous weapon" -> nextweapon -1 / key "Wheel up" -> universaldelta 1 / key "Wheel down" -> universaldelta -1 / key "Chainsaw" -> setweapon FI ] | [ key "Shotgun" -> setweapon SG / key "Chaingun" -> setweapon CG / key "Rocket" -> setweapon RL / key "Rifle" -> setweapon RI / key "Grenade" -> setweapon GL / key "Pistol" -> setweapon PI / key "Drop flag" -> dropflag / key "Suicide" -> suicide ]
+2. note: Best weapon: the strongest one with ammo. Next / previous: in order.
+== Communication {only if tab "Chat" open}
+1. [ key "Chat" -> saycommand / key "Team chat" -> sayteamcommand / key "Command line" -> saycommand / / key "Taunt" -> taunt ] | [ key "Expanded chat" -> togglechat / key "Console" -> toggleconsole / key "Scroll back" -> conskip 5 / key "Scroll to newest" -> conskip -1000 ]
+2. note: Scroll back / to newest: the console, or F10 and F8 when open.
+== Chat translation {only if tab "Chat" open}
+1. [ key "Mute translation" -> toggletranslate / key "Retranslate last" -> tretry / key "Say translated" -> saycommand "/tsay " / key "Team, translated" -> saycommand "/tsayteam " ] | [ key "Say, careful" -> saycommand "/tsayr " / key "Team, careful" -> saycommand "/tsayteamr " / key "Reply translated" -> saycommand "/trep " / key "Team, reply" -> saycommand "/trepteam " ]
+2. note: Reply: translated into the language of the last chat line (/trep).
+== Game {only if tab "Game and demos" open}
+1. [ key "Scoreboard" -> showscores / key "Kills / deaths" -> togglekilllog / key "Main menu" -> togglemainmenu / key "Settings" -> showgui options / key "Move HUD parts" -> hudedit / key "Screenshot" -> screenshot ] | [ key "Spectate on / off" -> spectator (! (isspectator (getclientnum))) / key "Pause" -> set paused (= $paused 0) / key "Third person" -> if (allowthirdperson) [togglevar thirdperson] / key "Add bot" -> addbot / key "Delete bot" -> delbot ]
+2. note: Pause: local games and demos. Third person: offline and edit mode.
+== Recording and demos {only if tab "Game and demos" open}
+1. [ key "Match record" -> togglematchrecord / key "Demo record" -> toggledemorecord / key "Demo: back 10 s" -> demorewind ] | [ key "Demo: ahead 10 s" -> demoforward / key "Demo: HD aim" -> toggledemohd ]
+2. note: The Demo keys work while you watch a demo.
+== Spectating (only while you spectate) {only if tab "Spectate and edit" open}
+1. [ key "Next player" -> nextfollow / key "Previous player" -> nextfollow -1 ] | key "Follow / free" -> follow
+== Editing {only if tab "Spectate and edit" open}
+1. key "Edit mode" -> edittoggle | key "Allow edit (hold)" -> allowspedit
+2. note: Allow edit: hold it to enter edit mode in single player.
+3. note: These keys work in edit mode only:
+4. [ key "Copy" -> editcopy / key "Paste" -> editpaste / key "Undo" -> undo; passthroughsel 0 / key "Redo" -> redo ] | [ key "Delete" -> editdel / key "Flip" -> editflip / key "Light (calc)" -> calclight ]
+5. note: Other map editing keys: see the editing guide (editbind).
 
 ## hud | HUD | Options > HUD
 == (top)
 1. button "Move HUD parts (drag and drop)..." : hudedit | button "Put everything back in place" : hudlayoutreset
-2. note: In game: drag the frames with the mouse, right click puts one back, Esc when done.
-== Scoreboard (Tab)
-1. slider "Opacity" scoreboardalpha
-2. note: Lower = see the game through the board
-3. button "Columns" > page scoreboard
-4. checkbox "Show At Death" deathscore
-== Display
-1. checkbox "Show FPS" showfps
-2. checkbox "Wall Clock" wallclock | {if "Wall Clock" ticked (wallclock)} (checkbox "24 Hour" wallclock24 | checkbox "Seconds" wallclocksecs)
-3. checkbox "Damage Screen" damagescreen | checkbox "Damage Compass" damagecompass
-4. checkbox "HUD Guns" hudgun
-5. {if "HUD Guns" ticked (hudgun)} (checkbox "Sway" hudgunsway | checkbox "Muzzle Flash" muzzleflash | checkbox "Muzzle Light" muzzlelight)
-6. text "Weapon Trails" | button "Colours" > page trails
-7. note: Muzzle flash light per weapon (every player; the flash itself stays):
-8. checkbox "Shotgun" muzzlelightshotgun | checkbox "Chaingun" muzzlelightchaingun | checkbox "Rifle" muzzlelightrifle
-9. checkbox "Grenade" muzzlelightgrenadelauncher | checkbox "Pistol" muzzlelightpistol
-10. checkbox "Crosshair Effects" crosshairfx
-11. {if "Crosshair Effects" ticked (crosshairfx)} (checkbox "Health Colors" crosshaircolors | checkbox "Teammates" teamcrosshair | checkbox "Hits" hitcrosshair on=425 | checkbox "Dim while reloading" crosshairreloaddim)
-12. checkbox "Outline Capture Meters" outlinemeters
-13. checkbox "Flag timer (stolen from the enemy base)" flagtimer
-14. checkbox "Big flag messages (taken / scored)" flagfeed
-15. checkbox "Numbered Capture Bases" basenumbers | checkbox "Show Teammates" radarteammates
-16. checkbox "Ammo Bar" ammobar | button "Adjust" > page ammobar
-17. checkbox "Game Clock" gameclock | button "Adjust" > page gameclock
-18. checkbox "HUD Score" hudscore | button "Adjust" > page hudscore
-19. checkbox "Kill Feed" killfeed | button "Adjust" > page killfeed | button "Kills / Deaths (F8)" : togglekilllog
-20. checkbox "react times (view / crosshair ms)" reacttime
-21. checkbox "others' react times (compatible server)" reacttimeall
-22. checkbox "score vs player (kills-deaths)" killfeedvs
-23. "Kill Feed Show" choice killfeedfilter: "All"=0, "Team"=1, "Mine"=2
-24. checkbox "Kill Streak" killstreak | button "Adjust" > page killstreak
-25. note: Every 5 frags. Display only, no bonus.
-== Friends
-1. [ text "Same team" / note: Body, Name, Minimap / colours "Friends colour, same team" friendallycolor | player preview ] | [ text "Other team" / note: Body, Name. / colours "Friends colour, other team" friendenemycolor | player preview ]
-== Team colours
-1. [ text "Teammates" / note: Body, bots too. None: blue. / colours "Teammates colour" teamcolorally | player preview ] | [ text "Enemies" / note: Body, bots too. None: red. / colours "Enemies colour" teamcolorenemy | player preview ]
-2. checkbox "Friends use these colours" friendsfollowteamcolor
-3. note: Free for all: everyone else is an enemy.
+2. note: Drag the frames with the mouse, right click puts one back, Esc when done.
+== On screen
+1. checkbox "Ammo bar" ammobar | button "Adjust..." > page ammobar
+2. checkbox "Game clock" gameclock | button "Adjust..." > page gameclock
+3. checkbox "Score display" hudscore | button "Adjust..." > page hudscore
+4. checkbox "Kill feed" killfeed | button "Adjust..." > page killfeed
+5. checkbox "Kill streak" killstreak | button "Adjust..." > page killstreak
+6. checkbox "Show FPS" showfps | checkbox "Wall clock" wallclock | {if "Wall clock" ticked (wallclock)} (checkbox "24 hour" wallclock24 | checkbox "Seconds" wallclocksecs)
+== When I am hit
+1. checkbox "Red screen flash" damagescreen | checkbox "Arrows showing where it came from" damagecompass
+== Team games
+1. checkbox "Teammates on the minimap" radarteammates
+2. checkbox "Numbered capture bases" basenumbers | checkbox "Outline capture meters" outlinemeters
+3. checkbox "Flag timer (stolen from the enemy base)" flagtimer
+4. checkbox "Big flag messages (taken / dropped / returned / scored)" flagfeed
+== More
+1. button "Crosshair..." > page crosshair | button "Weapons and trails..." > page trails
+2. button "Scoreboard (Tab)..." > page scoreboard | button "Player colours..." > page friends
 
-## friends | FRIENDS | Options > Friends
+## friends | FRIENDS AND COLOURS | Options > Friends and colours
 == (top)
-1. note: Nicks only, colors.
-== Friends
+1. button "Friends" : concat friendsview "=" 0 | button "Player colours" : concat friendsview "=" 1
+2. {if tab "Friends" open} note: Friends are found by nick or clan tag. Colours: see Player colours.
+== Friends {only if tab "Friends" open}
 1. field "Nick" friendaddname (Enter runs addfriend) | {if friendaddname != "" or textfocus() = "friendaddname" and textcurrentline() != ""} button "Add" : addfriend
 2. field "Clan" clantag
 3. note: Tag in the nick counts too
@@ -268,40 +323,41 @@
 9. {if numfriendsonline on and repeated for each i (count known in game: <min $numfriendsonline 10>)} button "<getfriendonlinename $i>" : concat joinfriend <i> | {if numfriendsonline on and repeated for each i (count known in game: <min $numfriendsonline 10>) and getfriendonlinemap(<i>) != ""} note: <getfriendonlinemap $i>
 10. {if not (numfriendsonline on) and numfriends on or clantag != ""} text "<friendscanmsg>"
 11. {if not (numfriendsonline on) and not (numfriends on or clantag != "")} note: Nobody yet
+== Team colours {only if not (tab "Friends" open)}
+1. [ text "Teammates" / note: Body, bots too. None: blue. / colours "Teammates colour" teamcolorally | player preview ] | [ text "Enemies" / note: Body, bots too. None: red. / colours "Enemies colour" teamcolorenemy | player preview ]
+2. note: Free for all: everyone else is an enemy.
+== Friends colours {only if not (tab "Friends" open)}
+1. [ text "Same team" / note: Body, Name, Minimap / colours "Friends colour, same team" friendallycolor | player preview ] | [ text "Other team" / note: Body, Name. / colours "Friends colour, other team" friendenemycolor | player preview ]
+2. checkbox "Friends' bodies use the team colours" friendsfollowteamcolor
 
-## traduction | CHAT TRANSLATION | Options > Chat Translation
+## traduction | Chat Translation | Options > Chat Translation
 also: Chat Translation
 == (top)
-1. note: L4ZY <tradversion>
-2. {if tupdateavail = 3} button "Quit to Finish Update" : quit
-3. {if tupdateavail = 3} text "<tupdatemsg>"
-4. {if not (tupdateavail = 3) and tupdateavail = 2} text "<tupdatelabel>"
-5. {if not (tupdateavail = 3) and tupdateavail = 2} text "<tupdatemsg>"
-6. {if not (tupdateavail = 3) and not (tupdateavail = 2) and tupdateavail on} button "<tupdatelabel>" : tupdateapply
-7. {if not (tupdateavail = 3) and not (tupdateavail = 2) and tupdateavail on} text "<tupdatemsg>"
-8. checkbox "Translate Incoming Chat" translatechat
-9. checkbox "Translate Team Chat" translateteamchat
-10. checkbox "Preview While Typing" translatepreview
-11. checkbox "I Am a Woman" translatefemme
-12. "Auto-Translate" choice translateauto: "Off"=0, "Base Language"=1, "Last Spoken"=2
-== I Read In {in columns side by side}
+1. button "Translation" : concat tradtab "=" 0 | button "Model" : concat tradtab "=" 1 | button "Examples" : concat tradtab "=" 2 | button "Shortcuts and codes" : concat tradtab "=" 3 | button "Commands" : concat tradtab "=" 4
+2. {if tab "Translation" open} note: L4ZY <tradversion>
+3. {if tab "Translation" open and tupdateavail = 3} button "Quit to Finish Update" : quit
+4. {if tab "Translation" open and tupdateavail = 3} text "<tupdatemsg>"
+5. {if tab "Translation" open and not (tupdateavail = 3) and tupdateavail = 2} text "<tupdatelabel>"
+6. {if tab "Translation" open and not (tupdateavail = 3) and tupdateavail = 2} text "<tupdatemsg>"
+7. {if tab "Translation" open and not (tupdateavail = 3) and not (tupdateavail = 2) and tupdateavail on} button "<tupdatelabel>" : tupdateapply
+8. {if tab "Translation" open and not (tupdateavail = 3) and not (tupdateavail = 2) and tupdateavail on} text "<tupdatemsg>"
+== Translate {only if tab "Translation" open}
+1. checkbox "Translate incoming chat" translatechat
+2. checkbox "Translate team chat" translateteamchat
+3. checkbox "Preview while typing" translatepreview
+4. checkbox "I am a woman (feminine grammar)" translatefemme
+5. "Auto-translate" choice translateauto: "Off"=0, "Base language"=1, "Last spoken"=2
+== I read in {only if tab "Translation" open}
 1. button "English" : concat translatelang en | button "French" : concat translatelang fr | button "German" : concat translatelang de | button "Spanish" : concat translatelang es | button "Russian" : concat translatelang ru
 2. button "Portuguese" : concat translatelang pt | button "Italian" : concat translatelang it | button "Polish" : concat translatelang pl | button "Dutch" : concat translatelang nl | button "Swedish" : concat translatelang sv
 3. field "Other" translatelang
-== I Send In {in columns side by side}
+== I send in {only if tab "Translation" open}
 1. button "English" : concat translateoutlang en | button "French" : concat translateoutlang fr | button "German" : concat translateoutlang de | button "Spanish" : concat translateoutlang es | button "Russian" : concat translateoutlang ru
 2. button "Portuguese" : concat translateoutlang pt | button "Italian" : concat translateoutlang it | button "Polish" : concat translateoutlang pl | button "Dutch" : concat translateoutlang nl | button "Swedish" : concat translateoutlang sv
 3. field "Other" translateoutlang
-== Codes {in columns side by side}
-1. {if repeated for each i (count known in game: 9)} (text "<at $TRAD_readme_codes (+ $arg1 $i)> : <at $TRAD_readme_names (+ $arg1 $i)>" | text "<at $TRAD_readme_codes (+ $arg1 $i)> : <at $TRAD_readme_names (+ $arg1 $i)>") | {if repeated for each i (count known in game: 8)} text "<at $TRAD_readme_codes (+ $arg1 $i)> : <at $TRAD_readme_names (+ $arg1 $i)>"
-== Shortcuts
-1. button "Mute Translation (F7)" : toggletranslate
-2. button "Expanded Chat (F10)" : togglechat
-3. button "Retranslate Last Line (F9)" : tretry
-4. slider "Expanded Chat Size" fullchatsize
-5. button "Service Status" : translatestatus
-== Model
-1. text "Local Qwen or Internet API"
+4. note: The active language is green. Other codes: Shortcuts and codes.
+== Model {only if tab "Model" open}
+1. note: Local Qwen or Internet API.
 2. text "<tmodelstatus>"
 3. text "<tmodelhint>"
 4. note: Official Qwen (Apache-2.0). Install Small, Normal or Large here.
@@ -312,180 +368,242 @@ also: Chat Translation
 9. button "Open custom model folder" : openfolder models
 10. {if tmodelcustomcount on and repeated for each i (count known in game: <tmodelcustomcount>)} (text "<tmodelcustomname $i>" | button "Use" : concat tmodelcustomuse <i> | button "Delete" : concat tmodelcustomdel <i>)
 11. {if not (tmodelcustomcount on)} note: No custom file yet
-12. text "Internet API (OpenAI-compatible)"
-13. field "Address" tmodelurl
-14. field "API Key" tmodelkey
-15. field "Model" tmodelapimodel
-16. note: Model empty = auto. Save does not show the key again.
-17. button "Save API" : tmodelsaveapi | button "Clear API Key" : tmodelclearapi
-== Examples
-1. text "Few-shot examples: more = more work for the AI (slower)"
+== Internet API (OpenAI-compatible) {only if tab "Model" open}
+1. field "Address" tmodelurl
+2. field "API Key" tmodelkey
+3. field "Model" tmodelapimodel
+4. note: Model empty = auto. Save does not show the key again.
+5. button "Save API" : tmodelsaveapi | button "Clear API Key" : tmodelclearapi
+== Examples {only if tab "Examples" open}
+1. status: Few-shot examples: more = more work for the AI (slower)
 2. note: Exact translation: this phrase only, does not slow the AI.
-3. note: Keep as many as you want. = means leave untranslated.
-4. note: /tfix uses the same choice as this page.
-5. text "<texamplestatus>"
-6. text "Language"
-7. button "English" : concat texamplesetlang en | button "French" : concat texamplesetlang fr | button "German" : concat texamplesetlang de | button "Spanish" : concat texamplesetlang es | button "Russian" : concat texamplesetlang ru
-8. button "Portuguese" : concat texamplesetlang pt | button "Italian" : concat texamplesetlang it | button "Polish" : concat texamplesetlang pl | button "Dutch" : concat texamplesetlang nl | button "Swedish" : concat texamplesetlang sv
-9. field "Other" texamplelang (Enter runs texamplerefresh)
-10. "Direction" choice texampledir: "Incoming Chat"=0, "What I Send"=1
-11. "Save As" choice texamplekind: "Exact Translation"=0, "Few-Shot Example"=1
-12. {if "I Am a Woman" ticked (translatefemme)} note: I Am a Woman is on: feminine examples are included
-13. {if not ("I Am a Woman" ticked (translatefemme))} note: I Am a Woman is off: feminine-only examples stay hidden
-14. field "Original Phrase" texamplesrc
-15. field "How It Should Read" texampledst
-16. button "Save" : texamplesave | button "Forget This Original" : texampleforgetsrc | button "Reload List" : texamplerefresh
-17. {if texamplecount on and repeated for each i (count known in game: <texamplecount>)} (text "<texampleline $i>" | button "Edit" : concat texampleload <i> | button "Forget" : concat texampleforget <i>)
-18. {if not (texamplecount on)} note: No examples in this list yet
-== Commands
+3. note: Keep as many as you want. = means leave untranslated. /tfix: same choice.
+4. text "<texamplestatus>"
+5. button "English" : concat texamplesetlang en | button "French" : concat texamplesetlang fr | button "German" : concat texamplesetlang de | button "Spanish" : concat texamplesetlang es | button "Russian" : concat texamplesetlang ru
+6. button "Portuguese" : concat texamplesetlang pt | button "Italian" : concat texamplesetlang it | button "Polish" : concat texamplesetlang pl | button "Dutch" : concat texamplesetlang nl | button "Swedish" : concat texamplesetlang sv
+7. field "Other" texamplelang (Enter runs texamplerefresh)
+8. "Direction" choice texampledir: "Incoming Chat"=0, "What I Send"=1
+9. "Save as" choice texamplekind: "Exact Translation"=0, "Few-Shot Example"=1
+10. {if "I am a woman (feminine grammar)" ticked (translatefemme)} note: I am a woman is on: feminine examples are included
+11. {if not ("I am a woman (feminine grammar)" ticked (translatefemme))} note: I am a woman is off: feminine-only examples stay hidden
+12. field "Original Phrase" texamplesrc
+13. field "How It Should Read" texampledst
+14. button "Save" : texamplesave | button "Forget This Original" : texampleforgetsrc | button "Reload List" : texamplerefresh
+15. {if texamplecount on and repeated for each i (count known in game: <texamplecount>)} (text "<texampleline $i>" | button "Edit" : concat texampleload <i> | button "Forget" : concat texampleforget <i>)
+16. {if not (texamplecount on)} note: No examples in this list yet
+== Shortcuts {only if tab "Shortcuts and codes" open}
+1. button "Mute Translation (F7)" : toggletranslate
+2. button "Expanded Chat (F10)" : togglechat
+3. button "Retranslate Last Line (F9)" : tretry
+4. button "Service Status" : translatestatus
+5. slider "Expanded Chat Size" fullchatsize
+6. note: Keys: Options > Keys > Chat and game.
+== Language codes {only if tab "Shortcuts and codes" open}
+1. {if repeated for each i (count known in game: 9)} (text "<at $TRAD_readme_codes (+ $arg1 $i)> : <at $TRAD_readme_names (+ $arg1 $i)>" | text "<at $TRAD_readme_codes (+ $arg1 $i)> : <at $TRAD_readme_names (+ $arg1 $i)>") | {if repeated for each i (count known in game: 8)} text "<at $TRAD_readme_codes (+ $arg1 $i)> : <at $TRAD_readme_names (+ $arg1 $i)>"
+== Commands {only if tab "Commands" open}
 1. note: /say always sends as typed
 2. note: /tsay always uses I Send In
 3. note: /trep replies in the last player's language
 4. note: /to name hello : @name, follows Auto-Translate. Tab completes
 5. note: /sayto name hello : @name, as typed
 6. note: /tsayto name hello : @name, I Send In
-7. note: /trepto name hello : @name, that player's language
-8. note: /tfix better : last chat line was wrong (exact or example, see Examples)
-9. note: /tfixout better : last line you sent was wrong
-10. note: /tretry or F9 : last chat, MOTD or [INFO] (not assists)
-11. note: /tretry 12 : retranslate F10 line 12 (numbers on the left)
-12. text "/tsayde hello"
-13. note: Replace de with a language code
-14. text "/tsaytde hello"
-15. note: Same codes, team chat
-16. text "/toteam /saytoteam /tsaytoteam /treptoteam"
-17. note: Same as /to /sayto /tsayto /trepto, team chat
-18. text "/trepteam same as /trep, team chat"
+7. note: /tsayr hello : careful translation, slower (a few s), sent only if it works
+8. note: /tsayteamr hello : same, team chat
+9. note: /trepto name hello : @name, that player's language
+10. note: /tfix better : last chat line was wrong (exact or example, see Examples)
+11. note: /tfixout better : last line you sent was wrong
+12. note: /tretry or F9 : last chat, MOTD or [INFO] (not assists)
+13. note: /tretry 12 : retranslate F10 line 12 (numbers on the left)
+14. text "/tsayde hello"
+15. note: Replace de with a language code
+16. text "/tsaytde hello"
+17. note: Same codes, team chat
+18. text "/toteam /saytoteam /tsaytoteam /treptoteam"
+19. note: Same as /to /sayto /tsayto /trepto, team chat
+20. text "/trepteam same as /trep, team chat"
 
-## console | CONSOLE | Options > Console
+## console | Console and chat | Options > Console and chat
 == (top)
-1. checkbox "chat console" miniconfilter on=0x300
-2. slider "console size (lines)" consize
-3. text "console filter:"
-4. [ flag "important information" confilter 0x11 / flag "warnings" confilter 0x02 / flag "errors" confilter 0x04 / flag "script messages" confilter 0x20 ] | [ flag "chat" confilter 0x100 / flag "team chat" confilter 0x200 / flag "game events" confilter 0x400 ] | [ flag "self frags" confilter 0x800 / flag "other player frags" confilter 0x1000 / flag "team kills" confilter 0x2000 ]
-5. slider "full console size (percent of screen)" fullconsize
-6. text "full console filter:"
-7. [ flag "important information" fullconfilter 0x11 / flag "warnings" fullconfilter 0x02 / flag "errors" fullconfilter 0x04 / flag "script messages" fullconfilter 0x20 ] | [ flag "chat" fullconfilter 0x100 / flag "team chat" fullconfilter 0x200 / flag "game events" fullconfilter 0x400 ] | [ flag "self frags" fullconfilter 0x800 / flag "other player frags" fullconfilter 0x1000 / flag "team kills" fullconfilter 0x2000 ]
-8. button "Kills / Deaths Log (F8)" : togglekilllog
-9. slider "Kills / Deaths Log Size" fullkilllogsize
-10. button "Expanded Chat (F10)" : togglechat
-11. slider "Expanded Chat Size" fullchatsize
-12. note: Chat only. Numbered lines, mouse wheel to scroll.
-13. note: Ctrl+C copies all. Ctrl+Shift+C = visible. Drag to copy a range.
-== Config
-1. button "Edit autoexec.cfg" > page optionscfg
-2. button "Import settings from another client" > page importsettings
-3. button "Restore Defaults (Clears All Settings)" : exec "restore.cfg"; LOOK_retire; LOOK_apply
+1. button "Console and chat box" : concat consoletab "=" 0 | button "Full screen (F10, F11)" : concat consoletab "=" 1
+== Console (top left) {only if tab "Console and chat box" open}
+1. slider "Lines shown" consize
+2. note: What it shows:
+3. [ flag "important information" confilter 0x11 / flag "warnings" confilter 0x02 / flag "errors" confilter 0x04 / flag "script messages" confilter 0x20 ] | [ flag "chat" confilter 0x100 / flag "team chat" confilter 0x200 / flag "game events" confilter 0x400 ] | [ flag "self frags" confilter 0x800 / flag "other player frags" confilter 0x1000 / flag "team kills" confilter 0x2000 ]
+== Chat box (bottom left) {only if tab "Console and chat box" open}
+1. checkbox "Chat in its own box" miniconfilter on=0x300
+2. note: Kill feed and frag messages: Options > HUD > Kill feed.
+== Full console (F11) {only if tab "Full screen (F10, F11)" open}
+1. slider "Size (percent of screen)" fullconsize
+2. note: What it shows:
+3. [ flag "important information" fullconfilter 0x11 / flag "warnings" fullconfilter 0x02 / flag "errors" fullconfilter 0x04 / flag "script messages" fullconfilter 0x20 ] | [ flag "chat" fullconfilter 0x100 / flag "team chat" fullconfilter 0x200 / flag "game events" fullconfilter 0x400 ] | [ flag "self frags" fullconfilter 0x800 / flag "other player frags" fullconfilter 0x1000 / flag "team kills" fullconfilter 0x2000 ]
+== Expanded chat (F10) {only if tab "Full screen (F10, F11)" open}
+1. button "Open expanded chat (F10)" : togglechat
+2. slider "Expanded Chat Size" fullchatsize
+3. note: Chat only. Numbered lines, mouse wheel to scroll.
+4. note: Ctrl+C copies all. Ctrl+Shift+C = visible. Drag to copy a range.
 
-## record | RECORD | Options > Recording
+## record | Recording | Options > Recording
 == (top)
+1. button "Match videos" : concat recordtab "=" 0 | button "Demos (HD aim)" : concat recordtab "=" 1
+== Match videos {only if tab "Match videos" open}
 1. {if matchrecord on} button "Match Recording: ON" : togglematchrecord
 2. {if not (matchrecord on)} button "Match Recording: OFF" : togglematchrecord
 3. slider "Quality: <matchrecqname>" matchrecquality
 4. slider "Videos to Keep (oldest deleted automatically)" matchkeep
-5. text "Saved in My Games / L4ZY / recordings"
-6. button "Open Folder" : openfolder recordings
-7. {if nummatchrecs() > 0 and repeated for each i (count known in game: <nummatchrecs>)} (text "<matchrecname $i>" | button "Extract" : matchrecextract <i>)
-8. {if not (nummatchrecs() > 0)} text "No Recordings Yet"
-9. text "Extract copies the file"
-10. {if demohdrecord on} button "Demo + HD Aim: ON" : toggledemorecord
-11. {if not (demohdrecord on)} button "Demo + HD Aim: OFF" : toggledemorecord
-12. text "Aim recorded on this machine, not server truth"
-13. slider "Demos to Keep (oldest deleted automatically)" demokeep
-14. slider "Live HD spectating delay in ms (same for every player)" hdlivedelay
-15. text "Put both files in this folder (same names, not a subfolder)"
-16. button "<localdemofolder>" : openfolder demo
-17. text "The game's demo folder works too"
-18. {if numlocaldemos() > 0 and repeated for each i (count known in game: <numlocaldemos>)} (text "<localdemoname $i>" | button "Play" : playlocaldemo <i> | button "Extract" : localdemoextract <i>)
-19. {if not (numlocaldemos() > 0)} text "No Local Demos Yet"
-20. text "Extract copies the .dmo and the HD file together"
+== Saved videos {only if tab "Match videos" open}
+1. text "My Games / L4ZY / recordings" | button "Open Folder" : openfolder recordings
+2. {if nummatchrecs() > 0 and repeated for each i (count known in game: <nummatchrecs>)} (text "<matchrecname $i>" | button "Extract" : matchrecextract <i>)
+3. {if not (nummatchrecs() > 0)} note: No Recordings Yet
+4. note: Extract copies the file.
+== Demos with HD aim {only if tab "Demos (HD aim)" open}
+1. {if demohdrecord on} button "Demo + HD Aim: ON" : toggledemorecord
+2. {if not (demohdrecord on)} button "Demo + HD Aim: OFF" : toggledemorecord
+3. checkbox "Record enemy visibility in HD demos" demohdvis
+4. note: Which enemies were really on your screen, for studying demos. Never shown in game.
+5. note: Aim recorded on this machine, not server truth.
+6. slider "Demos to Keep (oldest deleted automatically)" demokeep
+7. slider "Live HD spectating delay in ms (same for every player)" hdlivedelay
+== Saved demos {only if tab "Demos (HD aim)" open}
+1. note: Put both files in this folder (same names, not a subfolder):
+2. button "<localdemofolder>" : openfolder demo
+3. note: The game's demo folder works too.
+4. {if numlocaldemos() > 0 and repeated for each i (count known in game: <numlocaldemos>)} (text "<localdemoname $i>" | button "Play" : playlocaldemo <i> | button "Extract" : localdemoextract <i>)
+5. {if not (numlocaldemos() > 0)} note: No Local Demos Yet
+6. note: Extract copies the .dmo and the HD file together.
 
-## crosshair | Crosshair | Options > Mouse > crosshair:
+## importsettings | Import settings | Options > Import settings from another client
 == (top)
-1. slider "crosshair size" crosshairsize
+1. text "Copies keys, name, options, servers and friends"
+2. text "from another client into L4ZY."
+3. {if importsrccount() = 0} note: No other client found in My Games.
+4. {if repeated for each i (count known in game: <importsrccount>)} button "<if (= $importsel $i) [result "> "] [result ""]><importsrclabel $i>" : importsel = <i>
+5. button "<if (= $importsel -1) [result "> "] [result ""]>Another folder (type it below)" : importsel = -1
+6. field importdir (Enter runs importsel = -1)
+7. note: Example: C:\Games\Sauerbraten (the folder that holds config.cfg)
+8. {if importsel >= -1 and tab "<if (= $importsel -1) [result "> "] [result ""]>Another folder (type it below)" open} note: From: <guifieldtext importdir>
+9. {if importsel >= -1 and not (tab "<if (= $importsel -1) [result "> "] [result ""]>Another folder (type it below)" open)} note: From: <importsrcfolder $importsel>
+10. {if importsel >= -1} button "<if (importrestartable) [result "Import and restart"] [result "Import at next start"]>" : importsettingsfrom $importsel (guifieldtext i...
+11. {if not (importsel >= -1)} note: Pick a client above.
+12. note: Your current settings are kept as config.cfg.before-import.bak
+13. {if not (strcmp(importlastresult() ))} note: Last time: <importlastresult>
+
+## crosshair | Crosshair | Options > Mouse > Crosshair...
+== Look
+1. slider "Size" crosshairsize
 2. colours "Crosshair colour (hex)" crosshaircolour
-3. {if repeated for each row (count known in game: <div (+ (listlen $crosshairs) 6) 7>) and repeated for each col (count known in game: 7) and <ch> != ""} button "image" : cleargui 1 loadcrosshair @(at <ch> 0) 0 loadc...
+3. note: Click an image to use it:
+4. {if repeated for each row (count known in game: <div (+ (listlen $crosshairs) 6) 7>) and repeated for each col (count known in game: 7) and <ch> != ""} button "image" : cleargui 1 loadcrosshair @(at <ch> 0) 0 loadc...
+== Effects
+1. checkbox "Crosshair effects" crosshairfx
+2. {if "Crosshair effects" ticked (crosshairfx)} [ checkbox "Colour shows my health" crosshaircolors / checkbox "Other crosshair on teammates" teamcrosshair / checkbox "Hit marker" hitcrosshair on=425 / checkbox "Dim while reloading" crosshairreloaddim ]
 
-## scoreboard | Scoreboard | Options > HUD > Columns
+## ammobar | Ammo Bar | Options > HUD > Adjust... (next to Ammo bar)
 == (top)
-1. text "Tab in-game. Each box is one column."
+1. checkbox "Show the ammo bar" ammobar
+== Layout
+1. "Align" choice ammobaralign: "Left"=-1, "Centre"=0, "Right"=1
+2. checkbox "Horizontal" ammobarhorizontal
+3. checkbox "Flip" ammobarflip
+4. checkbox "Hide weapons without ammo" ammobarhideempty
+5. slider "Space between weapons" ammobarsep
+6. slider "Space before the ammo count" ammobarcountsep
+== Size and place
+1. note: Easier: Options > HUD > Move HUD parts.
+2. field "Ammo count size" ammobarcountscale | button "-" : ammobarcountscale (+fround $ammobarcountscale... | button "+" : ammobarcountscale (+fround $ammobarcountscale...
+3. field "Size" ammobarscale | button "-" : ammobarscale (+fround $ammobarscale -0.01) | button "+" : ammobarscale (+fround $ammobarscale 0.01)
+4. field "Position X" ammobarx | button "-" : ammobarx (+fround $ammobarx -0.01) | button "+" : ammobarx (+fround $ammobarx 0.01)
+5. field "Position Y" ammobary | button "-" : ammobary (+fround $ammobary -0.01) | button "+" : ammobary (+fround $ammobary 0.01)
+
+## gameclock | Game Clock | Options > HUD > Adjust... (next to Game clock)
+== (top)
+1. checkbox "Show the game clock" gameclock
+== Look
+1. "Align" choice gameclockalign: "Left"=-1, "Centre"=0, "Right"=1
+2. slider "Opacity (0 to 255)" gameclockalpha
+== Size and place
+1. note: Easier: Options > HUD > Move HUD parts.
+2. field "Size" gameclockscale | button "-" : gameclockscale (+fround $gameclockscale -0.01) | button "+" : gameclockscale (+fround $gameclockscale 0.01)
+3. field "Position X" gameclockx | button "-" : gameclockx (+fround $gameclockx -0.01) | button "+" : gameclockx (+fround $gameclockx 0.01)
+4. field "Position Y" gameclocky | button "-" : gameclocky (+fround $gameclocky -0.01) | button "+" : gameclocky (+fround $gameclocky 0.01)
+
+## hudscore | HUD Score | Options > HUD > Adjust... (next to Score display)
+== (top)
+1. checkbox "Show the score" hudscore
+== Look
+1. "Align" choice hudscorealign: "Left"=-1, "Centre"=0, "Right"=1
+2. slider "Opacity (0 to 255)" hudscorealpha
+3. slider "Space between the two scores" hudscoresep
+== Size and place
+1. note: Easier: Options > HUD > Move HUD parts.
+2. field "Size" hudscorescale | button "-" : hudscorescale (+fround $hudscorescale -0.01) | button "+" : hudscorescale (+fround $hudscorescale 0.01)
+3. field "Position X" hudscorex | button "-" : hudscorex (+fround $hudscorex -0.01) | button "+" : hudscorex (+fround $hudscorex 0.01)
+4. field "Position Y" hudscorey | button "-" : hudscorey (+fround $hudscorey -0.01) | button "+" : hudscorey (+fround $hudscorey 0.01)
+
+## killfeed | Kill Feed | Options > HUD > Adjust... (next to Kill feed)
+== (top)
+1. checkbox "Show the kill feed" killfeed
+== What it shows
+1. "Frags" choice killfeedfilter: "All"=0, "Team"=1, "Mine"=2
+2. checkbox "My reaction times (view / crosshair, ms)" reacttime
+3. checkbox "Other players' reaction times (compatible server)" reacttimeall
+4. checkbox "Score against each player (kills-deaths)" killfeedvs
+5. checkbox "Also write frags in the console" killfeedconsole
+== Look
+1. "Align" choice killfeedalign: "Left"=-1, "Centre"=0, "Right"=1
+2. slider "Fade after (seconds)" killfeedfade
+3. slider "Lines at most" killfeedmax
+4. field "Size" killfeedscale | button "-" : killfeedscale (+fround $killfeedscale -0.01) | button "+" : killfeedscale (+fround $killfeedscale 0.01)
+5. field "Position X" killfeedx | button "-" : killfeedx (+fround $killfeedx -0.01) | button "+" : killfeedx (+fround $killfeedx 0.01)
+6. field "Position Y" killfeedy | button "-" : killfeedy (+fround $killfeedy -0.01) | button "+" : killfeedy (+fround $killfeedy 0.01)
+== Kills / deaths log (F8)
+1. button "Open the log (F8)" : togglekilllog
+2. slider "Log size (percent of screen)" fullkilllogsize
+
+## killstreak | Kill Streak | Options > HUD > Adjust... (next to Kill streak)
+== (top)
+1. checkbox "Show kill streaks (display only, no bonus)" killstreak
+== What it shows
+1. checkbox "Also other players' streaks" killstreakothers
+2. checkbox "A teamkill breaks the streak" killstreaktk
+3. slider "Announce every N frags" killstreakstep
+== Look
+1. slider "Fade after (seconds)" killstreakfade
+2. "Align" choice killstreakalign: "Left"=-1, "Centre"=0, "Right"=1
+3. note: Easier: Options > HUD > Move HUD parts.
+4. field "Size" killstreakscale | button "-" : killstreakscale (+fround $killstreakscale -0.01) | button "+" : killstreakscale (+fround $killstreakscale 0.01)
+5. field "Position X" killstreakx | button "-" : killstreakx (+fround $killstreakx -0.01) | button "+" : killstreakx (+fround $killstreakx 0.01)
+6. field "Position Y" killstreaky | button "-" : killstreaky (+fround $killstreaky -0.01) | button "+" : killstreaky (+fround $killstreaky 0.01)
+
+## trails | Weapons and trails | Options > HUD > Weapons and trails...
+== My gun
+1. checkbox "Show my gun" hudgun
+2. {if "Show my gun" ticked (hudgun)} checkbox "Sway when I move" hudgunsway
+== Muzzle flashes (every player)
+1. checkbox "Flash" muzzleflash
+2. checkbox "Light (lights walls and players when shooting)" muzzlelight
+3. {if "Light (lights walls and players when shooting)" ticked (muzzlelight)} note: Light per weapon:
+4. {if "Light (lights walls and players when shooting)" ticked (muzzlelight)} ([ checkbox "Shotgun" muzzlelightshotgun / checkbox "Chaingun" muzzlelightchaingun / checkbox "Rifle" muzzlelightrifle ] | [ checkbox "Grenade" muzzlelightgrenadelauncher / checkbox "Pistol" muzzlelightpistol ])
+== Trail colours
+1. note: Your view only: nothing is sent, size and duration stay stock.
+2. button "Me..." > page trailsme | button "Others..." > page trailsothers | button "All..." > page trailsall
+3. note: Me: my shots. Others: everyone else. All: every shot without its own.
+4. slider "Brightness of custom colours" trailbrightness
+5. button "Back to stock colours" : trailcolorreset
+6. note: Rockets and grenades also have a projectile colour (glow and explosion).
+7. button "Projectiles and explosions back to stock" : projcolorreset
+
+## scoreboard | Scoreboard | Options > HUD > Scoreboard (Tab)...
+== (top)
+1. note: Shown while you hold Tab.
+== Board
+1. slider "Opacity" scoreboardalpha
+2. note: Lower = see the game through the board
+3. checkbox "Show it when I die" deathscore
+== Columns
+1. note: Each box is one column.
 2. [ checkbox "Server name" showservinfo / checkbox "Frags" showfrags / checkbox "Frags in CTF / Collect" hidefrags on=0 off=1 / checkbox "Deaths" showdeaths / checkbox "K/D" showkd / checkbox "Flags / skulls" showflags / checkbox "Accuracy" showaccuracy / checkbox "Languages" showlang / checkbox "Vs you (kills-deaths)" showvs / checkbox "Status (dead / lag)" showstatus ] | [ checkbox "Ping" showping / checkbox "Packet jump" showpj / checkbox "Client number" showclientnum / checkbox "Spectators" showspectators / checkbox "Highlight me" highlightscore / checkbox "Connecting players" showconnecting ]
 
-## trails | Weapon Trails | Options > HUD > Colours
-== (top)
-1. note: Your view only: nothing is sent, size and duration stay stock.
-2. button "Me: my shots..." > page trailsme
-3. button "Others: everyone else, any team..." > page trailsothers
-4. button "All: every shot, unless Me / Others says otherwise..." > page trailsall
-5. slider "Brightness of custom colours" trailbrightness
-6. button "Back to stock colours" : trailcolorreset
-7. note: Rockets and grenades also have a projectile colour (in each page above):
-8. note: the glow in flight and the explosion. With RT, their light takes it, not the smoke's.
-9. button "Projectiles and explosions back to stock" : projcolorreset
-
-## ammobar | Ammo Bar | Options > HUD > Adjust (next to Ammo Bar)
-== (top)
-1. checkbox "AmmoBar" ammobar
-2. "AmmoBarAlign" choice ammobaralign: "-1"=-1, "0"=0, "1"=1
-3. checkbox "AmmoBarHorizontal" ammobarhorizontal
-4. checkbox "AmmoBarFlip" ammobarflip
-5. checkbox "AmmoBarHideEmpty" ammobarhideempty
-6. slider "AmmoBarSep" ammobarsep
-7. slider "AmmoBarCountSep" ammobarcountsep
-8. field "AmmoBarCountScale" ammobarcountscale | button "-" : ammobarcountscale (+fround $ammobarcountscale... | button "+" : ammobarcountscale (+fround $ammobarcountscale...
-9. field "AmmoBarScale" ammobarscale | button "-" : ammobarscale (+fround $ammobarscale -0.01) | button "+" : ammobarscale (+fround $ammobarscale 0.01)
-10. field "AmmoBarX" ammobarx | button "-" : ammobarx (+fround $ammobarx -0.01) | button "+" : ammobarx (+fround $ammobarx 0.01)
-11. field "AmmoBarY" ammobary | button "-" : ammobary (+fround $ammobary -0.01) | button "+" : ammobary (+fround $ammobary 0.01)
-
-## gameclock | Game Clock | Options > HUD > Adjust (next to Game Clock)
-== (top)
-1. checkbox "GameClock" gameclock
-2. "GameClockAlign" choice gameclockalign: "-1"=-1, "0"=0, "1"=1
-3. slider "GameClockAlpha" gameclockalpha
-4. field "GameClockScale" gameclockscale | button "-" : gameclockscale (+fround $gameclockscale -0.01) | button "+" : gameclockscale (+fround $gameclockscale 0.01)
-5. field "GameClockX" gameclockx | button "-" : gameclockx (+fround $gameclockx -0.01) | button "+" : gameclockx (+fround $gameclockx 0.01)
-6. field "GameClockY" gameclocky | button "-" : gameclocky (+fround $gameclocky -0.01) | button "+" : gameclocky (+fround $gameclocky 0.01)
-
-## hudscore | HUD Score | Options > HUD > Adjust (next to HUD Score)
-== (top)
-1. checkbox "HUDScore" hudscore
-2. "HUDScoreAlign" choice hudscorealign: "-1"=-1, "0"=0, "1"=1
-3. slider "HUDScoreAlpha" hudscorealpha
-4. slider "HUDScoreSep" hudscoresep
-5. field "HUDScoreScale" hudscorescale | button "-" : hudscorescale (+fround $hudscorescale -0.01) | button "+" : hudscorescale (+fround $hudscorescale 0.01)
-6. field "HUDScoreX" hudscorex | button "-" : hudscorex (+fround $hudscorex -0.01) | button "+" : hudscorex (+fround $hudscorex 0.01)
-7. field "HUDScoreY" hudscorey | button "-" : hudscorey (+fround $hudscorey -0.01) | button "+" : hudscorey (+fround $hudscorey 0.01)
-
-## killfeed | Killfeed | Options > HUD > Adjust (next to Kill Feed)
-== (top)
-1. checkbox "Killfeed" killfeed
-2. checkbox "also show frags in console" killfeedconsole
-3. checkbox "react times (view / crosshair ms)" reacttime
-4. checkbox "others' react times (compatible server)" reacttimeall
-5. checkbox "score vs player (kills-deaths)" killfeedvs
-6. "show" choice killfeedfilter: "all"=0, "team"=1, "mine"=2
-7. "Align" choice killfeedalign: "left"=-1, "centre"=0, "right"=1
-8. slider "Fade (s)" killfeedfade
-9. slider "Max lines" killfeedmax
-10. field "Scale" killfeedscale | button "-" : killfeedscale (+fround $killfeedscale -0.01) | button "+" : killfeedscale (+fround $killfeedscale 0.01)
-11. field "Position X" killfeedx | button "-" : killfeedx (+fround $killfeedx -0.01) | button "+" : killfeedx (+fround $killfeedx 0.01)
-12. field "Position Y" killfeedy | button "-" : killfeedy (+fround $killfeedy -0.01) | button "+" : killfeedy (+fround $killfeedy 0.01)
-13. button "kills / deaths log (F8)" : togglekilllog
-14. slider "log size" fullkilllogsize
-
-## killstreak | Killstreak | Options > HUD > Adjust (next to Kill Streak)
-== (top)
-1. checkbox "Killstreak (display only, no bonus)" killstreak
-2. checkbox "also show other players" killstreakothers
-3. checkbox "teamkill breaks streak" killstreaktk
-4. slider "announce every N frags" killstreakstep
-5. slider "KillstreakFade" killstreakfade
-6. "KillstreakAlign" choice killstreakalign: "-1"=-1, "0"=0, "1"=1
-7. field "KillstreakScale" killstreakscale | button "-" : killstreakscale (+fround $killstreakscale -0.01) | button "+" : killstreakscale (+fround $killstreakscale 0.01)
-8. field "KillstreakX" killstreakx | button "-" : killstreakx (+fround $killstreakx -0.01) | button "+" : killstreakx (+fround $killstreakx 0.01)
-9. field "KillstreakY" killstreaky | button "-" : killstreaky (+fround $killstreaky -0.01) | button "+" : killstreaky (+fround $killstreaky 0.01)
-
-## trailsme | Weapon Trails: Me | Options > HUD > Colours > Me: my shots...
+## trailsme | Weapon Trails: Me | Options > HUD > Weapons and trails... > Me...
 == (top)
 1. note: My shots. same as All = use the All colour.
 2. text "Shotgun"
@@ -505,7 +623,7 @@ also: Chat Translation
 16. text "Grenade (projectile and explosion)"
 17. colours "Grenade projectile colour, me" projmycolorgrenadelauncher
 
-## trailsothers | Weapon Trails: Others | Options > HUD > Colours > Others: everyone else, any team...
+## trailsothers | Weapon Trails: Others | Options > HUD > Weapons and trails... > Others...
 == (top)
 1. note: Everyone else (players, bots), any team. same as All = use the All colour.
 2. text "Shotgun"
@@ -525,7 +643,7 @@ also: Chat Translation
 16. text "Grenade (projectile and explosion)"
 17. colours "Grenade projectile colour, others" projothercolorgrenadelauncher
 
-## trailsall | Weapon Trails: All | Options > HUD > Colours > All: every shot, unless Me / Others says otherwise...
+## trailsall | Weapon Trails: All | Options > HUD > Weapons and trails... > All...
 == (top)
 1. note: Every shot, unless Me / Others has its own colour. stock = the game's colour.
 2. text "Shotgun"
@@ -879,7 +997,7 @@ also: Chat Translation
 1. field "<generated by assistantgui>" assistq (Enter runs assistantask $assistq; assistq = "")
 2. button "Send" : assistantask (guifieldtext assistq); assistq ... | button "New conversation" : assistantclear | checkbox "Think first (slower, smarter)" assistantthink
 
-## optionscfg | autoexec.cfg | Options > Console > Edit autoexec.cfg
+## optionscfg | autoexec.cfg | Options > Edit autoexec.cfg
 == (top)
 1. text "<text editor of autoexec.cfg>"
 

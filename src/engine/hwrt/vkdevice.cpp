@@ -544,6 +544,34 @@ int hwrtfindmemtype(uint32_t typebits, VkMemoryPropertyFlags props)
     return -1;
 }
 
+// HOST_VISIBLE|HOST_COHERENT alone picks system memory on NVIDIA, so every shader
+// read of such a buffer crosses the bus. The BAR window is video memory the CPU
+// can still write through a mapping. Without Resizable BAR it is 256 MB shared
+// with the driver, so at most a quarter of it (64 MB) is ever taken here.
+static VkDeviceSize hwrtbarused = 0;
+
+int hwrtfindbarmemtype(uint32_t typebits, VkDeviceSize size)
+{
+    const VkMemoryPropertyFlags want = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT|VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    loopi(int(hwrtdev.memprops.memoryTypeCount))
+    {
+        if(!(typebits&(1U<<i))) continue;
+        const VkMemoryType &t = hwrtdev.memprops.memoryTypes[i];
+        if((t.propertyFlags&want) != want) continue;
+        VkDeviceSize heap = hwrtdev.memprops.memoryHeaps[t.heapIndex].size;
+        VkDeviceSize cap = min(heap/4, VkDeviceSize(64) << 20);
+        if(hwrtbarused + size > cap) return -1;
+        return i;
+    }
+    return -1;
+}
+
+void hwrtbaraccount(VkDeviceSize size, bool add)
+{
+    if(add) hwrtbarused += size;
+    else hwrtbarused = size < hwrtbarused ? hwrtbarused - size : 0;
+}
+
 // Runs on the start-up worker thread (vkworker below), never on the main
 // thread: nothing in here touches GL, and every step is timed and named so a
 // report shows which driver call did not come back. On failure the main thread

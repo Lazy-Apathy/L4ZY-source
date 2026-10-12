@@ -58,7 +58,7 @@ void main()
     rayQueryEXT q;
     // WORLD|MODEL: skip the first-person body (SELF = 0x04). Hitting it would
     // write transparent and punch a head-shaped hole in the bake view.
-    rayQueryInitializeEXT(q, tlas, gl_RayFlagsOpaqueEXT, 0x03, origin, tmin, dir, tmax);
+    rayQueryInitializeEXT(q, tlas, gl_RayFlagsOpaqueEXT, 0x83, origin, tmin, dir, tmax);
     while(rayQueryProceedEXT(q))
     {
         if(rayQueryGetIntersectionTypeEXT(q, false) == gl_RayQueryCandidateIntersectionTriangleEXT)

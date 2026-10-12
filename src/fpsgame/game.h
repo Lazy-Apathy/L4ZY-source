@@ -320,6 +320,11 @@ static const int msgsizes[] =               // size inclusive message token, 0 f
 #define HD_SPEC 2
 #define HD_FRAME 4
 #define HD_ZOOM_SHIFT 3
+// extra records in the .dmohd (enemy visibility, demohdvis): see demohd.cpp
+#define HD_EXT_CN 255
+#define HD_EXT_VIEW 1
+#define HD_EXT_VIS 2
+#define HD_EXT_VERSION 1
 #define DEMO_VERSION 1                  // bump when demo format changes
 #define DEMO_MAGIC "SAUERBRATEN_DEMO"
 
@@ -791,11 +796,13 @@ namespace game
     extern int specviewdelay();
     extern bool specpacketqueued();
     extern void notefragreacthit(fpsent *target);
+    extern void notereactshot(fpsent *d);
+    extern void reactframe();
     extern void fragreactspawned(fpsent *d);
     extern void timeupdate(int timeremain);
     extern void msgsound(int n, physent *d = NULL);
     extern void drawicon(int icon, float x, float y, float sz = 120);
-    extern void addflagfeed(const char *text, int icon); // big CTF message (flag taken / scored)
+    extern void addflagfeed(const char *text, int icon); // big CTF message (flag taken / dropped / returned / scored)
     const char *mastermodecolor(int n, const char *unknown);
     const char *mastermodeicon(int n, const char *unknown);
 
@@ -981,6 +988,12 @@ namespace demohd
     void flushtoServer();
     void parselive(ucharbuf &p);
     void clearlive();
+    bool visrecording();
+    void visview(float fov, float zoomfov, float vfov, int w, int h, int minpx);
+    void visbegin();
+    void notevis(int cn, int bits, float vispx, float bodypx, float xhang, float dist, float sx, float sy);
+    void visend();
+    void visnone();
 }
 
 namespace server

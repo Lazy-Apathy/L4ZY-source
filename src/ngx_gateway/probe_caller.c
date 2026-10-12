@@ -90,7 +90,6 @@ int main(int argc, char **argv)
         fprintf(f, "abi_version %u header %u\n", ver, SAUER_NGX_ABI_VERSION);
         fprintf(f, "probe_link rc %d\n%s\n", (int)pr, probe);
         fprintf(f, "last_error code %d ngx 0x%08X %s\n", (int)err.code, err.ngx_result, err.message);
-        fprintf(f, "streamline_loaded %s\n", GetModuleHandleA("sl.interposer.dll") ? "yes" : "no");
         fclose(f);
         printf("wrote %s\n", outpath);
     }

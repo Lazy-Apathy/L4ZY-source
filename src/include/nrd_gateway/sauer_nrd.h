@@ -16,6 +16,11 @@ extern "C" {
 #define SAUER_NRD_MSG 512u
 #define SAUER_NRD_OPT_ANTILAG_OFF 1u
 #define SAUER_NRD_OPT_FAST_OFF    2u
+/* Lighter REBLUR (rt-performance-lot4): LIGHT drops the temporal stabilisation
+ * pass and the anti-firefly filter; LIGHTER also halves the blur radius. Older
+ * gateways ignore these bits. */
+#define SAUER_NRD_OPT_LIGHT       4u
+#define SAUER_NRD_OPT_LIGHTER     8u
 
 enum
 {
@@ -136,6 +141,32 @@ typedef struct SauerNrdProbeOut
     SauerNrdProbePx px[SAUER_NRD_PROBE_MAX];
 } SauerNrdProbeOut;
 
+/* SIGMA shadow denoiser for the soft shadows: a second NRD instance (SIGMA_SHADOW_TRANSLUCENCY), created only
+ * when the game turns it on. Compatible addition to ABI 2: the structs and exports above do not change; a gateway
+ * without the sauer_nrd_sigma_* exports simply has no SIGMA. The four channels of the translucency are filtered
+ * alike (the game puts the sun's lit fraction in x and the lamps' per colour in yzw). */
+typedef struct SauerNrdSigmaImages
+{
+    uint32_t struct_bytes;
+    uint64_t in_penumbra;       /* VkImage R16F: penumbra radius, 65504 lit, 0 facing away */
+    uint64_t in_translucency;   /* VkImage RGBA8 UNORM: the noisy lit fractions */
+    uint64_t in_viewz;          /* VkImage R32F (the REBLUR guide) */
+    uint64_t in_normal;         /* VkImage RGBA16 UNORM (the REBLUR guide) */
+    uint64_t in_mv;             /* VkImage RGBA16F (the REBLUR guide) */
+    uint64_t out_shadow;        /* VkImage RGBA8 UNORM: denoised, square root encoded; also the history */
+    uint32_t w;
+    uint32_t h;
+} SauerNrdSigmaImages;
+
+typedef struct SauerNrdSigmaFrame
+{
+    uint32_t struct_bytes;
+    SauerNrdFrame common;       /* same camera data as the REBLUR frame; common.struct_bytes = sizeof(SauerNrdFrame) */
+    float light_direction[3];   /* towards the sun */
+    float plane_distance_sensitivity; /* <= 0: NRD's default */
+    uint32_t stabilized_frames; /* frames of temporal stabilisation, 0 (none) to 7 */
+} SauerNrdSigmaFrame;
+
 typedef uint32_t (*PFN_sauer_nrd_abi_version)(void);
 typedef int32_t (*PFN_sauer_nrd_create)(const SauerNrdInit *init);
 typedef int32_t (*PFN_sauer_nrd_set_images)(const SauerNrdImages *images);
@@ -144,6 +175,11 @@ typedef void (*PFN_sauer_nrd_destroy)(void);
 typedef int32_t (*PFN_sauer_nrd_stats)(SauerNrdStats *stats);
 typedef int32_t (*PFN_sauer_nrd_probe_arm)(const SauerNrdProbeIn *in);
 typedef int32_t (*PFN_sauer_nrd_probe_read)(SauerNrdProbeOut *out);
+typedef int32_t (*PFN_sauer_nrd_sigma_create)(const SauerNrdInit *init);
+typedef int32_t (*PFN_sauer_nrd_sigma_set_images)(const SauerNrdSigmaImages *images);
+typedef int32_t (*PFN_sauer_nrd_sigma_denoise)(const SauerNrdSigmaFrame *frame);
+typedef void (*PFN_sauer_nrd_sigma_destroy)(void);
+typedef int32_t (*PFN_sauer_nrd_sigma_stats)(SauerNrdStats *stats);
 
 #ifdef __cplusplus
 }

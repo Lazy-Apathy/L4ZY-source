@@ -205,6 +205,24 @@ bool conreplaceid(int id, int type, const char *fmt, ...)
     return false;
 }
 
+static int conskipafterremove(int skip, int removed) { return skip > removed ? skip-1 : skip; }
+static void conremoved(int removed);
+
+// Drops one console line for good (a temporary status such as "Translating
+// carefully..."). Only console lines: chat lines (F10) are never removed.
+bool conremoveid(int id)
+{
+    loopvrev(conlines) if(conlines[i].uid == id)
+    {
+        if(conlines[i].type & CHATLOG_FILTER) return false;
+        // conlines[i] counts from the newest line, remove() from the oldest
+        delete[] conlines.remove(conlines.length()-1-i).line;
+        conremoved(i);
+        return true;
+    }
+    return false;
+}
+
 VAR(fullconsole, 0, 0, 1);
 VAR(fullchat, 0, 0, 1);
 VARP(fullchatsize, 0, 75, 100);
@@ -388,6 +406,18 @@ HVARP(fullconfilter, 0, 0x7FFFFFF, 0x7FFFFFF);
 HVARP(miniconfilter, 0, 0, 0x7FFFFFF);
 
 int conskip = 0, miniconskip = 0;
+
+// keep the scrolled view and the F11 selection on the same lines after a removal
+static void conremoved(int removed)
+{
+    conskip = conskipafterremove(conskip, removed);
+    miniconskip = conskipafterremove(miniconskip, removed);
+    if(overlaykind == 2 && overlayselstart >= 0)
+    {
+        overlayselstart = conskipafterremove(overlayselstart, removed);
+        overlayselend = conskipafterremove(overlayselend, removed);
+    }
+}
 
 void setconskip(int &skip, int filter, int n)
 {

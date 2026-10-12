@@ -1075,6 +1075,7 @@ extern int unescapestring(char *dst, const char *src, const char *end);
 struct settingentry
 {
     string page, title, section, label, var, args, words;
+    string choice; // radio button or checkbox: its own text (label = the name of its row)
     int kind; // 0 checkbox, 1 radio, 2 slider, 3 picker (args = its menu alias)
 };
 static vector<settingentry> settingindex;
@@ -1138,6 +1139,31 @@ static const char *settingtoken(const char *p, char *out, int len)
     return e;
 }
 
+// a label as the player reads it: colour codes and tabs dropped, no trailing colon
+static void settingcleanlabel(char *dst, const char *src, int len = MAXSTRLEN)
+{
+    int n = 0;
+    while(*src == ' ') src++;
+    for(const char *c = src; *c && n < len-1; c++)
+    {
+        if(*c == '\f' && c[1]) { c++; continue; }
+        if(*c == '^' && c[1] == 'f' && c[2]) { c += 2; continue; }
+        if(*c == '\t') continue;
+        dst[n++] = *c;
+    }
+    while(n > 0 && (dst[n-1] == ' ' || dst[n-1] == ':')) n--;
+    dst[n] = 0;
+}
+
+// the same without touching colour codes (labels shown again in the search page)
+static void settingtrimlabel(char *s)
+{
+    int n = 0;
+    for(const char *c = s; *c; c++) if(*c != '\t') s[n++] = *c;
+    while(n > 0 && (s[n-1] == ' ' || s[n-1] == ':')) n--;
+    s[n] = 0;
+}
+
 static bool settingpageok(const char *page)
 {
     static const char * const pages[] = { "hud", "scoreboard", "gfx", "display", "audio", "mouse", "keys", "console", "record",
@@ -1177,6 +1203,9 @@ static void indexsettingsfile(const char *file)
     char *buf = loadfile(path(file, true), NULL);
     if(!buf) return;
     string page = "", title = "", section = "", text = "";
+    // the name of a row of buttons (a guitext or GFX_name just before it) and the
+    // setting of that row: radio buttons and "On" boxes are named by their row
+    string rowtext = "", rowowner = "";
     for(char *line = buf; line && *line; )
     {
         char *next = strchr(line, '\n');
@@ -1188,7 +1217,7 @@ static void indexsettingsfile(const char *file)
             settingtoken(p, a, sizeof(a));
             copystring(page, a);
             copystring(title, a);
-            section[0] = text[0] = 0;
+            section[0] = text[0] = rowtext[0] = rowowner[0] = 0;
         }
         else if(p && page[0] && settingpageok(page))
         {
@@ -1201,13 +1230,16 @@ static void indexsettingsfile(const char *file)
             }
             if(!p) { line = next; continue; }
             if(!strcmp(tok, "guititle")) { if(settingtoken(p, a, sizeof(a))) copystring(title, a); }
-            else if(!strcmp(tok, "guisection")) { if(settingtoken(p, a, sizeof(a))) copystring(section, a); text[0] = 0; }
+            else if(!strcmp(tok, "guisection")) { if(settingtoken(p, a, sizeof(a))) copystring(section, a); text[0] = rowtext[0] = rowowner[0] = 0; }
+            else if(!strcmp(tok, "GFX_name")) { if(settingtoken(p, a, sizeof(a))) { settingcleanlabel(rowtext, a); rowowner[0] = 0; } }
             else if(!strcmp(tok, "guitext"))
             {
                 // only a literal label; a computed one ((format ...)) is not a name
                 while(*p == ' ' || *p == '\t') p++;
                 if(*p == '"' && settingtoken(p, a, sizeof(a))) copystring(text, a);
                 else text[0] = 0;
+                // a grey hint (^f4...) is not the name of a row
+                if(text[0] && text[0] != '\f') { settingcleanlabel(rowtext, text); rowowner[0] = 0; }
             }
             else if(!strcmp(tok, "guicheckbox") || !strcmp(tok, "guiradio") || !strcmp(tok, "guislider") || !strcmp(tok, "guilistslider"))
             {
@@ -1224,6 +1256,20 @@ static void indexsettingsfile(const char *file)
                     copystring(e.title, title);
                     copystring(e.section, section);
                     const char *lab = slider ? text : a;
+                    e.choice[0] = 0;
+                    if(!slider)
+                    {
+                        // the button's own text stays as the choice; a radio button or an
+                        // "On" box takes the name of its row (like a slider), never "Off (default)"
+                        copystring(e.choice, a);
+                        settingtrimlabel(e.choice);
+                        char na[MAXSTRLEN];
+                        settingnorm(a, na, sizeof(na));
+                        bool generic = e.kind == 0 && (!strcmp(na, "on") || !strcmp(na, "off") || !strcmp(na, "enabled") || !strcmp(na, "show"));
+                        if(e.kind == 1 || generic) lab = rowtext[0] && (!rowowner[0] || !strcmp(rowowner, b)) ? rowtext : "";
+                        if(!generic) copystring(rowowner, b);
+                    }
+                    else copystring(rowowner, b);
                     char nl[MAXSTRLEN];
                     settingnorm(lab, nl, sizeof(nl));
                     copystring(e.label, nl[0] && !isdigit((uchar)nl[0]) ? lab : b);
@@ -1265,6 +1311,7 @@ static void indexsettingsfile(const char *file)
                 copystring(e.label, a[0] ? a : b);
                 copystring(e.var, b);
                 copystring(e.args, pickers[i]);
+                e.choice[0] = 0;
                 e.words[0] = 0;
             }
             // text fields: "guifield VAR N" edits VAR itself; "guifield ALIAS N [VAR $ALIAS]"
@@ -1316,6 +1363,7 @@ static void indexsettingsfile(const char *file)
                     copystring(e.section, section);
                     copystring(e.label, clean[0] ? clean : realvar);
                     copystring(e.var, realvar);
+                    e.choice[0] = 0;
                     // width, then the alias when the field edits a copy
                     if(strcmp(b, realvar)) formatstring(e.args, "%s %s", w, b);
                     else copystring(e.args, w);
@@ -1396,13 +1444,41 @@ static int settingwordscore(const settingentry &e, const char *w, const char *la
 
 static void settingput(vector<char> &out, const char *s) { out.put(s, strlen(s)); }
 
+// a typed question, normalized, with the ways of writing "frames per second"
+// ("i/s", "ips", "images par seconde", "img/s", "frame rate") turned into "fps"
+static void settingquerynorm(const char *in, char *out, int len)
+{
+    char q[MAXSTRLEN];
+    settingnorm(in, q, sizeof(q));
+    vector<char *> w;
+    for(char *t = strtok(q, " "); t; t = strtok(NULL, " ")) w.add(t);
+    int n = 0;
+    out[0] = 0;
+    loopv(w)
+    {
+        const char *t = w[i];
+        int skip = 0;
+        if(!strcmp(t, "ips") || !strcmp(t, "framerate")) skip = 1;
+        else if(w.inrange(i+1) && !strcmp(w[i+1], "s") && (!strcmp(t, "i") || !strcmp(t, "img") || !strcmp(t, "image") || !strcmp(t, "images"))) skip = 2;
+        else if(w.inrange(i+2) && (!strcmp(t, "images") || !strcmp(t, "image")) && !strcmp(w[i+1], "par") && !strncmp(w[i+2], "seconde", 7)) skip = 3;
+        else if(w.inrange(i+1) && !strcmp(t, "frame") && !strcmp(w[i+1], "rate")) skip = 2;
+        if(skip) { t = "fps"; i += skip-1; }
+        int l = strlen(t);
+        if(n + l + 2 > len) break;
+        if(n) out[n++] = ' ';
+        memcpy(out + n, t, l);
+        n += l;
+        out[n] = 0;
+    }
+}
+
 static void settingsearchgui(const char *query)
 {
     buildsettingindex();
     char q[MAXSTRLEN], uq[MAXSTRLEN];
     size_t ul = encodeutf8((uchar *)uq, sizeof(uq)-1, (const uchar *)query, strlen(query));
     uq[ul] = 0;
-    settingnorm(uq, q, sizeof(q));
+    settingquerynorm(uq, q, sizeof(q));
     vector<char> out;
     if(strlen(q) < 2)
     {
@@ -1419,7 +1495,8 @@ static void settingsearchgui(const char *query)
     {
         const settingentry &e = settingindex[i];
         char lab[MAXSTRLEN], var[MAXSTRLEN], where[MAXSTRLEN];
-        settingnorm(e.label, lab, sizeof(lab));
+        defformatstring(lc, "%s %s", e.label, e.choice);
+        settingnorm(lc, lab, sizeof(lab));
         settingnorm(e.var, var, sizeof(var));
         defformatstring(wh, "%s %s %s", e.page, e.title, e.section);
         settingnorm(wh, where, sizeof(where));
@@ -1482,8 +1559,8 @@ static void settingsearchgui(const char *query)
             settingput(out, line);
             copystring(lastloc, loc);
         }
-        if(e.kind == 0) nformatstring(line, sizeof(line), "guicheckbox %s %s %s\n", escapestring(e.label), e.var, e.args);
-        else if(e.kind == 1) nformatstring(line, sizeof(line), "guiradio %s %s %s\n", escapestring(e.label), e.var, e.args);
+        if(e.kind == 0) nformatstring(line, sizeof(line), "guicheckbox %s %s %s\n", escapestring(e.choice[0] ? e.choice : e.label), e.var, e.args);
+        else if(e.kind == 1) nformatstring(line, sizeof(line), "guiradio %s %s %s\n", escapestring(e.choice[0] ? e.choice : e.label), e.var, e.args);
         else if(e.kind == 3) nformatstring(line, sizeof(line), "guitext %s 0\nguistayopen [%s %s]\n", escapestring(e.label), e.args, e.var);
         else if(e.kind == 4)
         {
@@ -1528,8 +1605,13 @@ COMMAND(settingsearchgui, "s");
 namespace game { extern bool assistanthttp(const char *pathq, const char *body, int bodylen, char *resp, int resplen, int timeoutms); }
 
 // "cmd name ARGS | what it does | words"  or  "action name ARGS | what it does | words"
-// (an action is only allowed as what a key does, in bind/specbind)
-struct assistcommand { string name, args, desc, words; bool action; };
+// (an action is only allowed as what a key does, in bind/specbind/editbind)
+// "keyscript name | exact script | what it does | words": a key action of the Keys
+// page written as a small script ("if (allowthirdperson) [togglevar thirdperson]");
+// the assistant only names it, the game binds the exact text listed here
+// "cmd ... | what it does | words | now: QUERY": QUERY (one word, a command of the menus) gives
+// the current value, shown to the model ("GFX_profapply ... (now: 0)")
+struct assistcommand { string name, args, script, now; char desc[1024], words[512]; bool action, keyscript; };
 static vector<assistcommand> assistcommands;
 static bool assistcommandsloaded = false;
 
@@ -1572,23 +1654,37 @@ static void loadassistcommands()
         if(next) *next++ = 0;
         char *cr = strchr(line, '\r');
         if(cr) *cr = 0;
-        bool action = !strncmp(line, "action ", 7);
-        if(action || !strncmp(line, "cmd ", 4))
+        bool action = !strncmp(line, "action ", 7), keyscript = !strncmp(line, "keyscript ", 10);
+        if(action || keyscript || !strncmp(line, "cmd ", 4))
         {
-            char *head = line + (action ? 7 : 4), *desc = strchr(head, '|'), *words = NULL;
-            if(desc) { *desc++ = 0; words = strchr(desc, '|'); if(words) *words++ = 0; }
+            char *head = line + (keyscript ? 10 : (action ? 7 : 4)), *desc = strchr(head, '|'), *words = NULL, *script = NULL;
+            if(keyscript)
+            {
+                // name | script | what it does | words
+                if(!desc) { line = next; continue; }
+                *desc++ = 0;
+                script = desc;
+                desc = strchr(script, '|');
+                if(!desc) { line = next; continue; }
+            }
+            char *now = NULL;
+            if(desc) { *desc++ = 0; words = strchr(desc, '|'); if(words) { *words++ = 0; now = strstr(words, "| now:"); if(now) { *now = 0; now += 6; } } }
             while(*head == ' ') head++;
             char *sp = strchr(head, ' ');
             if(sp) *sp++ = 0;
             if(head[0])
             {
                 assistcommand &c = assistcommands.add();
-                c.action = action;
+                c.action = action || keyscript;
+                c.keyscript = keyscript;
                 copystring(c.name, head);
-                copystring(c.args, sp ? sp : "");
-                copystring(c.desc, desc ? desc : "");
-                copystring(c.words, words ? words : "");
-                assisttrim(c.args); assisttrim(c.desc); assisttrim(c.words);
+                copystring(c.args, sp && !keyscript ? sp : "");
+                copystring(c.script, script ? script : "");
+                copystring(c.now, now ? now : "");
+                assisttrim(c.now);
+                copystring(c.desc, desc ? desc : "", sizeof(c.desc));
+                copystring(c.words, words ? words : "", sizeof(c.words));
+                assisttrim(c.args); assisttrim(c.script); assisttrim(c.desc); assisttrim(c.words);
             }
         }
         line = next;
@@ -1644,6 +1740,8 @@ static bool assisthidden(const char *var)
 static assistcommand *findassistcommand(const char *name)
 {
     loopv(assistcommands) if(!strcmp(assistcommands[i].name, name)) return &assistcommands[i];
+    // the model sometimes changes the case (gfx_profapply): same listed command
+    loopv(assistcommands) if(!strcasecmp(assistcommands[i].name, name)) return &assistcommands[i];
     return NULL;
 }
 
@@ -1742,6 +1840,34 @@ static bool assistisnum(const char *s, float &v)
     return true;
 }
 
+// a colour setting: hex RGB (HVARP, or a -1 / 0 .. 0xFFFFFF setting like the trail colours)
+static bool assistcolourvar(const ident *id)
+{
+    return id && id->type == ID_VAR && id->minval >= -1 && id->maxval == 0xFFFFFF && ((id->flags & IDF_HEX) || id->minval == -1 || strstr(id->name, "colo"));
+}
+
+// "#FF69B4", "0xFF69B4" or "FF69B4" (6 hex digits): the colour, else -1
+static int assisthexcolour(const char *s)
+{
+    if(s[0] == '#') s++;
+    else if(s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) s += 2;
+    int l = strlen(s);
+    if(l != 6) return -1;
+    loopi(6) if(!isxdigit((uchar)s[i])) return -1;
+    return int(strtol(s, NULL, 16));
+}
+
+// a colour as the menus write it: 0xRRGGBB (or -1)
+static const char *assistcolourstr(int v)
+{
+    static string bufs[2];
+    static int cur = 0;
+    cur = (cur + 1)%2;
+    if(v < 0) formatstring(bufs[cur], "%d", v);
+    else formatstring(bufs[cur], "0x%06X", v);
+    return bufs[cur];
+}
+
 static bool assistword(const char *s, int maxlen, const char *extra)
 {
     int l = strlen(s);
@@ -1752,6 +1878,27 @@ static bool assistword(const char *s, int maxlen, const char *extra)
 
 static bool assistcheck(const char *line, int depth, char *canon, int canonlen, char *show, int showlen, const char *&why);
 
+// a Keys page script listed in data/assistant-commands.txt: none of the words the
+// assistant may never run (quit, exec, alias, say, connect...; "if" is fine here) and no macro
+static bool assistkeyscriptok(const char *script)
+{
+    if(strpbrk(script, "@`\\")) return false;
+    for(const char *p = script; *p; )
+    {
+        while(*p && !isalnum((uchar)*p) && *p != '_') p++;
+        const char *e = p;
+        while(*e && (isalnum((uchar)*e) || *e == '_')) e++;
+        if(e > p)
+        {
+            string w;
+            copystring(w, p, min(int(e - p) + 1, MAXSTRLEN));
+            if(strcmp(w, "if") && assistforbiddencmd(w)) return false;
+        }
+        p = e;
+    }
+    return true;
+}
+
 // ARGS types: KEY ACTION INT NUM WORD TEXT PAGE, "?" = optional
 static bool assistargok(const char *type, const char *v, int depth, char *canon, int canonlen, const char *&why)
 {
@@ -1761,10 +1908,21 @@ static bool assistargok(const char *type, const char *v, int depth, char *canon,
     int tl = strlen(t);
     if(tl && t[tl-1] == '?') t[tl-1] = 0;
     if(!strcmp(t, "KEY")) { if(!assistword(v, 20, "")) { why = "bad key name"; return false; } concatstring(canon, v, canonlen); return true; }
-    if(!strcmp(t, "WORD")) { if(!assistword(v, 24, "-.")) { why = "bad value"; return false; } concatstring(canon, v, canonlen); return true; }
+    if(!strcmp(t, "WORD"))
+    {
+        if(v[0] == '#' && assisthexcolour(v) >= 0) { concatstring(canon, v+1, canonlen); return true; }
+        if(!assistword(v, 24, "-.")) { why = "bad value"; return false; }
+        concatstring(canon, v, canonlen);
+        return true;
+    }
     if(!strcmp(t, "INT")) { if(!assistisint(v, iv)) { why = "expected a whole number"; return false; } concatstring(canon, v, canonlen); return true; }
     if(!strcmp(t, "NUM")) { if(!assistisnum(v, fv)) { why = "expected a number"; return false; } concatstring(canon, v, canonlen); return true; }
-    if(!strcmp(t, "TEXT")) { if(strlen(v) > 60 || strchr(v, ';')) { why = "text too long or not plain"; return false; } concatstring(canon, escapestring(v), canonlen); return true; }
+    if(!strcmp(t, "TEXT"))
+    {
+        if(strlen(v) > 60 || strchr(v, ';')) { why = "text too long or not plain"; return false; }
+        concatstring(canon, assistword(v, 60, "/-.") ? v : escapestring(v), canonlen);
+        return true;
+    }
     if(!strcmp(t, "PAGE"))
     {
         if(!settingpageok(v) && strcmp(v, "options") && strcmp(v, "settingsearch")) { why = "not a settings page"; return false; }
@@ -1802,13 +1960,19 @@ static bool assistargok(const char *type, const char *v, int depth, char *canon,
 static const char *assistlabel(const char *var)
 {
     const settingentry *e = assistmenuentry(var);
-    if(e && e->label[0] && strcmp(e->label, var)) return e->label;
+    if(e && e->label[0] && strcmp(e->label, var))
+    {
+        static string clean;
+        settingcleanlabel(clean, e->label);
+        if(clean[0]) return clean;
+    }
     const char *d = assistdesc(var);
     if(!d || !strcmp(d, "-")) return var;
     static string name;
     int n = 0;
-    while(d[n] && d[n] != '.' && d[n] != '(' && d[n] != ':' && n < 48) n++;
-    while(n > 0 && d[n-1] == ' ') n--;
+    while(d[n] && d[n] != '.' && d[n] != '(' && d[n] != ':' && d[n] != ';' && n < 60) n++;
+    if(n >= 60) { while(n > 20 && d[n] != ' ') n--; }
+    while(n > 0 && (d[n-1] == ' ' || d[n-1] == ',')) n--;
     copystring(name, d, n+1);
     return name[0] ? name : var;
 }
@@ -1846,6 +2010,7 @@ static bool assistcheck(const char *line, int depth, char *canon, int canonlen, 
     if(n <= 0) return false;
     memcpy(mytoks, toks, sizeof(mytoks));
     canon[0] = show[0] = 0;
+    buildsettingindex(); // the menus decide which settings are the player's
     const char *name = mytoks[0];
     if(assistforbiddencmd(name)) { why = "forbidden command"; return false; }
     ident *id = getident(name);
@@ -1861,13 +2026,27 @@ static bool assistcheck(const char *line, int depth, char *canon, int canonlen, 
             case ID_VAR:
             {
                 int iv;
+                if(assistcolourvar(id))
+                {
+                    // a colour: "#FF69B4", "0xFF69B4", "FF69B4", or a plain number (-1 = none / same as All)
+                    int hv = assisthexcolour(v);
+                    if(hv >= 0) iv = hv;
+                    else if(!assistisint(v, iv)) { why = "expected a colour, 0xRRGGBB"; return false; }
+                    if(iv < id->minval || iv > id->maxval) { why = "value outside the allowed range"; return false; }
+                    nformatstring(canon, canonlen, "%s %s", id->name, assistcolourstr(iv));
+                    string oldc;
+                    copystring(oldc, assistcolourstr(*id->storage.i));
+                    nformatstring(show, showlen, "%s: %s -> %s", assistlabel(id->name), oldc, assistcolourstr(iv));
+                    return true;
+                }
                 if(!assistisint(v, iv)) { why = "expected a whole number"; return false; }
                 if(iv < id->minval || iv > id->maxval) { why = "value outside the allowed range"; return false; }
                 if(iv != *id->storage.i) { const char *locked = settinglocked(id->name, iv); if(locked) { why = locked; return false; } }
                 nformatstring(canon, canonlen, "%s %d", id->name, iv);
                 string oldname;
                 copystring(oldname, assistvaluename(id->name, *id->storage.i));
-                nformatstring(show, showlen, "%s: %d%s -> %d%s", assistlabel(id->name), *id->storage.i, oldname, iv, assistvaluename(id->name, iv));
+                if(iv == *id->storage.i) nformatstring(show, showlen, "%s: already %d%s", assistlabel(id->name), iv, oldname);
+                else nformatstring(show, showlen, "%s: %d%s -> %d%s", assistlabel(id->name), *id->storage.i, oldname, iv, assistvaluename(id->name, iv));
                 return true;
             }
             case ID_FVAR:
@@ -1877,7 +2056,8 @@ static bool assistcheck(const char *line, int depth, char *canon, int canonlen, 
                 if(fv < id->minvalf || fv > id->maxvalf) { why = "value outside the allowed range"; return false; }
                 if(fv != *id->storage.f) { const char *locked = settinglocked(id->name, fv); if(locked) { why = locked; return false; } }
                 nformatstring(canon, canonlen, "%s %s", id->name, floatstr(fv));
-                nformatstring(show, showlen, "%s: %s -> %s", assistlabel(id->name), floatstr(*id->storage.f), floatstr(fv));
+                if(fv == *id->storage.f) nformatstring(show, showlen, "%s: already %s", assistlabel(id->name), floatstr(fv));
+                else nformatstring(show, showlen, "%s: %s -> %s", assistlabel(id->name), floatstr(*id->storage.f), floatstr(fv));
                 return true;
             }
             default:
@@ -1891,6 +2071,17 @@ static bool assistcheck(const char *line, int depth, char *canon, int canonlen, 
     }
     loadassistcommands();
     assistcommand *c = findassistcommand(name);
+    if(c && c->keyscript)
+    {
+        // a key action of the Keys page: only on a key, and only its exact script
+        if(depth == 0) { why = "this only goes on a key (bind)"; return false; }
+        if(n != 1) { why = "wrong number of values"; return false; }
+        if(!c->script[0] || !assistkeyscriptok(c->script)) { why = "not an allowed command"; return false; }
+        copystring(canon, c->script, canonlen);
+        copystring(show, c->desc[0] ? c->desc : c->name, showlen);
+        return true;
+    }
+    if(c && strcmp(c->name, name)) id = getident(c->name);
     if(!c || !id || (id->type != ID_COMMAND && id->type != ID_ALIAS)) { why = "not an allowed command"; return false; }
     if(c->action && depth == 0) { why = "this only goes on a key (bind)"; return false; }
     // match the values against the declared argument types
@@ -1908,8 +2099,27 @@ static bool assistcheck(const char *line, int depth, char *canon, int canonlen, 
         if(!assistargok(specs[i-1], mytoks[i], depth, canon, canonlen, why)) return false;
     }
     if(!strcmp(c->name, "showgui")) nformatstring(show, showlen, "Open the settings page \"%s\"", mytoks[1]);
-    else if(!strcmp(c->name, "bind") || !strcmp(c->name, "specbind"))
-        nformatstring(show, showlen, "%s %s: %s", c->name[0] == 's' ? "Spectator key" : "Key", mytoks[1], mytoks[2]);
+    else if(!strcmp(c->name, "bind") || !strcmp(c->name, "specbind") || !strcmp(c->name, "editbind"))
+    {
+        // what the key will do, in words, and what it did until now
+        const char *kind = c->name[0] == 's' ? "Spectator key" : (c->name[0] == 'e' ? "Edit mode key" : "Key");
+        const char *what = mytoks[2];
+        assistcommand *a = strchr(what, ';') ? NULL : findassistcommand(what);
+        string shortwhat;
+        if(a && a->desc[0] && (a->keyscript || !a->args[0]))
+        {
+            // "third person view on / off (Keys page: ...)" -> "third person view on / off"
+            copystring(shortwhat, a->desc);
+            char *paren = strstr(shortwhat, " (");
+            if(paren) *paren = 0;
+            what = shortwhat;
+        }
+        char *old = n >= 3 ? executestr(assistfmt("%s %s", c->name[0] == 's' ? "getspecbind" : (c->name[0] == 'e' ? "geteditbind" : "getbind"), escapestring(mytoks[1]))) : NULL;
+        if(old && strlen(old) > 40) strcpy(&old[37], "...");
+        if(old && old[0]) nformatstring(show, showlen, "%s %s: %s (now: %s)", kind, mytoks[1], what, old);
+        else nformatstring(show, showlen, "%s %s: %s", kind, mytoks[1], what);
+        DELETEA(old);
+    }
     else nformatstring(show, showlen, "%s", c->desc[0] ? c->desc : c->name);
     return true;
 }
@@ -1973,7 +2183,12 @@ static bool assiststopword(const char *w)
         "je", "tu", "il", "elle", "on", "nous", "vous", "me", "te", "se", "de", "du", "la", "le", "un", "au", "aux", "en", "et", "ou",
         "mais", "ne", "rien", "vois", "voir", "vu", "tout", "toute", "tous", "fait", "fais", "peu", "beaucoup", "ca", "cela", "ce",
         "moi", "toi", "suis", "ai", "as", "a", "it", "is", "my", "me", "to", "of", "in", "on", "at", "put", "please", "stp", "svp",
-        "puis", "aussi", "encore", "trouve", "trouver", "ou", "est", "sont" };
+        "puis", "aussi", "encore", "trouve", "trouver", "ou", "est", "sont",
+        // questions in plain words: these match descriptions everywhere ("are", "what", "quoi"...)
+        "are", "be", "do", "does", "what", "which", "why", "when", "have", "has", "there", "this", "that", "these", "those",
+        "am", "an", "very", "really", "much", "so", "just", "get", "your", "its", "will", "would", "should", "could",
+        "quoi", "quel", "quelle", "quels", "quelles", "pourquoi", "donne", "donner", "etre", "avoir", "ont", "vraiment",
+        "jveux", "veut", "va", "vas", "sa", "ses", "leur", "leurs", "par", "comme" };
     loopi(sizeof(stop)/sizeof(stop[0])) if(!strcmp(w, stop[i])) return true;
     return false;
 }
@@ -1993,7 +2208,8 @@ static bool assistwordin(const char *text, const char *w)
         if(tl)
         {
             if(tl == wl && !strncmp(t, w, wl)) return true;
-            if(wl >= 4 && tl >= 4 && !strncmp(t, w, min(tl, wl))) return true;
+            // close forms only (shadow / shadows, ombre / ombres): "show" is not "showfps"
+            if(wl >= 4 && tl >= 4 && abs(tl - wl) <= 2 && !strncmp(t, w, min(tl, wl))) return true;
         }
         t = e;
     }
@@ -2036,7 +2252,14 @@ static int assistitemscore(const assistitem &it, vector<char *> &words)
         const settingentry *e = assistmenuentry(it.var);
         if(e)
         {
-            settingnorm(e->label, lab, sizeof(lab));
+            char lc[2*MAXSTRLEN];
+            copystring(lc, e->label, sizeof(lc));
+            loopv(settingindex) if(settingindex[i].kind <= 1 && settingindex[i].choice[0] && !strcmp(settingindex[i].var, it.var) && strlen(lc) + strlen(settingindex[i].choice) + 2 < sizeof(lc))
+            {
+                strcat(lc, " ");
+                strcat(lc, settingindex[i].choice);
+            }
+            settingnorm(lc, lab, sizeof(lab));
             string w;
             formatstring(w, "%s %s %s", e->page, e->title, e->section);
             settingnorm(w, where, sizeof(where));
@@ -2083,29 +2306,43 @@ static int assistitemscore(const assistitem &it, vector<char *> &words)
     return total;
 }
 
-// menu label and/or what the setting really does
+// menu label and/or what the setting really does (whole: never cut)
 static const char *assistabout(const char *var, const settingentry *e)
 {
+    static char buf[2048];
     const char *d = assistdesc(var);
     if(d && !strcmp(d, "-")) d = NULL;
-    const char *l = e && e->label[0] && strcmp(e->label, var) ? e->label : NULL;
-    if(l && d) return assistfmt("%s - %s", l, d);
-    return l ? l : (d ? d : "");
+    string l = "";
+    if(e && e->label[0] && strcmp(e->label, var)) settingcleanlabel(l, e->label);
+    if(l[0] && d) nformatstring(buf, sizeof(buf), "%s - %s", l, d);
+    else copystring(buf, l[0] ? l : (d ? d : ""), sizeof(buf));
+    return buf;
 }
 
 static void assistcatalogline(vector<char> &out, const assistitem &it)
 {
-    char line[2*MAXSTRLEN];
+    static char line[4096];
     if(it.cmd)
     {
         if(it.cmd->action)
         {
-            char *keys = executestr(assistfmt("searchbinds %s", escapestring(it.cmd->name)));
+            char *keys = executestr(assistfmt("searchbinds %s", escapestring(it.cmd->keyscript ? it.cmd->script : it.cmd->name)));
             nformatstring(line, sizeof(line), "(key action) %s%s%s : %s%s%s\n", it.cmd->name, it.cmd->args[0] ? " " : "", it.cmd->args, it.cmd->desc,
                 keys && keys[0] ? " (now on keys: " : "", keys && keys[0] ? assistfmt("%s)", keys) : "");
             DELETEA(keys);
         }
-        else nformatstring(line, sizeof(line), "(command) %s%s%s : %s\n", it.cmd->name, it.cmd->args[0] ? " " : "", it.cmd->args, it.cmd->desc);
+        else
+        {
+            string now = "";
+            if(it.cmd->now[0] && assistword(it.cmd->now, 40, ""))
+            {
+                ident *q = getident(it.cmd->now);
+                char *v = q && (q->type == ID_ALIAS || q->type == ID_COMMAND) ? executestr(it.cmd->now) : NULL;
+                if(v && v[0] && strlen(v) < 40) formatstring(now, " (now: %s)", v);
+                DELETEA(v);
+            }
+            nformatstring(line, sizeof(line), "(command) %s%s%s : %s%s\n", it.cmd->name, it.cmd->args[0] ? " " : "", it.cmd->args, it.cmd->desc, now);
+        }
         out.put(line, strlen(line));
         return;
     }
@@ -2119,25 +2356,33 @@ static void assistcatalogline(vector<char> &out, const assistitem &it)
         if(route) formatstring(where, " [menu: %s%s%s | showgui %s]", route, e->section[0] ? " > " : "", e->section, e->page);
         else formatstring(where, " [menu: %s%s%s]", e->title, e->section[0] ? " > " : "", e->section);
     }
-    // radio buttons: list the choices with their values
-    string choices = "";
+    // radio buttons: list the choices with their values (the text of each button)
+    static char choices[1024];
+    choices[0] = 0;
     loopv(settingindex) if(settingindex[i].kind == 1 && !strcmp(settingindex[i].var, it.var))
     {
         char val[MAXSTRLEN];
         const char *vend = NULL;
         char tk[1][MAXSTRLEN];
         if(assisttokens(settingindex[i].args, tk, 1, vend) == 1) copystring(val, tk[0]); else val[0] = 0;
-        if(val[0] && strcmp(settingindex[i].label, it.var))
+        string ch;
+        settingcleanlabel(ch, settingindex[i].choice);
+        if(val[0] && ch[0])
         {
             const char *locked = settinglocked(it.var, parsefloat(val));
-            concformatstring(choices, "%s%s=%s", choices[0] ? ", " : " choices: ", val, settingindex[i].label);
-            if(locked) concformatstring(choices, " (unavailable here, do not propose: %s)", locked);
+            int cl = strlen(choices);
+            nformatstring(choices + cl, sizeof(choices) - cl, "%s%s=%s", choices[0] ? ", " : " choices: ", val, ch);
+            cl = strlen(choices);
+            if(locked) nformatstring(choices + cl, sizeof(choices) - cl, " (unavailable here, do not propose: %s)", locked);
         }
     }
     switch(id->type)
     {
         case ID_VAR:
-            if(id->minval == 0 && id->maxval == 1) nformatstring(line, sizeof(line), "%s = %d (0 or 1) : %s%s%s\n", id->name, *id->storage.i, assistabout(it.var, e), choices, where);
+            if(assistcolourvar(id))
+                nformatstring(line, sizeof(line), "%s = %s (colour, hex 0xRRGGBB%s) : %s%s%s\n", id->name, assistcolourstr(*id->storage.i),
+                    id->minval < 0 ? ", or -1" : "", assistabout(it.var, e), choices, where);
+            else if(id->minval == 0 && id->maxval == 1) nformatstring(line, sizeof(line), "%s = %d (0 or 1) : %s%s%s\n", id->name, *id->storage.i, assistabout(it.var, e), choices, where);
             else nformatstring(line, sizeof(line), "%s = %d (%d..%d) : %s%s%s\n", id->name, *id->storage.i, id->minval, id->maxval, assistabout(it.var, e), choices, where);
             break;
         case ID_FVAR:
@@ -2179,8 +2424,11 @@ static int assistkeyhints(const char *utf8q, vector<char> &out)
             else if(!strcmp(n, "droit") || !strcmp(n, "right")) key = "MOUSE2";
             else if(!strcmp(n, "milieu") || !strcmp(n, "middle")) key = "MOUSE3";
         }
-        // "touche q", "key f5", or a lone f1..f12
+        // "touche q", "key f5", "sur V", "on the O key", or a lone f1..f12
         bool afterkey = i > 0 && (!strcmp(words[i-1], "touche") || !strcmp(words[i-1], "key"));
+        if(!afterkey && strlen(w) == 1 && isalpha((uchar)w[0]))
+            afterkey = (i > 0 && i == words.length()-1 && (!strcmp(words[i-1], "sur") || !strcmp(words[i-1], "on") || !strcmp(words[i-1], "to"))) ||
+                       (words.inrange(i+1) && (!strcmp(words[i+1], "key") || !strcmp(words[i+1], "touche")));
         if(!key && ((afterkey && strlen(w) <= 3 && isalnum((uchar)w[0])) || (w[0] == 'f' && isdigit((uchar)w[1]) && strlen(w) <= 3)))
         {
             if(keys.length() >= 8) break;
@@ -2206,8 +2454,8 @@ static void assistcatalog(const char *utf8q, vector<char> &out, const char *earl
     buildsettingindex();
     loadassistcommands();
     char q[MAXSTRLEN], pq[MAXSTRLEN];
-    settingnorm(utf8q, q, sizeof(q));
-    settingnorm(earlier, pq, sizeof(pq));
+    settingquerynorm(utf8q, q, sizeof(q));
+    settingquerynorm(earlier, pq, sizeof(pq));
     int keyhints = assistkeyhints(utf8q, out);
     vector<char *> words, pwords;
     for(char *w = strtok(q, " "); w; w = strtok(NULL, " ")) if(strlen(w) >= 2 && !assiststopword(w)) words.add(w);
@@ -2234,6 +2482,8 @@ static void assistcatalog(const char *utf8q, vector<char> &out, const char *earl
     });
     loopv(assistcommands) { assistitem &it = items.add(); it.var = NULL; it.cmd = &assistcommands[i]; it.score = 0; }
     loopv(items) items[i].score = 3*assistitemscore(items[i], words) + assistitemscore(items[i], pwords);
+    int top = 0;
+    loopv(items) top = max(top, items[i].score);
     // best first, menu order kept on ties
     vector<int> order;
     loopv(items) if(items[i].score > 0) order.add(i);
@@ -2248,7 +2498,17 @@ static void assistcatalog(const char *utf8q, vector<char> &out, const char *earl
     {
         const assistitem &it = items[order[i]];
         bool hidden = !it.cmd && !assistmenuentry(it.var);
-        if(it.cmd ? ncmd >= 6 : (nset >= 20 || out.length() > 3800 || (hidden && nhidden >= 5))) continue;
+        // a saved setting outside the menus with no description says nothing to the
+        // model ("blurglaresigma = 50"): only when the question names it exactly
+        if(hidden && !assistdesc(it.var))
+        {
+            bool named = false;
+            loopvj(words) if(!strcasecmp(words[j], it.var)) named = true;
+            if(!named) continue;
+        }
+        // far weaker matches only fill the list when it is short (the model's context is small)
+        if(shown >= 6 && it.score*3 < top) break;
+        if(it.cmd ? ncmd >= 6 : (nset >= 14 || out.length() > 4200 || (hidden && nhidden >= 4))) continue;
         assistcatalogline(out, it);
         if(it.cmd) { ncmd++; action |= it.cmd->action; hasbind |= !strcmp(it.cmd->name, "bind"); hasgui |= !strcmp(it.cmd->name, "showgui"); }
         else { nset++; if(hidden) nhidden++; }
@@ -2319,6 +2579,29 @@ static void assistaddline(const char *s)
     }
 }
 
+// what two proposals must share to be two values of the same thing: the name of a
+// setting, the key of a bind ("bind V"), or a command with all but its last value
+// ("settrailcolor me RI")
+static int assistsamekey(const char *cmd)
+{
+    const char *s = cmd;
+    while(*s == ' ' || *s == '/') s++;
+    int skip = int(s - cmd), l = strcspn(s, " ");
+    string name;
+    copystring(name, s, min(l+1, MAXSTRLEN));
+    ident *id = getident(name);
+    if(id && id->type <= ID_SVAR) return skip + l;
+    if(!strcmp(name, "bind") || !strcmp(name, "specbind") || !strcmp(name, "editbind"))
+    {
+        const char *k = s + l;
+        while(*k == ' ') k++;
+        k += strcspn(k, " ");
+        return int(k - cmd);
+    }
+    const char *last = strrchr(s, ' ');
+    return last ? int(last - cmd) : skip + l;
+}
+
 static void assistparse(const char *raw)
 {
     const char *body = strstr(raw, "\r\n\r\n");
@@ -2378,13 +2661,13 @@ static void assistparse(const char *raw)
     {
         if(assistlog[i].kind != ASSIST_PROPOSAL) continue;
         const char *a = assistprops[assistlog[i].prop].cmd;
-        int alen = strcspn(a, " ");
+        int alen = assistsamekey(a);
         int same = 0;
         for(int j = assistlog.length()-1; j >= 0 && assistlog[j].kind != ASSIST_QUESTION; j--)
         {
             if(assistlog[j].kind != ASSIST_PROPOSAL) continue;
             const char *b = assistprops[assistlog[j].prop].cmd;
-            if(int(strcspn(b, " ")) == alen && !strncmp(a, b, alen) && strncmp(a, "bind", 4)) same++;
+            if(assistsamekey(b) == alen && !strncmp(a, b, alen)) same++;
         }
         if(same > 1) drop.add(i); // descending order
     }
@@ -2483,9 +2766,9 @@ static void assistantapply(int *i)
     if(id && id->type == ID_VAR) formatstring(p.undo, "%s %d", id->name, *id->storage.i);
     else if(id && id->type == ID_FVAR) formatstring(p.undo, "%s %s", id->name, floatstr(*id->storage.f));
     else if(id && id->type == ID_SVAR) formatstring(p.undo, "%s %s", id->name, escapestring(*id->storage.s));
-    else if(id && n >= 2 && (!strcmp(id->name, "bind") || !strcmp(id->name, "specbind")))
+    else if(id && n >= 2 && (!strcmp(id->name, "bind") || !strcmp(id->name, "specbind") || !strcmp(id->name, "editbind")))
     {
-        char *old = executestr(assistfmt("%s %s", id->name[0] == 's' ? "getspecbind" : "getbind", toks[1]));
+        char *old = executestr(assistfmt("%s %s", id->name[0] == 's' ? "getspecbind" : (id->name[0] == 'e' ? "geteditbind" : "getbind"), escapestring(toks[1])));
         formatstring(p.undo, "%s %s %s", id->name, toks[1], escapestring(old ? old : ""));
         DELETEA(old);
     }

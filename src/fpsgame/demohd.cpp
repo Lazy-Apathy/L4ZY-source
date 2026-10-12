@@ -30,6 +30,8 @@ extern int mainmenu;
 // recording the local demo also asks clan servers for their copy (AUTODEMO_CMD)
 VARFP(demohdrecord, 0, 1, 1, game::announceautodemo());
 VARP(demohdplay, 0, 1, 1);
+// enemy visibility from your eyes in the HD track (off: the file is unchanged)
+VARP(demohdvis, 0, 0, 1);
 static void hdprune();
 VARFP(demokeep, 1, 5, 30, { hdprune(); });
 
@@ -281,6 +283,93 @@ namespace demohd
         hd->putlil<float>(s.o.z);
     }
 
+    // Enemy visibility in the HD track (demohdvis 1), from game::reactframe.
+    // 32-byte records among the aim samples, marked by cn HD_EXT_CN, which no
+    // player has: older clients load them as the aim track of a player who
+    // never exists and play the demo as before. When demohdvis is 0 nothing
+    // is written and the file is exactly the usual one.
+    //   t, HD_EXT_CN, type << HD_ZOOM_SHIFT, a, b, then 6 floats:
+    //   HD_EXT_VIEW (first record, again if it changes): a = recorder cn,
+    //     b = HD_EXT_VERSION; fov, zoom fov, vertical fov (no zoom), window
+    //     width, height, smallest visible size that counts as seen (px)
+    //   HD_EXT_VIS (only when the state of an enemy changes): a = his cn,
+    //     b = 1 seen | 2 in the view | 4 line of sight | 8 under the
+    //     crosshair | visible points (0-7) << 4; visible size (px, square
+    //     root of the visible area), whole body height (px), angle from the
+    //     crosshair (deg), distance, screen
+    //     x, y of his chest (-1..1 on screen, 2 = behind)
+    static uchar visbits[256];
+    static int visseen[256], visframe = 0;
+    static bool visviewdone = false;
+    static float visviewlast[6];
+
+    bool visrecording() { return demohdvis && active && hd && !game::demoplayback; }
+
+    static void visreset()
+    {
+        memset(visbits, 0, sizeof(visbits));
+        memset(visseen, 0, sizeof(visseen));
+        visframe = 0;
+        visviewdone = false;
+    }
+
+    static void writeext(int type, int a, int b, const float *v)
+    {
+        hdsample s;
+        s.t = clockms();
+        s.cn = HD_EXT_CN;
+        s.flags = uchar(type << HD_ZOOM_SHIFT);
+        s.gun = uchar(a);
+        s.state = uchar(b);
+        s.pad = 0;
+        s.yaw = v[0];
+        s.pitch = v[1];
+        s.roll = v[2];
+        s.o = vec(v[3], v[4], v[5]);
+        writehdsample(s);
+    }
+
+    void visview(float fov, float zoomfov, float vfov, int w, int h, int minpx)
+    {
+        if(!visrecording()) return;
+        float v[6] = { fov, zoomfov, vfov, float(w), float(h), float(minpx) };
+        if(visviewdone && !memcmp(v, visviewlast, sizeof(v))) return;
+        memcpy(visviewlast, v, sizeof(v));
+        visviewdone = true;
+        writeext(HD_EXT_VIEW, rec_cn, HD_EXT_VERSION, v);
+    }
+
+    void visbegin() { visframe++; }
+
+    void notevis(int cn, int bits, float vispx, float bodypx, float xhang, float dist, float sx, float sy)
+    {
+        if(!visrecording() || cn < 0 || cn > 255) return;
+        visseen[cn] = visframe;
+        if((visbits[cn]&15) == (bits&15)) return;
+        visbits[cn] = uchar(bits);
+        float v[6] = { vispx, bodypx, xhang, dist, sx, sy };
+        writeext(HD_EXT_VIS, cn, bits, v);
+    }
+
+    // enemies not looked at this frame (dead, gone, now on your team) are no longer seen
+    void visend()
+    {
+        if(!visrecording()) return;
+        loopi(256) if(visbits[i]&15 && visseen[i] != visframe)
+        {
+            visbits[i] = 0;
+            float v[6] = { 0, 0, 0, 0, 2, 2 };
+            writeext(HD_EXT_VIS, i, 0, v);
+        }
+    }
+
+    void visnone()
+    {
+        if(!visrecording()) return;
+        visbegin();
+        visend();
+    }
+
     static void putsamplemsg(packetbuf &p, const hdsample &s)
     {
         putint(p, s.cn);
@@ -415,6 +504,7 @@ namespace demohd
         splitnext = false;
         matchid = uint(time(NULL));
         writehdheader();
+        visreset();
         recstart = totalmillis ? totalmillis : 1;
         lastsamplet = -1;
         skippackets = 0;
@@ -633,7 +723,13 @@ namespace demohd
         }
         (void)protocol;
         hdsample s;
-        while(readsample(f, s)) track.add(s);
+        int nvis = 0;
+        while(readsample(f, s))
+        {
+            if(s.cn == HD_EXT_CN) { nvis++; continue; } // visibility records, not aim
+            track.add(s);
+        }
+        if(nvis) logoutf("HD visibility records: %d", nvis);
         delete f;
         // server tracks stamped with each player's own (spaced) sample times
         // interleave slightly; playback walks one time-ordered list
@@ -1568,7 +1664,7 @@ namespace demohd
 
 static void hdprune() { demohd::prune(); }
 
-void game::demohdsample() { demohd::captureframe(); }
+void game::demohdsample() { game::reactframe(); demohd::captureframe(); }
 void game::demohdapplyzoom() { demohd::applyzoom(); }
 void game::demohdafterpacket(int chan, const uchar *data, int len) { if(!game::specpacketqueued()) demohd::afterpacket(chan, data, len); }
 void game::demohdwritepos(const uchar *data, int len) { demohd::writepos(data, len); }

@@ -2,6 +2,8 @@
 
 extern float curfov, fovy, aspect;
 extern int fov;
+extern int screenw, screenh, zoomfov;
+extern float forceaspect;
 
 namespace game
 {
@@ -733,6 +735,44 @@ namespace game
 
     static void reactclear(reactstreak &s) { s.enter = s.last = s.ended = 0; }
 
+    // ---- Precise reaction times (reacttimemode 1, the default) ----
+    // Measured once per rendered frame (game::reactframe, once the camera is
+    // set) from the eyes of the measured player: you, or the watched player
+    // whose aim is exact (HD). An enemy is seen from the first frame where one
+    // of 7 points of his body (head, chest and its two sides, hips, knees,
+    // feet) is inside the real view (fov with zoom, window shape) with a clear
+    // line of sight (glass and the holes of map model leaves do not block it)
+    // and the visible part of him is at least PREACT_MINPX pixels across
+    // (square root of its area on the screen). Hidden less than PREACT_GAP ms
+    // keeps the same sighting. Both times end at the shot that killed, not at
+    // the frag message (one ping later). Nothing here changes the game or what
+    // is drawn. reacttimemode 0 = the older measure, kept to compare.
+    VARP(reacttimemode, 0, 1, 1);
+
+    static const int PREACT_GAP = 300, PREACT_SHOTMS = 2000;
+    static const float PREACT_MINPX = 5;
+
+    struct preciseview
+    {
+        int sight, lastvis;             // first frame of this sighting, last frame seen
+        int xhenter, xhprevs, xhpreve;  // crosshair streak (classic test), previous streak
+    };
+    static preciseview pview[FRAGRT_CN];
+    static int preact_lastshot = 0;
+    static fpsent *preact_viewer = NULL;
+
+    static void clearprecisecn(int cn)
+    {
+        if(cn < 0 || cn >= FRAGRT_CN) return;
+        memset(&pview[cn], 0, sizeof(preciseview));
+    }
+
+    static void clearprecise()
+    {
+        loopi(FRAGRT_CN) clearprecisecn(i);
+        preact_lastshot = 0;
+    }
+
     static void clearfragreactcn(int cn)
     {
         if(cn < 0 || cn >= FRAGRT_CN) return;
@@ -741,11 +781,13 @@ namespace game
         reactclear(react_theirfov[cn]);
         reactclear(react_theirxh[cn]);
         react_hitfov[cn] = react_hitxh[cn] = react_hittime[cn] = 0;
+        clearprecisecn(cn);
     }
 
     static void clearfragreact()
     {
         loopi(FRAGRT_CN) clearfragreactcn(i);
+        clearprecise();
         react_born = lastmillis;
     }
 
@@ -944,6 +986,138 @@ namespace game
             }
             trackonefragreact(v, d, myhfov, myvfov, thfov, tvfov);
         }
+    }
+
+    enum { PREACT_SEEN = 1, PREACT_INVIEW = 2, PREACT_LOS = 4, PREACT_XHAIR = 8 };
+    struct preactsight { int bits, npts; float vispx, bodypx, xhang, dist, sx, sy; };
+
+    // what the eye at (eye, yaw, pitch) with this view really shows of t
+    static void preactlook(const vec &eye, float yaw, float pitch, float hfov, float vfov, fpsent *t, preactsight &r)
+    {
+        static const int band[7] = { 0, 1, 1, 1, 2, 3, 4 };
+        r.bits = r.npts = 0;
+        r.vispx = r.bodypx = 0;
+        r.sx = r.sy = 2;
+        vec f, rt(-cosf(yaw*RAD), -sinf(yaw*RAD), 0), up;
+        vecfromyawpitch(yaw, pitch, 1, 0, f);
+        up.cross(f, rt);
+        float th = tanf(hfov*0.5f*RAD), tv = tanf(vfov*0.5f*RAD);
+        float feet = t->o.z - t->eyeheight, height = t->eyeheight + t->aboveeye;
+        float bandz[5] = { t->o.z + 0.5f, t->o.z - t->eyeheight*0.3f, t->o.z - t->eyeheight*0.55f, t->o.z - t->eyeheight*0.8f, feet + 1.0f };
+        vec tc = vec(t->o.x, t->o.y, bandz[1]).sub(eye);
+        r.dist = tc.magnitude();
+        r.xhang = r.dist > 0.5f ? atan2f(vec().cross(f, tc).magnitude(), f.dot(tc))/RAD : 0;
+        float zc = tc.dot(f);
+        if(zc > 1.0f)
+        {
+            r.sx = tc.dot(rt)/(zc*th);
+            r.sy = tc.dot(up)/(zc*tv);
+            r.bodypx = height/(zc*2*tv)*screenh;
+        }
+        vec side(tc.y, -tc.x, 0);
+        float sl = side.magnitude();
+        if(sl > 1e-3f) side.mul(t->radius*0.85f/sl);
+        else side = vec(0, 0, 0);
+        loopi(7)
+        {
+            vec p(t->o.x, t->o.y, bandz[band[i]]);
+            if(i == 2) p.sub(side);
+            else if(i == 3) p.add(side);
+            vec d = vec(p).sub(eye);
+            float z = d.dot(f);
+            if(z < 1.0f) continue;
+            if(fabs(d.dot(rt)) > z*th || fabs(d.dot(up)) > z*tv) continue;
+            r.bits |= PREACT_INVIEW;
+            float mag = d.magnitude();
+            float dist = raycube(eye, vec(d).mul(1.0f/mag), mag, RAY_ALPHAPOLY|RAY_SKIPFIRST);
+            if(dist >= 0 && dist < mag - 0.35f) continue;
+            r.npts++;
+        }
+        if(!r.npts) return;
+        r.bits |= PREACT_LOS;
+        // visible size: square root of the visible area, the silhouette being about 0.42 x height^2
+        // (measured against the pixels the renderer draws), times the share of points seen
+        r.vispx = sqrtf(0.42f*r.bodypx*r.bodypx*r.npts/7.0f);
+        if(r.vispx >= PREACT_MINPX) r.bits |= PREACT_SEEN;
+    }
+
+    static void preacttrack(preciseview &p, const preactsight &s, int now)
+    {
+        if(s.bits&PREACT_XHAIR) { if(!p.xhenter) p.xhenter = now; }
+        else if(p.xhenter)
+        {
+            p.xhprevs = p.xhenter;
+            p.xhpreve = now;
+            p.xhenter = 0;
+        }
+        if(s.bits&PREACT_SEEN)
+        {
+            if(!p.sight || now - p.lastvis > PREACT_GAP) p.sight = now;
+            p.lastvis = now;
+        }
+    }
+
+    void notereactshot(fpsent *d)
+    {
+        if(d && d == preact_viewer) preact_lastshot = lastmillis;
+    }
+
+    void reactframe()
+    {
+        fpsent *v = player1 && !intermission && !m_edit ? reactviewerof() : NULL;
+        bool doreact = v && reacttime && reacttimemode;
+        bool dorec = v && v == player1 && !demoplayback && demohd::visrecording();
+        if(!doreact && !dorec)
+        {
+            if(preact_viewer) { clearprecise(); preact_viewer = NULL; }
+            demohd::visnone();
+            return;
+        }
+        if(v != preact_viewer) { clearprecise(); preact_viewer = v; }
+        if(v->state != CS_ALIVE) { demohd::visnone(); return; }
+
+        float asp = forceaspect ? forceaspect : (screenh > 0 ? screenw/float(screenh) : 16/9.0f);
+        float hfov = curfov > 10 ? curfov : (fov > 10 ? float(fov) : 100.0f);
+        if(v != player1 && v != followingplayer()) hfov = 100.0f; // not drawn from their eyes
+        float vfov = 2*atanf(tanf(hfov*0.5f*RAD)/asp)/RAD;
+        int now = lastmillis;
+        if(dorec)
+        {
+            demohd::visbegin();
+            demohd::visview(float(fov), float(zoomfov), 2*atanf(tanf(fov*0.5f*RAD)/asp)/RAD, screenw, screenh, int(PREACT_MINPX));
+        }
+        loopv(players)
+        {
+            fpsent *d = players[i];
+            if(!d || d == v || d == player1) continue;
+            int cn = d->clientnum;
+            if(cn < 0 || cn >= FRAGRT_CN) continue;
+            if(d->state != CS_ALIVE || isteam(d->team, v->team))
+            {
+                if(pview[cn].sight || pview[cn].xhenter) clearprecisecn(cn);
+                continue;
+            }
+            preactsight s;
+            preactlook(v->o, v->yaw, v->pitch, hfov, vfov, d, s);
+            if(s.bits&PREACT_INVIEW && (v == player1 ? reactmyxhair(d) : reactxhair(v->o, v->yaw, v->pitch, d))) s.bits |= PREACT_XHAIR;
+            if(dorec) demohd::notevis(cn, s.bits | (min(s.npts, 7)<<4), s.vispx, s.bodypx, s.xhang, s.dist, s.sx, s.sy);
+            if(doreact) preacttrack(pview[cn], s, now);
+        }
+        if(dorec) demohd::visend();
+    }
+
+    // a frag by the measured player: seen / aim from the sighting to the shot that killed
+    static void precisefrag(fpsent *actor, fpsent *victim, int &fovms, int &xhms)
+    {
+        if(!reacttimemode || !actor || actor != preact_viewer || !victim) return;
+        int cn = victim->clientnum;
+        if(cn < 0 || cn >= FRAGRT_CN) return;
+        preciseview &p = pview[cn];
+        int shot = preact_lastshot && lastmillis - preact_lastshot <= PREACT_SHOTMS ? preact_lastshot : lastmillis;
+        fovms = xhms = 0;
+        if(p.sight && p.sight <= shot && shot - p.lastvis <= FRAGRT_GRACE) fovms = clamp(shot - p.sight, 1, FRAGRT_MAXMS);
+        if(p.xhenter && p.xhenter <= shot) xhms = clamp(shot - p.xhenter, 1, FRAGRT_MAXMS);
+        else if(p.xhprevs && p.xhprevs <= shot && shot - p.xhpreve <= FRAGRT_GRACE) xhms = clamp(min(shot, p.xhpreve) - p.xhprevs, 1, FRAGRT_MAXMS);
     }
 
     static void formatreact(char *dst, int len, int fovms, int xhms, bool approx)
@@ -1169,7 +1343,11 @@ namespace game
         {
             // watched player (HD): their own view; the killer's view is exact only if the killer is HD too
             showreact = true;
-            if(actor==rv) samplefragreact(victim, true, fovms, xhms);
+            if(actor==rv)
+            {
+                samplefragreact(victim, true, fovms, xhms);
+                precisefrag(actor, victim, fovms, xhms);
+            }
             else
             {
                 samplefragreact(actor, false, fovms, xhms);
@@ -1182,6 +1360,7 @@ namespace game
             if(actor==player1)
             {
                 samplefragreact(victim, true, fovms, xhms);
+                precisefrag(actor, victim, fovms, xhms);
                 if(clanmodactive() && !demoplayback && victim->aitype==AI_NONE)
                 {
                     defformatstring(cmd, "%s %d %d %d", FRAGRT_CMD, victim->clientnum, fovms, xhms);
@@ -2158,8 +2337,8 @@ namespace game
         }
     }
 
-    // big CTF messages, apart from the kill feed: a flag stolen or picked
-    // up, a flag scored (with the run time when it came from the base)
+    // big CTF messages, apart from the kill feed: a flag stolen, picked up,
+    // dropped, returned or reset, a flag scored (with the run time when it came from the base)
     VARP(flagfeed, 0, 1, 1);
     VARP(flagfeedfade, 1, 4, 20);
     struct flagfeedline { string text; int icon, millis; };

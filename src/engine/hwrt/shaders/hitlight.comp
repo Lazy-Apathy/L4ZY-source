@@ -6,6 +6,7 @@
 #extension GL_KHR_shader_subgroup_basic : require
 #extension GL_KHR_shader_subgroup_ballot : require
 #extension GL_KHR_shader_subgroup_arithmetic : require
+#extension GL_KHR_shader_subgroup_vote : require
 
 // Lot 2 (shots/rt-performance-lot2): the lighting pass with the same result for every
 // pixel and less invariant work. What changed, and why it cannot change a pixel:
@@ -155,6 +156,9 @@ struct LightEnv {
     mat4 nrdViewToClip;
     mat4 nrdViewToClipPrev;
     vec4 nrdHit; // A, B, C, denoisingRange
+    vec4 soft;   // extended sources: tan(sun angular radius), rays, pattern bits, adaptive
+    vec4 soft2;  // rays by apparent size: radians of diameter per extra ray (0 off), fewest rays, spare, spare
+    vec4 soft3;  // optimised rays: smallest contribution, tan of the smallest half-angle, temporal weight, filter radius scale
 };
 struct Light { vec3 pos; float radius; vec3 color; float flags; };
 // Same buffer as hitlight.comp; lot 2 appends one word per lamp after the 256
@@ -177,6 +181,12 @@ layout(std430, binding = 6) readonly buffer Lights {
     Light water[REFL_MAXPLANES];
 #ifndef HWRT_NO_REFL
     vec4 waterRect[REFL_MAXRECTS];
+    // Animated water (water.cpp hwrtwaterwaves): [0] x on, y grid n,
+    // z 1/tile, w slope scale; [1] second layer rotation cos/sin, 1/its
+    // tile, weight; [2] x far fade, y shore depth; then the n*n slopes of
+    // the tile (x, y), row by row.
+    vec4 waveParams[3];
+    vec2 waveSlope[];
 #endif
 } lights;
 
@@ -244,6 +254,11 @@ layout(binding = 28) uniform sampler2DArray normals;
 // The world diffuse again (same image as binding 5) through an anisotropic
 // sampler, for hwrtdiffmip 2. Plain sampler when the device has no anisotropy.
 layout(binding = 29) uniform sampler2DArray diffusesAniso;
+// NRD SIGMA for the soft shadows (SOFT_SIGMA only; trace.cpp binds 1x1 images otherwise): 30 the extended lamps'
+// light before their shadows (rgb) and the sun's N.L (a), 31 the penumbra radius, 32 the noisy lit fractions.
+layout(binding = 30, rgba16f) uniform writeonly image2D sigu;
+layout(binding = 31, r16f) uniform writeonly image2D sigpen;
+layout(binding = 32, rgba8) uniform writeonly image2D sigfrac;
 
 layout(push_constant) uniform Params
 {
@@ -304,6 +319,18 @@ const int REFL_WATER = 0x2000;
 const int REFL_WORLD = 0x4000;
 const int SPEC = 0x8000;
 const int REFL_PLANESHIFT = 16;
+// rt-performance-lot4. Bits 24-29: reach of the sky rays in 32-unit steps
+// (hwrtskyrange, 0 = to the far plane); a ray that meets nothing that close
+// counts as open sky. RT_ADAPT (hwrtrtadapt): shorter sky rays where it shows
+// least (screen edges, far surfaces, dark textures), RT_FAST: the camera turns
+// or moves fast this frame, shorter still.
+const int SKYRANGE_SHIFT = 24;
+const int RT_ADAPT = 0x200000;
+const int RT_FAST = 0x400000;
+// RT_SKYOPAQUE (hwrtskyopaque): sky rays see alpha-tested models (foliage) as solid
+// and skip smoke, so the hardware never hands a candidate back to the shader.
+const int RT_SKYOPAQUE = 0x800000;
+const float ADAPT_REACH = 1024.0;
 // ShadeTri.x: bits 0-8 diffuse layer, 9-16 specscale x 16, 17 "times the spec
 // map in diffuse.a", 18-25 normal layer (255 = none). All ones = no triangle.
 const uint TRI_LAYER_MASK = 0x1FFu;
@@ -326,6 +353,10 @@ const uint RAYMASK_SELF  = 0x04u;
 const uint RAYMASK_CASTER = 0x08u;
 const uint RAYMASK_PORTAL = 0x10u;
 const uint RAYMASK_SMOKE = 0x20u;
+// The local player's body in third person (always together with MODEL).
+const uint RAYMASK_LOCAL = 0x40u;
+// Other players, corpses, projectiles, flags, pickups (instead of MODEL).
+const uint RAYMASK_DYN = 0x80u;
 const uint RAYMASK_ALL = 0xFFu;
 // customIndex bit 16 (HWRT_SMOKE_SOFT): a soft smoke puff, bits 8-15 its peak
 // optical depth in 1/128. Never a surface; shadow and sky rays integrate it.
@@ -709,7 +740,7 @@ bool occluded(vec3 origin, vec3 dir, float tmax, uint mask, uint skipInst)
     // punched teleporter rim) still block, the alpha canopy does not.
     // OpaqueEXT lets hardware terminate. Sun / ordinary lamps keep CASTER
     // in the mask so they still take the any-hit path.
-    bool skipalpha = (mask & ~(RAYMASK_WORLD | RAYMASK_MODEL | RAYMASK_PORTAL)) == 0u;
+    bool skipalpha = (mask & ~(RAYMASK_WORLD | RAYMASK_MODEL | RAYMASK_DYN | RAYMASK_PORTAL)) == 0u;
     uint rflags = gl_RayFlagsTerminateOnFirstHitEXT;
     if(skipalpha) rflags |= gl_RayFlagsOpaqueEXT;
     rayQueryInitializeEXT(sq, tlas, rflags, mask, origin, tmin, dir, tfar);
@@ -746,7 +777,7 @@ float occludedT(vec3 origin, vec3 dir, float tmax, uint mask, uint skipInst)
     float tmin = 0.01;
     float tfar = max(tmax, tmin + 0.001);
     if(mask == 0u) mask = RAYMASK_ALL;
-    bool skipalpha = (mask & ~(RAYMASK_WORLD | RAYMASK_MODEL | RAYMASK_PORTAL)) == 0u;
+    bool skipalpha = (mask & ~(RAYMASK_WORLD | RAYMASK_MODEL | RAYMASK_DYN | RAYMASK_PORTAL)) == 0u;
     uint rflags = gl_RayFlagsTerminateOnFirstHitEXT;
     if(skipalpha) rflags |= gl_RayFlagsOpaqueEXT;
     rayQueryInitializeEXT(sq, tlas, rflags, mask, origin, tmin, dir, tfar);
@@ -870,6 +901,240 @@ int skyPackFlags()
     return int(lights.env.diffPad1 + 0.5);
 }
 
+// Extended light sources (lights.cpp: hwrtsunsize, hwrtlampsize, hwrtglowsize,
+// hwrtsoftrays, hwrtsoftnoise). The pixel's two pattern numbers in [0, 1):
+// fixed per pixel (a still dither the anti-aliasing resolves), or shifted by
+// the R2 step every frame (soft.z bit 0) so the temporal anti-aliasing averages
+// the penumbra; from the sky's blue-noise tile (bit 1, when it is loaded),
+// offset so the two patterns do not line up, else from a hash.
+vec2 softBase()
+{
+    ivec2 q = ivec2(gl_GlobalInvocationID.xy);
+    int mode = int(lights.env.soft.z + 0.5);
+    bool perframe = (mode & 1) != 0;
+    uvec2 b;
+    if((mode & 2) != 0 && (skyPackFlags() & 8192) != 0)
+        b = skyBlueNoiseBase(q + ivec2(37, 71), !perframe);
+    else
+    {
+        uint h = pcg(uint(q.x) * 1973u + uint(q.y) * 9277u + 26699u);
+        b = uvec2(h, pcg(h));
+        if(perframe) b += uint(pc.frame) * uvec2(3242174889u, 2447445414u);
+    }
+    return vec2(b >> 8u) * (1.0 / 16777216.0);
+}
+
+// Sample k of n on the unit disc: stratified radius, golden-angle turns.
+vec2 softDisc(vec2 u, int k, int n)
+{
+    float r = sqrt((float(k) + u.y) / float(n));
+    float a = 6.28318530718 * (u.x + float(k) * 0.61803398875);
+    return vec2(cos(a), sin(a)) * r;
+}
+
+// Extended sources are compiled in only for the pipeline that needs them
+// (specialization constant 0, trace.cpp): with every size at 0 the lighting
+// pass runs the shader without their code, as a bigger shader is slower even
+// when its extra branches are never taken.
+layout(constant_id = 0) const bool SOFT_SOURCES = false;
+// Optimised extended sources (sources-etendues-opti, lights.cpp hwrtsoftopt), each compiled in only for the
+// pipeline that uses it (trace.cpp): every piece of code the pass carries slows it down, even unused.
+// SOFT_LEAN: one ray per source per pixel to a point of the source that changes with the pixel (blue noise) and
+// with every frame: the code of a point source with a moved target. The prototype's loop of rays stays the
+// SOFT_SOURCES && !SOFT_LEAN pipeline (hwrtsoftopt 0).
+// SOFT_DETECT: the source's other rays (hwrtsoftrays, by apparent size) only where the first rays of a subgroup
+// of pixels (a 16x2 strip) on the same source disagree, i.e. where a penumbra or a shadow edge crosses it.
+// SOFT_FILTER: the extended sources' light kept apart as a lit fraction, filtered over the 5x5 pixels of the same
+// surface with a radius from the estimated penumbra width, then multiplied back.
+// SOFT_TEMPORAL: with the filter and NRD on, the fraction also averaged over the last frames on the same surface,
+// held inside the range of this frame's neighbouring pixels.
+layout(constant_id = 1) const bool SOFT_LEAN = false;
+layout(constant_id = 2) const bool SOFT_DETECT = false;
+layout(constant_id = 3) const bool SOFT_FILTER = false;
+layout(constant_id = 4) const bool SOFT_TEMPORAL = false;
+// SOFT_SUN_RAYS, SOFT_LAMP_RAYS (lights.cpp hwrtsoftshadowrays): with SOFT_LEAN alone, the rays per pixel for the
+// sun and for each extended lamp. 1 is the single moved ray above; more go to as many points of the source's disc,
+// spread over it (stratified radius, golden-angle turns) and still moved with the pixel and every frame, for a
+// smoother penumbra at the cost of each ray. A pipeline per count (trace.cpp), so 1 keeps the code of before; the
+// lamps keep 1 while no lamp is extended, as their loop of rays costs the whole pass some speed.
+layout(constant_id = 5) const int SOFT_SUN_RAYS = 1;
+layout(constant_id = 6) const int SOFT_LAMP_RAYS = 1;
+// SOFT_SIGMA_ON (lights.cpp hwrtsoftsigma, with NRD on): with SOFT_LEAN alone, the extended sources' light kept apart
+// as lit fractions (sun; lamps per colour) with a penumbra radius, written for NRD SIGMA (bindings 30-32) instead of
+// being added to the direct light the compose pass gets; the compose pass adds it back, denoised, before the
+// max(sun + lamps, sky) of the bake. Its own pipeline (trace.cpp), so the others keep their code.
+layout(constant_id = 7) const bool SOFT_SIGMA_ON = false;
+const bool SOFT_OLD = SOFT_SOURCES && !SOFT_LEAN;
+const bool SOFT_NEW = SOFT_SOURCES && SOFT_LEAN;
+const bool SOFT_RATIO = SOFT_NEW && SOFT_FILTER;
+const bool SOFT_SIGMA = SOFT_NEW && SOFT_SIGMA_ON && !SOFT_DETECT && !SOFT_FILTER;
+
+// Shadow rays per extended source, and whether they run adaptively: with 4 or
+// more, the two outermost samples go first and, when they agree, the pixel is
+// taken as fully lit or fully shadowed and the other rays are skipped, so only
+// the penumbra pays for every ray (soft.w).
+int softRayCount() { return clamp(int(lights.env.soft.y + 0.5), 1, 16); }
+// The rays for a source seen under the angle a (diameter / distance, radians).
+int softRayCountFor(float a)
+{
+    int nmax = softRayCount();
+    if(lights.env.soft2.x <= 0.0) return nmax;
+    int nmin = clamp(int(lights.env.soft2.y + 0.5), 1, nmax);
+    return clamp(nmin + int(a / lights.env.soft2.x), nmin, nmax);
+}
+bool softAdaptive(int nr) { return lights.env.soft.w > 0.5 && nr >= 4; }
+// SOFT_RATIO: the sun's light before its shadow and its lit fraction; the extended lamps' light before and
+// after their shadows; the widest penumbra estimated from an occluded ray here (world units, -1 none).
+vec3 gSunU = vec3(0.0);
+float gSunV = -1.0;
+vec3 gLampU = vec3(0.0);
+vec3 gLampV = vec3(0.0);
+float gPenW = -1.0;
+// SOFT_SIGMA: the sun's N.L; the mean distance to what stopped the rays of the last softRays() (-1 none) and to what
+// stopped the current lamp; the penumbra radius NRD expects (65504: no ray stopped) for the sun and for the brightest
+// extended lamp here (gSigLampL its light). SIGMA gets one radius per pixel: that of the brighter of the two, as a
+// faint source in its umbra must not set the blur of the main one (NRD README: driven by the most important light).
+float gSunNdl = 0.0;
+float gRayT = -1.0;
+float gOccT = -1.0;
+float gSigSunPen = 65504.0;
+float gSigLampPen = 65504.0;
+float gSigLampL = 0.0;
+float sigmaRadius(float r) { return clamp(r, 1e-4, 32768.0); }
+
+// SOFT_NEW: the lit fraction of one source from sorigin. Lamp: rays to pos + disc offsets of radius sr, each as
+// long as the distance minus slack. Sun (lamp false): along pos + disc offsets of radius sr = tan of the angular
+// radius, up to tmax. ext false: one ray to the centre (a point source, or one too faint or too small here).
+// nr: the rays SOFT_DETECT may use; key: the source (lamp index, -1 the sun) for its subgroup test; kd: the
+// lamp's kind word (a teleporter ring's disc lies in the ring's plane).
+float softLean(vec3 sorigin, vec3 pos, bool lamp, bool ext, float sr, float dist, vec3 ldir, int nr, int key, uint mask, uint skipInst, float slack, float tmax, uint kd)
+{
+    vec3 tx = vec3(0.0), ty = vec3(0.0);
+    vec2 u = vec2(0.0);
+    if(ext)
+    {
+        vec3 up = abs(ldir.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+        tx = normalize(cross(up, ldir));
+        ty = cross(ldir, tx) * sr;
+        tx *= sr;
+        if((kd & 4u) != 0u)
+        {
+            float a = float((kd >> 8u) & 255u) * (6.28318530718 / 256.0);
+            tx = vec3(-sin(a), cos(a), 0.0) * sr;
+            ty = vec3(0.0, 0.0, sr);
+        }
+        u = softBase();
+    }
+    int n = (SOFT_DETECT && ext) ? nr : 1;
+    float vis = 0.0, first = 0.0, tbsum = 0.0;
+    int nocc = 0;
+    for(int j = 0; j < n; j++)
+    {
+        if(SOFT_DETECT && j == 1)
+        {
+            // Every pixel of the strip on this source saw the same with its first ray: no penumbra here.
+            if(subgroupAllEqual(key) && subgroupAll(abs(first - subgroupBroadcastFirst(first)) < 0.02)) { n = 1; break; }
+        }
+        vec2 o = ext ? softDisc(u, j, n) : vec2(0.0);
+        vec3 d;
+        float len;
+        if(lamp)
+        {
+            d = pos + tx * o.x + ty * o.y - sorigin;
+            float dl = length(d);
+            d /= dl;
+            len = dl - slack;
+        }
+        else
+        {
+            d = ext ? normalize(pos + tx * o.x + ty * o.y) : pos;
+            len = tmax;
+        }
+        float vt = -1.0;
+        float v = len <= 0.02 ? 1.0 : shadowVis(sorigin, d, len, mask, skipInst, vt);
+        if(SOFT_RATIO && vt > 0.0) { tbsum += vt; nocc++; }
+        vis += v;
+        if(SOFT_DETECT && j == 0) first = v;
+    }
+    // Penumbra width here for an occluder at the mean hit distance (similar triangles).
+    if(SOFT_RATIO && ext && nocc > 0)
+    {
+        float tb = tbsum / float(nocc);
+        gPenW = max(gPenW, lamp ? 2.0 * sr * tb / max(dist - tb, 0.05 * dist) : 2.0 * sr * tb);
+    }
+    return vis / float(n);
+}
+
+// SOFT_NEW without the optional parts: where this pixel's single ray goes this frame, pos + a point of the disc of
+// radius sr facing ldir (a teleporter ring's disc in the ring's plane, kind bit 2). For the sun, pos = its
+// direction and sr = tan of its angular radius: the result is a direction to normalise. Kept this small on
+// purpose: it is all the soft pipeline adds to a point source, so the pass keeps the point sources' speed.
+vec3 softTarget(vec3 pos, float sr, vec3 ldir, uint kd)
+{
+    vec2 o = softDisc(softBase(), 0, 1) * sr;
+    vec3 tx, ty;
+    if((kd & 4u) != 0u)
+    {
+        float a = float((kd >> 8u) & 255u) * (6.28318530718 / 256.0);
+        tx = vec3(-sin(a), cos(a), 0.0);
+        ty = vec3(0.0, 0.0, 1.0);
+    }
+    else
+    {
+        vec3 up = abs(ldir.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+        tx = normalize(cross(up, ldir));
+        ty = cross(ldir, tx);
+    }
+    return pos + tx * o.x + ty * o.y;
+}
+// SOFT_SUN_RAYS / SOFT_LAMP_RAYS > 1: the lit fraction of an extended lamp (pos, disc radius sr facing ldir, kind
+// word kd) from n rays to points of its disc, each as long as its distance minus slack; bodymask (not 0): the
+// second ray against the bodies, along each ray the world left clear. Sun (lamp false): pos = its direction,
+// sr = tan of its angular radius, rays up to tmax.
+float softRays(int n, vec3 sorigin, vec3 pos, bool lamp, float sr, vec3 ldir, uint kd, float slack, float tmax, uint mask, uint bodymask, uint skipInst)
+{
+    vec3 tx, ty;
+    if((kd & 4u) != 0u)
+    {
+        float a = float((kd >> 8u) & 255u) * (6.28318530718 / 256.0);
+        tx = vec3(-sin(a), cos(a), 0.0);
+        ty = vec3(0.0, 0.0, 1.0);
+    }
+    else
+    {
+        vec3 up = abs(ldir.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+        tx = normalize(cross(up, ldir));
+        ty = cross(ldir, tx);
+    }
+    vec2 u = softBase();
+    float vis = 0.0;
+    float tsum = 0.0;
+    int nhit = 0;
+    for(int k = 0; k < n; k++)
+    {
+        vec2 o = softDisc(u, k, n) * sr;
+        vec3 d = pos + tx * o.x + ty * o.y;
+        float len = tmax;
+        if(lamp)
+        {
+            d -= sorigin;
+            float dl = length(d);
+            d /= dl;
+            len = dl - slack;
+        }
+        else d = normalize(d);
+        float vt;
+        float v = shadowVis(sorigin, d, len, mask, skipInst, vt);
+        if(v > 0.0 && bodymask != 0u) v *= shadowVis(sorigin, d, len, bodymask, skipInst, vt);
+        if(SOFT_SIGMA && vt > 0.0) { tsum += vt; nhit++; }
+        vis += v;
+    }
+    if(SOFT_SIGMA) gRayT = nhit > 0 ? tsum / float(nhit) : -1.0;
+    return vis / float(n);
+}
+// Ray j of nr: adaptive order nr-1, nr-2, then 0 .. nr-3.
+int softOrder(int j, int nr, bool adapt) { return adapt ? (j < 2 ? nr - 1 - j : j - 2) : j; }
+
 // Smooth normals (hwrtsmoothnormals, bit 14). gFlatN keeps the flat face
 // normal of a world hit whose lighting normal was smoothed; the sky rays use
 // it to stay above the face.
@@ -919,7 +1184,11 @@ void addSpec(vec3 ldir, vec3 n, vec3 viewDir, vec3 color, float specMul, inout v
     specAcc += color * sp * specMul;
 }
 
-void addOmni(int i, vec3 hit, vec3 n, vec3 sorigin, uint shmask, uint skipInst, bool wrap, inout vec3 acc, vec3 viewDir, float specMul, inout vec3 specAcc)
+// bodymask: a second shadow ray against the bodies and game objects alone
+// (DYN, plus SELF / LOCAL from hwrtshadowself 2), traced only once shmask found
+// the lamp clear. 0 for none. The teleport / lava lamps use it: their world ray
+// stays opaque and skips the mapmodel foliage, and this one honours skipInst.
+void addOmni(int i, vec3 hit, vec3 n, vec3 sorigin, uint shmask, uint bodymask, uint skipInst, bool wrap, inout vec3 acc, vec3 viewDir, float specMul, inout vec3 specAcc)
 {
     vec3 toL = lights.l[i].pos - sorigin;
     float mag = length(toL);
@@ -959,13 +1228,114 @@ void addOmni(int i, vec3 hit, vec3 n, vec3 sorigin, uint shmask, uint skipInst, 
     float vis = 1.0;
     bool wantshadow = flags < 0.5 || flags >= 2.5;
     float slack = flags >= 2.5 ? 0.35 : 0.01;
+    bool extended = false;
+    float extsr = 0.0;
     if(wantshadow && mag > slack + 0.02)
     {
-        float vt;
-        vis = shadowVis(sorigin, ldir, mag - slack, shmask, skipInst, vt);
+        // Extended source: radius / 128 rides in the flags of a shadowed lamp
+        // (0 + r/128) or a teleporter / lava lamp (3 + r/128).
+        float sr = flags < 0.5 ? flags * 128.0 : (flags - 3.0) * 128.0;
+        // The second ray against the bodies (bodymask) aims where the world ray did.
+        vec3 bdir = ldir;
+        float bdist = mag - slack;
+        // An unlimited lamp (the baker's old-map sun) far away: at least the
+        // sun's angular size.
+        if(radius <= 0.0 && lights.env.soft.x > 0.0) sr = max(sr, mag * lights.env.soft.x);
+        // Point source: one ray to the centre. Extended: rays to points of a
+        // disc of radius sr facing the hit; a teleporter ring's disc lies in the
+        // ring's plane (kind bit 2, bits 8-15 its normal's angle / 2pi), inside
+        // the hole.
+        if(SOFT_NEW)
+        {
+            // Extended unless it adds less than soft3.x to this pixel or looks smaller than soft3.y (hwrtsoftopt 16).
+            vec3 lc = lights.l[i].color;
+            extended = sr >= 0.05 && intensity * ndotl * max(lc.r, max(lc.g, lc.b)) >= lights.env.soft3.x
+                       && sr >= mag * lights.env.soft3.y;
+            if(SOFT_SIGMA) extsr = sr;
+            if(!SOFT_DETECT && !SOFT_FILTER && SOFT_LAMP_RAYS > 1 && extended)
+            {
+                vis = softRays(SOFT_LAMP_RAYS, sorigin, lights.l[i].pos, true, sr, ldir, lights.kind[i], slack, 0.0, shmask, bodymask, skipInst);
+                bodymask = 0u;
+                if(SOFT_SIGMA) gOccT = gRayT;
+            }
+            else if(!SOFT_DETECT && !SOFT_FILTER)
+            {
+                vec3 d = (extended ? softTarget(lights.l[i].pos, sr, ldir, lights.kind[i]) : lights.l[i].pos) - sorigin;
+                float dl = length(d);
+                float vt;
+                vis = shadowVis(sorigin, d / dl, dl - slack, shmask, skipInst, vt);
+                if(SOFT_SIGMA) gOccT = vt;
+                bdir = d / dl;
+                bdist = dl - slack;
+            }
+            else
+            {
+                int nr = (extended && SOFT_DETECT) ? softRayCountFor(2.0 * sr / max(mag, 1.0)) : 1;
+                vis = softLean(sorigin, lights.l[i].pos, true, extended, sr, mag, ldir, nr, i, shmask, skipInst, slack, 0.0, lights.kind[i]);
+            }
+        }
+        else if(SOFT_OLD && sr >= 0.05)
+        {
+            int nr = softRayCountFor(2.0 * sr / max(mag, 1.0));
+            bool adapt = softAdaptive(nr);
+            vec3 up = abs(ldir.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+            vec3 tx = normalize(cross(up, ldir));
+            vec3 ty = cross(ldir, tx);
+            uint kd = lights.kind[i];
+            if((kd & 4u) != 0u)
+            {
+                float a = float((kd >> 8u) & 255u) * (6.28318530718 / 256.0);
+                tx = vec3(-sin(a), cos(a), 0.0);
+                ty = vec3(0.0, 0.0, 1.0);
+            }
+            vec2 u = softBase();
+            vis = 0.0;
+            float first = 0.0;
+            for(int j = 0; j < 16; j++)
+            {
+                if(j >= nr) break;
+                vec2 o = softDisc(u, softOrder(j, nr, adapt), nr) * sr;
+                vec3 d = lights.l[i].pos + tx * o.x + ty * o.y - sorigin;
+                float dl = length(d);
+                float vt;
+                float v = dl <= slack + 0.02 ? 1.0 : shadowVis(sorigin, d / dl, dl - slack, shmask, skipInst, vt);
+                vis += v;
+                if(adapt && j == 0) first = v;
+                if(adapt && j == 1 && abs(v - first) < 0.02) { nr = 2; break; }
+            }
+            vis /= float(nr);
+        }
+        else
+        {
+            float vt;
+            vis = shadowVis(sorigin, ldir, mag - slack, shmask, skipInst, vt);
+        }
+        if(vis > 0.0 && bodymask != 0u)
+        {
+            float vt;
+            vis *= shadowVis(sorigin, bdir, bdist, bodymask, skipInst, vt);
+            if(SOFT_SIGMA && vt > 0.0) gOccT = vt;
+        }
     }
+    // SOFT_RATIO: an extended source's light waits for the filtered lit fraction (after the tile filter).
+    // SOFT_SIGMA: it goes to NRD SIGMA as a lit fraction, with the penumbra radius NRD expects for a local source
+    // (SIGMA_FrontEnd_PackPenumbra: disc diameter 2 sr) if it is the brightest extended lamp here.
+    bool ratio = (SOFT_RATIO || SOFT_SIGMA) && extended;
+    if(ratio)
+    {
+        vec3 c = lights.l[i].color * intensity * ndotl;
+        gLampU += c;
+        gLampV += c * vis;
+        float cl = dot(c, vec3(0.2126, 0.7152, 0.0722));
+        if(SOFT_SIGMA && cl > gSigLampL)
+        {
+            gSigLampL = cl;
+            gSigLampPen = gOccT > 0.0 ? sigmaRadius(extsr * gOccT / max(mag - gOccT, 1e-3)) : 65504.0;
+        }
+    }
+    if(SOFT_SIGMA) gOccT = -1.0;
     if(vis <= 0.0) return;
-    acc += lights.l[i].color * intensity * ndotl * vis;
+    if(!ratio) acc += lights.l[i].color * intensity * ndotl * vis;
     if(!aura)
     {
         addSpec(ldir, n, viewDir, lights.l[i].color * intensity * vis, specMul, specAcc);
@@ -1174,7 +1544,7 @@ vec3 traceReflection(vec3 ro, vec3 rd, float travelled, float pixangle, out floa
     float tmax = max(pc.range.x, 1.0);
     // World and other models; never SELF, like GL's reflection pass, which
     // does not draw the first-person player either.
-    uint mask = RAYMASK_WORLD | RAYMASK_MODEL;
+    uint mask = RAYMASK_WORLD | RAYMASK_MODEL | RAYMASK_DYN;
     rayQueryEXT rq;
     rayQueryInitializeEXT(rq, tlas, 0, mask, ro, 0.02, rd, tmax);
     while(rayQueryProceedEXT(rq))
@@ -1251,7 +1621,7 @@ vec3 traceReflection(vec3 ro, vec3 rd, float travelled, float pixangle, out floa
             sdir = normalize(sdir);
             float ndl = modelWrap(dot(n, sdir));
             uint inst = uint(rayQueryGetIntersectionInstanceIdEXT(rq, true));
-            if(ndl > 0.0 && !occluded(hit + ng * MODEL_SHADOW_BIAS, sdir, tmax, RAYMASK_WORLD | RAYMASK_MODEL, inst))
+            if(ndl > 0.0 && !occluded(hit + ng * MODEL_SHADOW_BIAS, sdir, tmax, RAYMASK_WORLD | RAYMASK_MODEL | RAYMASK_DYN, inst))
                 lit += lights.env.sunColor * ndl;
         }
     }
@@ -1288,6 +1658,38 @@ vec3 traceReflection(vec3 ro, vec3 rd, float travelled, float pixangle, out floa
 // which GL turns into a depth for the particles it draws into this image.
 // 0 = nothing traced: GL then draws that pixel from its own planar texture.
 #ifndef HWRT_NO_REFL
+// Animated water: bilinear, wrapping lookup of the slope tile (uv in tiles), the
+// same filtering GL's base level gets.
+vec2 waveSlopeAt(vec2 uv)
+{
+    int n = int(lights.waveParams[0].y), m = n - 1;
+    vec2 u = uv * float(n) - 0.5;
+    ivec2 i0 = ivec2(floor(u));
+    vec2 f = u - vec2(i0);
+    int x0 = i0.x & m, x1 = (i0.x + 1) & m, y0 = (i0.y & m) * n, y1 = ((i0.y + 1) & m) * n;
+    vec2 a = mix(lights.waveSlope[y0 + x0], lights.waveSlope[y0 + x1], f.x);
+    vec2 b = mix(lights.waveSlope[y1 + x0], lights.waveSlope[y1 + x1], f.x);
+    return mix(a, b, f.y);
+}
+
+// Wave normal at a point of a water plane. The tile has no mip levels here:
+// from one texel per footprint the slope fades out (gone at three, the same
+// fade as the GL water shaders), so far water does not sparkle; it also
+// fades where the water is shallow (depth along the vertical, from the
+// primary hit behind the water), so a shore does not shimmer.
+vec3 waveNormal(vec2 p, float footprint, float depth)
+{
+    vec4 P = lights.waveParams[0], Q = lights.waveParams[1], F = lights.waveParams[2];
+    vec2 s = waveSlopeAt(p * P.z);
+    vec2 q = vec2(dot(p, Q.xy), dot(p, vec2(-Q.y, Q.x))) * Q.z;
+    vec2 s2 = waveSlopeAt(q + vec2(0.37, 0.61));
+    s += Q.w * vec2(s2.x * Q.x - s2.y * Q.y, s2.x * Q.y + s2.y * Q.x);
+    float texel = 1.0 / (P.z * P.y);
+    float fade = clamp(1.5 - 0.5 * F.x * footprint / texel, 0.0, 1.0);
+    if(F.y > 0.0) fade *= clamp(depth / F.y, 0.0, 1.0);
+    return normalize(vec3(-s * (P.w * fade), 1.0));
+}
+
 void waterReflection(ivec2 p)
 {
     if((pc.mode & REFL_WATER) == 0) return;
@@ -1327,6 +1729,16 @@ void waterReflection(ivec2 p)
     {
         vec3 hp = o + d * bestT;
         vec3 rd = vec3(d.x, d.y, -d.z);
+        if(lights.waveParams[0].x > 0.5)
+        {
+            // Footprint of the pixel on the plane, between its narrow and
+            // its long (grazing) axis.
+            float footprint = reflPixelAngle() * bestT / sqrt(max(-d.z, 0.01));
+            float depth = gPrimaryT < 1e29 ? (gPrimaryT - bestT) * -d.z : 1e6;
+            rd = reflect(d, waveNormal(hp.xy, footprint, depth));
+            // a facet tilted past the view ray would send it under the water
+            if(rd.z < 0.02) rd = normalize(vec3(rd.xy, 0.02));
+        }
         float rt;
         vec3 c = traceReflection(hp + vec3(0.0, 0.0, 0.02), rd, bestT, reflPixelAngle(), rt);
         float path = rt < 0.0 ? 65535.0 : min(bestT + rt, 65535.0);
@@ -1370,6 +1782,34 @@ vec4 worldNormalSpec(uint nlayer, vec2 tc, vec4 grad, vec3 p0, vec3 p1, vec3 p2,
     vec3 nb = T * nm.x + Bo * nm.y + n * nm.z;
     float bl = length(nb);
     return vec4(bl > 1e-6 ? nb / bl : n, ns.a);
+}
+
+// SOFT_SIGMA: what NRD SIGMA_SHADOW_TRANSLUCENCY gets for a world pixel (else zeros): the lamps' light before their
+// shadows and the sun's N.L; the penumbra radius of the brighter source (65504 when its rays were not stopped, 0 when
+// no soft source lights the pixel); the noisy lit fractions, x the sun, yzw the lamps per colour (a source missing
+// here takes the other's).
+void storeSigma(ivec2 p, bool world)
+{
+    const vec3 lumw = vec3(0.2126, 0.7152, 0.0722);
+    vec4 u = vec4(0.0), f = vec4(0.0);
+    float pen = 0.0;
+    float lu = dot(gLampU, lumw);
+    bool sun = world && gSunV >= 0.0 && dot(gSunU, lumw) > 1e-5;
+    bool lamp = world && lu > 1e-5;
+    if(sun || lamp)
+    {
+        float sv = clamp(gSunV, 0.0, 1.0);
+        float ll = clamp(dot(gLampV, lumw) / max(lu, 1e-5), 0.0, 1.0);
+        vec3 lv = vec3(ll);
+        for(int c = 0; c < 3; c++)
+            if(gLampU[c] > 1e-5) lv[c] = clamp(gLampV[c] / gLampU[c], 0.0, 1.0);
+        f = vec4(sun ? sv : ll, lamp ? lv : vec3(sv));
+        u = vec4(lamp ? gLampU : vec3(0.0), sun ? gSunNdl : 0.0);
+        pen = (sun && (!lamp || dot(gSunU, lumw) >= gSigLampL)) ? gSigSunPen : gSigLampPen;
+    }
+    imageStore(sigu, p, u);
+    imageStore(sigpen, p, vec4(pen));
+    imageStore(sigfrac, p, f);
 }
 
 void shadePixel()
@@ -1418,7 +1858,7 @@ void shadePixel()
     vec3 hit = vec3(0.0);
     vec3 sorigin = vec3(0.0);
     float tmax = 0.0;
-    uint omnimask = 0u, nearmask = 0u, sunmask = 0u, skymask = 0u;
+    uint omnimask = 0u, nearmask = 0u, sunmask = 0u, skymask = 0u, glowbody = 0u;
     uint skipInst = 0xFFFFFFFFu;
     int nuse = 1;
     // Reflections lot: read again after tileCull (world spec, envmap mirror).
@@ -1427,6 +1867,15 @@ void shadePixel()
     float specmask = 1.0;
     float wspecScale = 0.0;
     float reflHitT = 0.0;
+#ifdef HWRT_SKY_HALF
+    // RT quality Medium / Low: the sky rays of one row pair in two, alternating every
+    // frame; the 5x5 sky filter fills the other rows from the rows above and below.
+    // Row pairs, not a checkerboard: a 16x16 tile runs two rows per 32-wide subgroup,
+    // so whole subgroups skip the rays (a checkerboard left every subgroup waiting on
+    // its traced half and saved almost nothing).
+    // False for a pixel that left its sky rays to its neighbours.
+    bool skyTraced = true;
+#endif
 
     if(live) do
     {
@@ -1453,7 +1902,7 @@ void shadePixel()
     // skins.a decides. Opaque BLAS triangles still commit in hardware.
     uint primarymask = RAYMASK_ALL & ~RAYMASK_SMOKE;
     if((pc.mode & SHADE_MODELS) != 0)
-        primarymask = RAYMASK_WORLD | RAYMASK_MODEL;
+        primarymask = RAYMASK_WORLD | RAYMASK_MODEL | RAYMASK_DYN;
     else if((pc.mode & MASK_MODELS) != 0)
         primarymask = RAYMASK_WORLD;
 
@@ -1848,7 +2297,8 @@ void shadePixel()
     // nearest hwrtdlights, so the body throws one silhouette per lamp, and
     // the shadow is cut wherever the winning lamp changes between two
     // neighbouring pixels. Hence 1 (default) is the sun alone, 2 adds the
-    // always-evaluated omnis, 3 the nearest-N finite lamps, 4 the sky -- a
+    // always-evaluated omnis (the teleport / lava glows through glowbody), 3 the
+    // nearest-N finite lamps, 4 the sky -- a
     // body that close eats every sample of the hemisphere (the 3D pit).
     // 0 is off.
     // Models keep walls + foliage + smoke, and skip their own instance so a
@@ -1863,9 +2313,15 @@ void shadePixel()
     {
         float ss = lights.env.shadowSelf;
         if(ss >= 0.5) sunmask = withself;
-        if(ss >= 1.5) omnimask = withself;
+        if(ss >= 1.5) { omnimask = withself; glowbody |= RAYMASK_SELF | RAYMASK_LOCAL; }
         if(ss >= 2.5) nearmask = withself;
-        if(ss >= 3.5) omnimask = nearmask = sunmask = skymask = RAYMASK_ALL;
+        if(ss >= 3.5) omnimask = nearmask = sunmask = skymask = RAYMASK_ALL & ~RAYMASK_DYN;
+        // hwrtshadowothers: which lights the others (DYN) shadow. 1 the sun and
+        // the sky, 2 + the teleport / lava lamps, 3 + the mapper lamps.
+        int others = 3 - ((skyPackFlags() >> 10) & 3);
+        if(others >= 1) { sunmask |= RAYMASK_DYN; skymask |= RAYMASK_DYN; }
+        if(others >= 2) glowbody |= RAYMASK_DYN;
+        if(others >= 3) { omnimask |= RAYMASK_DYN; nearmask |= RAYMASK_DYN; }
     }
     skipInst = ismodel ? hitInst : 0xFFFFFFFFu;
 #ifndef HWRT_NO_REFL
@@ -1890,7 +2346,11 @@ void shadePixel()
     // foliage any-hit path (the triforts 30 fps) does not run. WORLD|PORTAL
     // lets the punched teleporter rim block without player / leaf silhouettes
     // from the pad, so the lamp stays in the hole instead of flooding the
-    // floor in front of the ring.
+    // floor in front of the ring. A second ray (glowbody) then sees the other
+    // players, corpses, projectiles, flags and pickups (DYN, from
+    // hwrtshadowothers 2), and from
+    // hwrtshadowself 2 the local body, so they throw their shadow like they do
+    // for the other lamps. Mapmodel scenery stays out (its foliage any-hit).
     // Lot 2: the always-evaluated lamps of this tile, in index order. The 16 /
     // 96 caps were applied by the CPU (kind bit 0) counting in that same order,
     // and a glow dropped by the tile box would have returned at x >= 1 below.
@@ -1906,8 +2366,9 @@ void shadePixel()
         bool unlim = lights.l[i].radius <= 0.0;
         bool glowL = lights.l[i].flags >= 1.5 && !unlim;
         uint gmask = omnimask;
-        if(glowL && lights.l[i].flags >= 2.5) gmask = RAYMASK_WORLD | RAYMASK_PORTAL;
-        addOmni(i, hit, n, sorigin, gmask, skipInst, ismodel, direct, dir, specMul, specAcc);
+        uint bmask = 0u;
+        if(glowL && lights.l[i].flags >= 2.5) { gmask = RAYMASK_WORLD | RAYMASK_PORTAL; bmask = glowbody; }
+        addOmni(i, hit, n, sorigin, gmask, bmask, skipInst, ismodel, direct, dir, specMul, specAcc);
     }
 
     // Nearest-N among the finite lamps the tile box can reach, same order, same
@@ -1944,7 +2405,7 @@ void shadePixel()
     {
         int i = besti[k];
         if(i < 0) continue;
-        addOmni(i, hit, n, sorigin, nearmask, skipInst, ismodel, direct, dir, specMul, specAcc);
+        addOmni(i, hit, n, sorigin, nearmask, 0u, skipInst, ismodel, direct, dir, specMul, specAcc);
     }
 
     if(lights.env.sunOn > 0.5)
@@ -1959,11 +2420,63 @@ void shadePixel()
             else ndotl = max(ndotl, 0.0);
             if(ndotl > 0.0)
             {
+                // Point sun: one ray along sdir. Disc sun (soft.x = tan of its
+                // angular radius): rays to directions inside the disc.
+                float tanr = lights.env.soft.x;
                 float vt;
-                float vis = shadowVis(sorigin, sdir, tmax, sunmask, skipInst, vt);
+                float vis;
+                bool sunratio = false;
+                if(SOFT_NEW)
+                {
+                    bool ext = tanr > 0.0 && tanr >= lights.env.soft3.y;
+                    if(!SOFT_DETECT && !SOFT_FILTER && SOFT_SUN_RAYS > 1 && ext)
+                        vis = softRays(SOFT_SUN_RAYS, sorigin, sdir, false, tanr, sdir, 0u, 0.0, tmax, sunmask, 0u, skipInst);
+                    else if(!SOFT_DETECT && !SOFT_FILTER)
+                        vis = shadowVis(sorigin, ext ? normalize(softTarget(sdir, tanr, sdir, 0u)) : sdir, tmax, sunmask, skipInst, vt);
+                    else
+                    {
+                        int nr = (ext && SOFT_DETECT) ? softRayCountFor(2.0 * tanr) : 1;
+                        vis = softLean(sorigin, sdir, false, ext, tanr, 0.0, sdir, nr, -1, sunmask, skipInst, 0.0, tmax, 0u);
+                    }
+                    sunratio = (SOFT_RATIO || SOFT_SIGMA) && ext;
+                    if(sunratio)
+                    {
+                        gSunU = lights.env.sunColor * ndotl;
+                        gSunV = vis;
+                    }
+                    // SOFT_SIGMA: NRD's penumbra radius for a directional source, 0.5 x distance x tan of the radius.
+                    if(SOFT_SIGMA && sunratio)
+                    {
+                        gSunNdl = ndotl;
+                        float ot = SOFT_SUN_RAYS > 1 ? gRayT : vt;
+                        gSigSunPen = ot > 0.0 ? sigmaRadius(0.5 * ot * tanr) : 65504.0;
+                    }
+                }
+                else if(SOFT_OLD && tanr > 0.0)
+                {
+                    int nr = softRayCountFor(2.0 * tanr);
+                    bool adapt = softAdaptive(nr);
+                    vec3 up = abs(sdir.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+                    vec3 tx = normalize(cross(up, sdir));
+                    vec3 ty = cross(sdir, tx);
+                    vec2 u = softBase();
+                    vis = 0.0;
+                    float first = 0.0;
+                    for(int j = 0; j < 16; j++)
+                    {
+                        if(j >= nr) break;
+                        vec2 o = softDisc(u, softOrder(j, nr, adapt), nr) * tanr;
+                        float v = shadowVis(sorigin, normalize(sdir + tx * o.x + ty * o.y), tmax, sunmask, skipInst, vt);
+                        vis += v;
+                        if(adapt && j == 0) first = v;
+                        if(adapt && j == 1 && abs(v - first) < 0.02) { nr = 2; break; }
+                    }
+                    vis /= float(nr);
+                }
+                else vis = shadowVis(sorigin, sdir, tmax, sunmask, skipInst, vt);
                 if(vis > 0.0)
                 {
-                    direct += lights.env.sunColor * ndotl * vis;
+                    if(!sunratio) direct += lights.env.sunColor * ndotl * vis;
                     addSpec(sdir, n, dir, lights.env.sunColor * vis, specMul, specAcc);
 #ifndef HWRT_NO_REFL
                     addWorldSpec(sdir, dir, lights.env.sunColor * vis);
@@ -1973,13 +2486,90 @@ void shadePixel()
         }
     }
 
+    // SOFT_SIGMA: the soft sources' data for NRD SIGMA written here, before the sky rays, so none of it stays live
+    // through them. A world pixel the compose pass shades keeps them out of its direct light (the compose pass adds
+    // them back, denoised); hitlight's own picture (models, or NRD off this frame) takes the noisy fractions.
+    if(SOFT_SIGMA)
+    {
+        bool sw = nrdOn && !ismodel && !fullbright;
+        storeSigma(p, sw);
+        if(!sw)
+        {
+            if(gSunV >= 0.0) direct += gSunU * gSunV;
+            direct += gLampV;
+        }
+    }
+
     // Sky visibility stays out of `direct` until after the workgroup filter:
     // the bake takes max(sky, sun + lamps), so the world path needs the
     // hemisphere fraction on its own, and models fold it in after the filter
     // so the studio fill sees the denoised term.
     skyvis = 0.0;
+    float skyT = tmax;
+    if((pc.mode & (RT_ADAPT | (63 << SKYRANGE_SHIFT))) != 0)
+    {
+        int rcode = (pc.mode >> SKYRANGE_SHIFT) & 63;
+        if(rcode > 0) skyT = min(skyT, float(rcode) * 32.0);
+        if((pc.mode & RT_ADAPT) != 0)
+        {
+            float reach = rcode > 0 ? skyT : ADAPT_REACH;
+            vec2 sndc = (vec2(p) + 0.5) / vec2(pc.size) * 2.0 - 1.0;
+            float edge = smoothstep(0.55, 1.0, max(abs(sndc.x), abs(sndc.y)));
+            float far = smoothstep(768.0, 2048.0, hitdist);
+            float dark = 1.0 - smoothstep(0.03, 0.12, dot(albedo, vec3(0.2126, 0.7152, 0.0722)));
+            float f = (1.0 - 0.6 * edge) * (1.0 - 0.6 * far) * (1.0 - 0.5 * dark);
+            if((pc.mode & RT_FAST) != 0) f *= 0.5;
+            skyT = min(skyT, max(reach * f, 64.0));
+        }
+    }
+    // Solid foliage (hwrtskyopaque): opaque sky rays. The others (DYN, hwrtshadowothers) keep
+    // shadowing the sky; occludedT accepts DYN on its opaque path, shadowVis does not.
+    bool skyOpq = (pc.mode & RT_SKYOPAQUE) != 0;
+    if(skyOpq) skymask &= RAYMASK_WORLD | RAYMASK_MODEL | RAYMASK_PORTAL | RAYMASK_DYN;
     if(lights.env.skyOn > 0.5)
     {
+#ifdef HWRT_SKY_HALF
+        skyTraced = !(filtered && (((p.y >> 1) + pc.frame) & 1) != 0);
+        if(skyTraced)
+        {
+            int nsky = int(lights.env.skyRays);
+            nsky = clamp(nsky, 1, 4);
+            uint seed;
+            if(lights.env.skyStable > 0.5)
+                // Same pixel every frame. World-cell hashing painted a 4px mosaic
+                // on the close floor and made snow crawl worse under jitter.
+                seed = uint(p.x) + pcg(uint(p.y));
+            else seed = uint(p.x) + pcg(uint(p.y) + pcg(uint(pc.frame)));
+            bool bluenoise = (skyPackFlags() & 8192) != 0 && nrdOn && !ismodel;
+            uvec2 bnbase = uvec2(0u);
+            if(bluenoise) bnbase = skyBlueNoiseBase(p, lights.env.skyStable > 0.5);
+            float wsky = 1.0 / float(nsky);
+            float hitAcc = 0.0;
+            int hitN = 0;
+            for(int s = 0; s < 4; s++)
+            {
+                if(s >= nsky) break;
+                vec3 sdir = bluenoise ? skyBlueNoiseDir(n, bnbase, s) : cosineHemi(n, seed);
+                // Smooth normals: a ray that leaves under the flat face is mirrored.
+                if(gSmoothed && dot(sdir, gFlatN) < 0.0) sdir = reflect(sdir, gFlatN);
+                float t;
+                float vis;
+                if(skyOpq) { t = occludedT(sorigin, sdir, skyT, skymask, skipInst); vis = t < 0.0 ? 1.0 : 0.0; }
+                else vis = shadowVis(sorigin, sdir, skyT, skymask, skipInst, t);
+                if(t < 0.0)
+                    skyvis += wsky * vis;
+                else if(nrdOn)
+                {
+                    hitAcc += t;
+                    hitN++;
+                }
+            }
+            // Misses are open sky, not a 65504 hit. Averaging FP16_MAX with
+            // occluder T made every partially open pixel look infinitely far,
+            // so REBLUR used its full blur radius and snow bled into gravel.
+            if(nrdOn) skyHitDist = (hitN > 0) ? (hitAcc / float(hitN)) : 65504.0;
+        }
+#else
         int nsky = int(lights.env.skyRays);
         nsky = clamp(nsky, 1, 4);
         uint seed;
@@ -2001,7 +2591,9 @@ void shadePixel()
             // Smooth normals: a ray that leaves under the flat face is mirrored.
             if(gSmoothed && dot(sdir, gFlatN) < 0.0) sdir = reflect(sdir, gFlatN);
             float t;
-            float vis = shadowVis(sorigin, sdir, tmax, skymask, skipInst, t);
+            float vis;
+            if(skyOpq) { t = occludedT(sorigin, sdir, skyT, skymask, skipInst); vis = t < 0.0 ? 1.0 : 0.0; }
+            else vis = shadowVis(sorigin, sdir, skyT, skymask, skipInst, t);
             if(t < 0.0)
                 skyvis += wsky * vis;
             else if(nrdOn)
@@ -2014,6 +2606,7 @@ void shadePixel()
         // occluder T made every partially open pixel look infinitely far,
         // so REBLUR used its full blur radius and snow bled into gravel.
         if(nrdOn) skyHitDist = (hitN > 0) ? (hitAcc / float(hitN)) : 65504.0;
+#endif
     }
 
 #ifndef HWRT_NO_REFL
@@ -2064,11 +2657,21 @@ void shadePixel()
     {
         uint lx = gl_LocalInvocationID.x;
         uint ly = gl_LocalInvocationID.y;
+#ifdef HWRT_SKY_HALF
+        sh_sky[ly][lx] = valid && skyTraced ? skyvis : -1.0;
+        // The 5x5 below weighs every neighbour by its normal, plane and model /
+        // world kind: write them here too (they were left unwritten).
+        sh_n[ly][lx] = n;
+        sh_p[ly][lx] = hitp;
+        sh_mdl[ly][lx] = ismodel ? 1.0 : 0.0;
+        sh_hit[ly][lx] = (valid && nrdOn && skyTraced) ? skyHitDist : -1.0;
+#else
         sh_sky[ly][lx] = valid ? skyvis : -1.0;
         sh_n[ly][lx] = n;
         sh_p[ly][lx] = hitp;
         sh_mdl[ly][lx] = ismodel ? 1.0 : 0.0;
         sh_hit[ly][lx] = (valid && nrdOn) ? skyHitDist : -1.0;
+#endif
         barrier();
         // One 5x5. Every invocation hits every barrier. Four rays already
         // carry the grain; a second 7x7 pass smeared mid/far lighting.
@@ -2115,11 +2718,136 @@ void shadePixel()
             {
                 skyvis = acc / wsum;
                 skytaps = (wsum * wsum) / max(w2sum, 1e-8);
+#ifdef HWRT_SKY_HALF
+                // A skipped pixel takes its neighbours' occluder distance, or
+                // open sky when none of their rays hit anything.
+                if(!skyTraced)
+                {
+                    if(nrdOn) skyHitDist = hitW > 1e-5 ? hitAcc / hitW : 65504.0;
+                    skyTraced = true;
+                }
+#endif
             }
+#ifdef HWRT_SKY_HALF
+            else if(!skyTraced)
+            {
+                // No traced neighbour on this plane (an edge, a thin face): the
+                // traced pixel just above or below, whatever its plane. A second
+                // trace here cost more than the skipped rays saved.
+                const int offs[4] = int[](1, -1, 2, -2);
+                for(int k = 0; k < 4; k++)
+                {
+                    int ny = int(ly) + offs[k];
+                    if(ny < 0 || ny >= 16 || sh_sky[ny][lx] < 0.0) continue;
+                    skyvis = sh_sky[ny][lx];
+                    if(nrdOn) skyHitDist = sh_hit[ny][lx] > 0.0 ? sh_hit[ny][lx] : 65504.0;
+                    break;
+                }
+            }
+#endif
             if(nrdOn && skyHitDist < 65000.0 && hitW > 1e-5)
                 skyHitDist = hitAcc / hitW;
         }
         barrier();
+    }
+
+    // SOFT_FILTER (sources-etendues-opti): the sun's and the extended lamps' lit fractions are
+    // filtered over the 5x5 pixels of the same surface (normal, plane, model / world as the sky filter), with a
+    // Gaussian whose radius follows the widest penumbra estimated nearby, so a contact shadow stays sharp and a
+    // wide penumbra takes the whole 5x5. Then multiplied back onto their unshadowed light. Uniform branch: every
+    // invocation reaches the barrier.
+    if(SOFT_RATIO)
+    {
+        uint lx = gl_LocalInvocationID.x;
+        uint ly = gl_LocalInvocationID.y;
+        const vec3 lumw = vec3(0.2126, 0.7152, 0.0722);
+        float lu = dot(gLampU, lumw);
+        float rl = (valid && lu > 1e-5) ? clamp(dot(gLampV, lumw) / lu, 0.0, 1.0) : -1.0;
+        float rs = (valid && gSunV >= 0.0) ? gSunV : -1.0;
+        // The sky filter is done with these arrays: sky = sun fraction, hit = lamp fraction, mdl = model sign
+        // times (penumbra estimate + 2), so the pass needs no shared memory of its own.
+        sh_sky[ly][lx] = rs;
+        sh_hit[ly][lx] = rl;
+        sh_n[ly][lx] = n;
+        sh_p[ly][lx] = hitp;
+        sh_mdl[ly][lx] = (ismodel ? -1.0 : 1.0) * ((valid ? max(gPenW, -1.0) : -1.0) + 2.0);
+        barrier();
+        float rsf = rs, rlf = rl;
+        // Range of the raw fractions over the 3x3 (bit 16 holds the history inside it).
+        float mns = rs, mxs = rs, mnl = rl, mxl = rl;
+        if(valid && (rs >= 0.0 || rl >= 0.0))
+        {
+            float wmax = -1.0;
+            for(int dy = -2; dy <= 2; dy++)
+            for(int dx = -2; dx <= 2; dx++)
+            {
+                int nx = int(lx) + dx, ny = int(ly) + dy;
+                if(nx < 0 || ny < 0 || nx >= 16 || ny >= 16) continue;
+                wmax = max(wmax, abs(sh_mdl[ny][nx]) - 2.0);
+            }
+            ivec2 c = pc.size / 2;
+            float fp = max(hitdist * length(worldRayDir(c + ivec2(1, 0)) - worldRayDir(c)), 1e-4);
+            float sigma = wmax > 0.0 ? clamp(wmax / fp * lights.env.soft3.w, 0.0, 2.0) : 0.0;
+            float inv = sigma > 0.3 ? 0.5 / (sigma * sigma) : -1.0;
+            float planemax = max(1.0, hitdist * 0.02);
+            float as = 0.0, ws = 0.0, al = 0.0, wl = 0.0;
+            for(int dy = -2; dy <= 2; dy++)
+            for(int dx = -2; dx <= 2; dx++)
+            {
+                int nx = int(lx) + dx, ny = int(ly) + dy;
+                if(nx < 0 || ny < 0 || nx >= 16 || ny >= 16) continue;
+                bool near3 = abs(dx) <= 1 && abs(dy) <= 1;
+                if(!near3 && inv < 0.0) continue;
+                if((sh_mdl[ny][nx] < 0.0) != ismodel) continue;
+                float nd = dot(sh_n[ny][nx], n);
+                if(nd < 0.5) continue;
+                if(abs(dot(sh_p[ny][nx] - hitp, n)) > planemax) continue;
+                float vs = sh_sky[ny][nx], vl = sh_hit[ny][nx];
+                if(near3)
+                {
+                    if(vs >= 0.0) { mns = mns < 0.0 ? vs : min(mns, vs); mxs = max(mxs, vs); }
+                    if(vl >= 0.0) { mnl = mnl < 0.0 ? vl : min(mnl, vl); mxl = max(mxl, vl); }
+                }
+                if(inv < 0.0) continue;
+                float w = exp(-float(dx * dx + dy * dy) * inv) * nd * nd;
+                if(vs >= 0.0) { as += vs * w; ws += w; }
+                if(vl >= 0.0) { al += vl * w; wl += w; }
+            }
+            if(rs >= 0.0 && ws > 1e-5) rsf = as / ws;
+            if(rl >= 0.0 && wl > 1e-5) rlf = al / wl;
+        }
+        // SOFT_TEMPORAL (NRD on: the sky history images are free on the world): the filtered fractions averaged with
+        // the same surface's last value, held inside the 3x3 range of this frame's raw fractions so a moving
+        // shadow resets at once. .w the sun (2 = none), skyage the lamps (-1 = none).
+        if(SOFT_TEMPORAL && nrdOn && valid && !ismodel && lights.env.skyAlpha > 0.0)
+        {
+            if(lights.env.skyAlpha < 1.0)
+            {
+                vec4 clip = lights.env.prevViewProj * vec4(hitp, 1.0);
+                if(clip.w > 1e-6)
+                {
+                    ivec2 pp = ivec2(floor(((clip.xy / clip.w) * 0.5 + 0.5) * vec2(pc.size)));
+                    if(all(greaterThanEqual(pp, ivec2(0))) && all(lessThan(pp, pc.size)))
+                    {
+                        vec4 h = imageLoad(skyhistin, pp);
+                        if(skyHistGeomOk(h, hitp, n, hitdist))
+                        {
+                            float a = lights.env.soft3.z;
+                            if(rsf >= 0.0 && h.w <= 1.0) rsf = mix(clamp(h.w, mns - 0.02, mxs + 0.02), rsf, a);
+                            float hl = imageLoad(skyagein, pp).r;
+                            if(rlf >= 0.0 && hl >= 0.0) rlf = mix(clamp(hl, mnl - 0.02, mxl + 0.02), rlf, a);
+                        }
+                    }
+                }
+            }
+            if(live)
+            {
+                imageStore(skyhistout, p, vec4(hitp - pc.origin.xyz, rsf >= 0.0 ? rsf : 2.0));
+                imageStore(skyageout, p, vec4(rlf));
+            }
+        }
+        if(rsf >= 0.0) direct += gSunU * rsf;
+        if(rlf >= 0.0) direct += gLampU * rlf;
     }
 
     // Temporal reuse of skyvis, and the reason four rays are enough. The rays

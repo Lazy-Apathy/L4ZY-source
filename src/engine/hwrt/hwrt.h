@@ -108,6 +108,7 @@
     f(vkCmdDispatch) \
     f(vkCmdClearColorImage) \
     f(vkCmdCopyImage) \
+    f(vkCmdCopyBuffer) \
     f(vkCmdBlitImage) \
     f(vkCreateShaderModule) \
     f(vkDestroyShaderModule) \
@@ -256,6 +257,12 @@ extern hwrtdevice hwrtdev;
 extern bool hwrtinitdevice(const uint8_t *gluuid);
 extern void hwrtdestroydevice();
 extern int hwrtfindmemtype(uint32_t typebits, VkMemoryPropertyFlags props);
+// Video memory the CPU can map (the PCIe BAR window), for small buffers a shader
+// reads every frame and the CPU only writes, in order, never reads back. -1 when
+// there is none or the share kept for them is used up: the caller then keeps its
+// system-memory type. hwrtbaraccount() tracks what is taken.
+extern int hwrtfindbarmemtype(uint32_t typebits, VkDeviceSize size);
+extern void hwrtbaraccount(VkDeviceSize size, bool add);
 
 // NGX Vulkan / DLAA (dlaa.cpp). Best-effort: failure never sets hwrtfailed.
 extern bool hwrtdlaainitbeforeinstance();
@@ -369,6 +376,9 @@ extern void hwrtsnapscenedepth();
 extern bool hwrtmaskready();
 extern void hwrtcleanupmask();
 extern void hwrtsignalgl();      // GL -> Vulkan handoff
+extern int hwrtperfpath;
+// Set by hwrtrender(): hwrtdispatch() sends the GL signal itself, right before its submit.
+extern bool hwrtdispatchsignals;
 extern void hwrtwaitgl();        // Vulkan -> GL handoff
 extern void hwrtcomposite(bool replace, float alpha);
 extern void hwrtcompositeao();
@@ -486,7 +496,15 @@ enum { HWRT_ANIM_REBUILD_EVERY = 24, HWRT_ANIM_REBUILDS_PER_FRAME = 2 };
 // Instance ray masks, mirrored by the RAYMASK_ constants in hitlight.comp.
 // Kept separate so a primary ray can ask for the world alone while shadow and
 // sky rays still see every model.
-enum { HWRT_RAYMASK_WORLD = 0x01, HWRT_RAYMASK_MODEL = 0x02, HWRT_RAYMASK_SELF = 0x04, HWRT_RAYMASK_CASTER = 0x08, HWRT_RAYMASK_PORTAL = 0x10, HWRT_RAYMASK_SMOKE = 0x20, HWRT_RAYMASK_ALL = 0xFF };
+enum { HWRT_RAYMASK_WORLD = 0x01, HWRT_RAYMASK_MODEL = 0x02, HWRT_RAYMASK_SELF = 0x04, HWRT_RAYMASK_CASTER = 0x08, HWRT_RAYMASK_PORTAL = 0x10, HWRT_RAYMASK_SMOKE = 0x20, HWRT_RAYMASK_LOCAL = 0x40, HWRT_RAYMASK_DYN = 0x80, HWRT_RAYMASK_ALL = 0xFF };
+// LOCAL rides on MODEL: the local player's body in third person.
+// DYN replaces MODEL on the others: other players and bots, corpses,
+// projectiles, flags and pickups (not the mapmodel scenery). Every ray that
+// meant "models" asks for MODEL | DYN; the shadow rays add DYN per light type
+// (hwrtshadowothers: sun and sky, teleport / lava lamps, mapper lamps). The
+// teleport / lava lamps trace the world and portal rim in one opaque ray (no
+// foliage any-hit) and the bodies in a second one: DYN by hwrtshadowothers,
+// SELF / LOCAL from hwrtshadowself 2.
 
 // Extra bits in the lighting push-constant `mode` int (the struct is 128 bytes).
 // They can be set together: SHADE_MODELS wins for the primary cull mask,
@@ -500,6 +518,8 @@ enum { HWRT_MODE_MASK_MODELS = 0x100, HWRT_MODE_SHADE_MODELS = 0x200, HWRT_MODE_
 // world's spec shaders their highlights back (hwrtspecular). Bits 16-20 carry
 // the water plane count.
 enum { HWRT_MODE_REFL_WATER = 0x2000, HWRT_MODE_REFL_WORLD = 0x4000, HWRT_MODE_SPEC = 0x8000, HWRT_MODE_REFL_PLANESHIFT = 16 };
+// rt-performance-lot4: sky ray reach in 32-unit steps (bits 24-29), adaptive reach, fast camera.
+enum { HWRT_MODE_SKYRANGE_SHIFT = 24, HWRT_MODE_RT_ADAPT = 0x200000, HWRT_MODE_RT_FAST = 0x400000, HWRT_MODE_SKYOPAQUE = 0x800000 };
 
 extern int hwrthdrprobe;
 extern int hwrthdrpushmode;
@@ -669,6 +689,8 @@ extern bool hwrtnrdensure(int w, int h);
 extern bool hwrtnrdsession();
 // Sky rays actually traced: hwrtskyrays with NRD, at least 4 otherwise (lights.cpp).
 extern int hwrtskyrayseffective();
+// RT quality Medium / Low: hitlight variant with sky rays on one pixel in two (lights.cpp).
+extern bool hwrtskyhalf();
 extern bool hwrtnrdsetimages(VkImage diff, VkImage viewz, VkImage normal, VkImage mv, VkImage outdiff, int w, int h);
 extern bool hwrtnrddenoise(VkCommandBuffer cmd, int w, int h, int reset);
 extern void hwrtdestroynrd();

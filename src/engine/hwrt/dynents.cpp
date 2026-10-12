@@ -32,6 +32,9 @@ int hwrtskinlayers = 0, hwrtskinw = 0, hwrtskinh = 0, hwrtgeomcount = 0;
 
 vec hwrtteleporthole(0, 0, 7.3f);
 bool hwrthasteleporthole = false;
+// Radius of the punched hole (0 = unknown): bounds the teleporter's extended light source (lights.cpp).
+float hwrtteleportholeradius = 0;
+int hwrtteleportholeaxis = -1; // model axis of the ring's normal (0 x, 1 y, 2 z), -1 unknown
 
 struct hwrtbuf
 {
@@ -39,6 +42,7 @@ struct hwrtbuf
     VkDeviceMemory memory;
     VkDeviceAddress address;
     VkDeviceSize size;
+    bool bar;   // allocated from the BAR window (hwrtbaraccount)
 };
 
 struct hwrtmodelblas
@@ -291,6 +295,8 @@ static void punchteleporterdisk(vector<vec> &positions, vector<uint> &indices, v
     hwrthasteleporthole = true;
     if(rmax < 1e-3f) return;
     const float rcut = 0.40f * rmax;
+    hwrtteleportholeradius = rcut;
+    hwrtteleportholeaxis = axis;
 
     vector<uint> keepidx, keeptri;
     int dropped = 0;
@@ -350,6 +356,7 @@ static void destroybuf(hwrtbuf &b)
         if(b.buffer) vkDestroyBuffer(hwrtdev.device, b.buffer, NULL);
         if(b.memory) vkFreeMemory(hwrtdev.device, b.memory, NULL);
     }
+    if(b.bar) hwrtbaraccount(b.size, false);
     memset(&b, 0, sizeof(b));
 }
 
@@ -363,7 +370,9 @@ static bool dynfail(const char *what, VkResult r = VK_SUCCESS)
     return false;
 }
 
-static bool allocbuf(hwrtbuf &b, VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags props, bool deviceaddress = true)
+// bar: a buffer the lighting shader reads and the CPU only writes, in order,
+// goes to the BAR window when there is room (same bytes, video memory).
+static bool allocbuf(hwrtbuf &b, VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags props, bool deviceaddress = true, bool bar = false)
 {
     memset(&b, 0, sizeof(b));
     if(size < 1) size = 1;
@@ -377,7 +386,9 @@ static bool allocbuf(hwrtbuf &b, VkDeviceSize size, VkBufferUsageFlags usage, Vk
 
     VkMemoryRequirements req;
     vkGetBufferMemoryRequirements(hwrtdev.device, b.buffer, &req);
-    int memtype = hwrtfindmemtype(req.memoryTypeBits, props);
+    int memtype = bar && (props & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) ? hwrtfindbarmemtype(req.memoryTypeBits, req.size) : -1;
+    bool inbar = memtype >= 0;
+    if(memtype < 0) memtype = hwrtfindmemtype(req.memoryTypeBits, props);
     if(memtype < 0 && (props & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT))
     {
         memtype = hwrtfindmemtype(req.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
@@ -395,11 +406,25 @@ static bool allocbuf(hwrtbuf &b, VkDeviceSize size, VkBufferUsageFlags usage, Vk
     alloc.allocationSize = req.size;
     alloc.memoryTypeIndex = uint32_t(memtype);
     r = vkAllocateMemory(hwrtdev.device, &alloc, NULL, &b.memory);
+    if(r != VK_SUCCESS && inbar)
+    {
+        // The BAR window is full after all: the system-memory type, as before.
+        inbar = false;
+        memtype = hwrtfindmemtype(req.memoryTypeBits, props);
+        if(memtype < 0) { destroybuf(b); return false; }
+        alloc.memoryTypeIndex = uint32_t(memtype);
+        r = vkAllocateMemory(hwrtdev.device, &alloc, NULL, &b.memory);
+    }
     if(r != VK_SUCCESS) { destroybuf(b); return false; }
+    b.size = req.size;
+    if(inbar)
+    {
+        b.bar = true;
+        hwrtbaraccount(b.size, true);
+    }
     r = vkBindBufferMemory(hwrtdev.device, b.buffer, b.memory, 0);
     if(r != VK_SUCCESS) { destroybuf(b); return false; }
 
-    b.size = req.size;
     if(deviceaddress)
     {
         VkBufferDeviceAddressInfo addrinfo = { VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO };
@@ -410,9 +435,9 @@ static bool allocbuf(hwrtbuf &b, VkDeviceSize size, VkBufferUsageFlags usage, Vk
     return true;
 }
 
-static bool createbuf(hwrtbuf &b, VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags props, bool deviceaddress = true)
+static bool createbuf(hwrtbuf &b, VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags props, bool deviceaddress = true, bool bar = false)
 {
-    if(allocbuf(b, size, usage, props, deviceaddress)) return true;
+    if(allocbuf(b, size, usage, props, deviceaddress, bar)) return true;
     return dynfail("could not allocate a dynent buffer");
 }
 
@@ -582,6 +607,8 @@ static void destroylocked()
     hwrtdroppedinsts = 0;
     hwrtteleporthole = vec(0, 0, 7.3f);
     hwrthasteleporthole = false;
+    hwrtteleportholeradius = 0;
+    hwrtteleportholeaxis = -1;
     bulletc = NULL;
     destroymodel(smokeboxc);
     smokeboxfailed = false;
@@ -1117,7 +1144,7 @@ static bool createattrbufs(hwrtbuf &attrbuf, hwrtbuf &tribuf, uint nverts, uint 
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT|VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
     const VkMemoryPropertyFlags props =
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-    if(!allocbuf(attrbuf, VkDeviceSize(nverts)*sizeof(hwrtmodelvert), usage, props) ||
+    if(!allocbuf(attrbuf, VkDeviceSize(nverts)*sizeof(hwrtmodelvert), usage, props, true, true) ||
        !allocbuf(tribuf, VkDeviceSize(ntris)*sizeof(uint), usage, props))
     {
         destroybuf(attrbuf);
@@ -1224,7 +1251,7 @@ static hwrtmodelblas *buildmodelblas(model *m)
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
 
     if(!allocbuf(vbuf, vertbytes, geomusage, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) ||
-       !allocbuf(ibuf, idxbytes, geomusage, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT))
+       !allocbuf(ibuf, idxbytes, geomusage, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, true, true))
     {
         destroybuf(vbuf); destroybuf(ibuf);
         return NULL;
@@ -1491,7 +1518,7 @@ static hwrtmodelblas *buildbulletblas()
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
 
     if(!allocbuf(vbuf, vertbytes, geomusage, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) ||
-       !allocbuf(ibuf, idxbytes, geomusage, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT))
+       !allocbuf(ibuf, idxbytes, geomusage, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, true, true))
     {
         destroybuf(vbuf); destroybuf(ibuf);
         return NULL;
@@ -1777,7 +1804,7 @@ static bool ensuretlasbuffers()
         const VkDeviceSize geombytes = VkDeviceSize(HWRT_MAX_GEOMS_CAP)*sizeof(hwrtmodelgeom);
         if(!createbuf(s.geombuf, geombytes,
                       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT|VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT))
+                      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, true, true))
         {
             destroylocked();
             return false;
@@ -1914,7 +1941,7 @@ static bool createanimblas(hwrtanimslot &a, uint nverts, uint ntris)
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
 
     if(!allocbuf(a.vbuf, vertbytes, geomusage, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) ||
-       !allocbuf(a.ibuf, idxbytes, geomusage, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT))
+       !allocbuf(a.ibuf, idxbytes, geomusage, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, true, true))
     {
         destroyanim(a);
         return false;
@@ -2454,12 +2481,13 @@ static void markfullbright(hwrtdynslot &s, uint32_t custom)
     s.geommap[custom].flags |= HWRT_GEOM_FULLBRIGHT;
 }
 
-static uint32_t addinstance(hwrtinstance *dst, uint32_t n, const vec &o, float yaw, float pitch, const hwrtmodelblas *c)
+static uint32_t addinstance(hwrtinstance *dst, uint32_t n, const vec &o, float yaw, float pitch, const hwrtmodelblas *c, uint32_t extramask = 0)
 {
     if(!c || !c->addr) return n;
     if(n >= HWRT_MAX_INSTANCES) { notefull(); return n; }
     uint32_t mask = HWRT_RAYMASK_MODEL;
     if(isdefaultteleporter(c->m)) mask |= HWRT_RAYMASK_PORTAL;
+    else if(extramask) mask = extramask;
     instanceat(dst[n], o, yaw, pitch, customforcache(c), c->addr, mask);
     return n + 1;
 }
@@ -2547,6 +2575,11 @@ static uint32_t adddynent(hwrtdynslot &s, hwrtinstance *dst, uint32_t n, dynent 
     if(!anim && !c) return n;
     if(anim && anim->addr) writegeom(s, customforanim(s, anim), anim->attrbuf, anim->ibuf, anim->tribuf, anim->ntris, anim->ntris);
     uint32_t raymask = isfirstpersonbody(d) ? HWRT_RAYMASK_SELF : HWRT_RAYMASK_MODEL;
+    if(raymask == HWRT_RAYMASK_MODEL)
+    {
+        if(d != player) raymask = HWRT_RAYMASK_DYN;
+        else if(d->state == CS_ALIVE) raymask |= HWRT_RAYMASK_LOCAL;
+    }
     if(d == player)
     {
         static int lastfp = -1;
@@ -2718,7 +2751,9 @@ static uint32_t gatherinstances(hwrtdynslot &s, hwrtinstance *dst, int *nmap, in
         vec o;
         float yaw;
         hwrtentxform(e, o, yaw);
-        uint32_t next = addinstance(dst, n, o, yaw, 0, c);
+        // Pickups and other game entities (not the teleporter ring) shadow the
+        // teleport / lava lamps too.
+        uint32_t next = addinstance(dst, n, o, yaw, 0, c, hwrtalwaysvisibleent(e) ? 0u : uint32_t(HWRT_RAYMASK_DYN));
         if(next > n) dynn++;
         n = next;
     }
@@ -2748,7 +2783,7 @@ static uint32_t gatherinstances(hwrtdynslot &s, hwrtinstance *dst, int *nmap, in
     {
         hwrtmodelblas *c = isbulletname(scenemodels[i].name) ? bulletc : blasforname(scenemodels[i].name, false);
         if(!c) continue;
-        uint32_t next = addinstance(dst, n, scenemodels[i].o, scenemodels[i].yaw, scenemodels[i].pitch, c);
+        uint32_t next = addinstance(dst, n, scenemodels[i].o, scenemodels[i].yaw, scenemodels[i].pitch, c, HWRT_RAYMASK_DYN);
         if(next > n) dynn++;
         n = next;
     }

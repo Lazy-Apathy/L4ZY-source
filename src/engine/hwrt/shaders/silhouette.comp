@@ -49,7 +49,7 @@ void main()
     // does not colour the inside of the skull. No OpaqueEXT so MESH_ALPHA
     // foliage / flags appear as candidates and are confirmed (the overlay
     // is meant to show the triangles are in the TLAS; holes are mode 7).
-    rayQueryInitializeEXT(q, tlas, 0, 0x03, origin, tmin, dir, tmax);
+    rayQueryInitializeEXT(q, tlas, 0, 0x83, origin, tmin, dir, tmax);
     while(rayQueryProceedEXT(q))
     {
         if(rayQueryGetIntersectionTypeEXT(q, false) == gl_RayQueryCandidateIntersectionTriangleEXT)

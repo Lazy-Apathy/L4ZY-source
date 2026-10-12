@@ -1,4 +1,5 @@
-// sauer_nrd.cpp — MSVC Vulkan dispatcher for NVIDIA NRD REBLUR_DIFFUSE.
+// sauer_nrd.cpp — MSVC Vulkan dispatcher for NVIDIA NRD REBLUR_DIFFUSE (the sky) and, on request,
+// SIGMA_SHADOW_TRANSLUCENCY (the soft shadows).
 // C ABI only. No pointers the MinGW module must free.
 
 #ifndef VK_NO_PROTOTYPES
@@ -127,7 +128,17 @@ struct Gateway
     uint16_t probeGY[SAUER_NRD_PROBE_MAX] = {};
 };
 
-static Gateway g;
+// REBLUR (the sky) and SIGMA (the soft shadows) each have their own NRD instance, pools and pipelines. Every helper
+// works on the current one: REBLUR, unless a sauer_nrd_sigma_* export switched to SIGMA for its call.
+static Gateway greblur, gsigma;
+static Gateway *gcur = &greblur;
+#define g (*gcur)
+struct UseGateway
+{
+    Gateway *prev;
+    UseGateway(Gateway &x) : prev(gcur) { gcur = &x; }
+    ~UseGateway() { gcur = prev; }
+};
 
 static void seterr(int32_t code, const char *m)
 {
@@ -454,9 +465,10 @@ extern "C" __declspec(dllexport) void sauer_nrd_destroy(void)
     g = {};
 }
 
-extern "C" __declspec(dllexport) int32_t sauer_nrd_create(const SauerNrdInit *init)
+static int32_t createinstance(const SauerNrdInit *init, nrd::Denoiser den)
 {
-    sauer_nrd_destroy();
+    destroyall();
+    g = {};
     if(!init || init->struct_bytes != sizeof(SauerNrdInit))
         return SAUER_NRD_ERR_SIZE;
     if(!init->instance || !init->physical_device || !init->device || !init->gdpa)
@@ -519,7 +531,7 @@ extern "C" __declspec(dllexport) int32_t sauer_nrd_create(const SauerNrdInit *in
 
     nrd::DenoiserDesc dd = {};
     dd.identifier = kIdent;
-    dd.denoiser = nrd::Denoiser::REBLUR_DIFFUSE;
+    dd.denoiser = den;
     nrd::InstanceCreationDesc icd = {};
     icd.denoisers = &dd;
     icd.denoisersNum = 1;
@@ -689,6 +701,11 @@ extern "C" __declspec(dllexport) int32_t sauer_nrd_create(const SauerNrdInit *in
     return SAUER_NRD_OK;
 }
 
+extern "C" __declspec(dllexport) int32_t sauer_nrd_create(const SauerNrdInit *init)
+{
+    return createinstance(init, nrd::Denoiser::REBLUR_DIFFUSE);
+}
+
 extern "C" __declspec(dllexport) int32_t sauer_nrd_set_images(const SauerNrdImages *im)
 {
     if(!g.alive) return SAUER_NRD_ERR_STATE;
@@ -822,41 +839,9 @@ static void probexfer(VkCommandBuffer cmd, bool before)
     }
 }
 
-extern "C" __declspec(dllexport) int32_t sauer_nrd_denoise(const SauerNrdFrame *fr)
+// The common settings of a frame (both denoisers).
+static void fillcommon(const SauerNrdFrame *fr, nrd::CommonSettings &cs)
 {
-    if(!g.alive || !g.nrd) return SAUER_NRD_ERR_STATE;
-    if(!fr || fr->struct_bytes != sizeof(SauerNrdFrame)) return SAUER_NRD_ERR_SIZE;
-    if(!fr->command_buffer) return SAUER_NRD_ERR_ARGS;
-    if(fr->w < 8 || fr->h < 8 || fr->w > g.maxw || fr->h > g.maxh)
-        return SAUER_NRD_ERR_ARGS;
-
-    using TU = nrd::ResourceType;
-    Tex &userZ = g.user[(size_t)TU::IN_VIEWZ];
-    Tex &userOut = g.user[(size_t)TU::OUT_DIFF_RADIANCE_HITDIST];
-    if(!userZ.view || userZ.w != g.maxw || userZ.h != g.maxh ||
-       !userOut.view || userOut.w != g.maxw || userOut.h != g.maxh)
-    {
-        char m[SAUER_NRD_MSG];
-        snprintf(m, sizeof(m), "size mismatch pool %ux%u userZ %ux%u userOut %ux%u rect %ux%u",
-                 unsigned(g.maxw), unsigned(g.maxh), unsigned(userZ.w), unsigned(userZ.h),
-                 unsigned(userOut.w), unsigned(userOut.h), unsigned(fr->w), unsigned(fr->h));
-        seterr(SAUER_NRD_ERR_ARGS, m);
-        return SAUER_NRD_ERR_ARGS;
-    }
-    /* Circumscribed contract: every VkImage is the active size. resourceSize
-     * is the physical allocation (pools + user). DRS would keep a larger
-     * capacity and pass a smaller rectSize; that needs every image, including
-     * guides, at that capacity. Recreate on change instead of mixing sizes. */
-    if(fr->w != g.maxw || fr->h != g.maxh)
-    {
-        char m[SAUER_NRD_MSG];
-        snprintf(m, sizeof(m), "rect %ux%u != pool %ux%u (recreate instance)",
-                 unsigned(fr->w), unsigned(fr->h), unsigned(g.maxw), unsigned(g.maxh));
-        seterr(SAUER_NRD_ERR_ARGS, m);
-        return SAUER_NRD_ERR_ARGS;
-    }
-
-    nrd::CommonSettings cs = {};
     memcpy(cs.viewToClipMatrix, fr->view_to_clip, sizeof(cs.viewToClipMatrix));
     memcpy(cs.viewToClipMatrixPrev, fr->view_to_clip_prev, sizeof(cs.viewToClipMatrixPrev));
     memcpy(cs.worldToViewMatrix, fr->world_to_view, sizeof(cs.worldToViewMatrix));
@@ -887,58 +872,11 @@ extern "C" __declspec(dllexport) int32_t sauer_nrd_denoise(const SauerNrdFrame *
     if(fr->accum == SAUER_NRD_ACCUM_CLEAR) cs.accumulationMode = nrd::AccumulationMode::CLEAR_AND_RESTART;
     else if(fr->accum == SAUER_NRD_ACCUM_RESTART) cs.accumulationMode = nrd::AccumulationMode::RESTART;
     else cs.accumulationMode = nrd::AccumulationMode::CONTINUE;
+}
 
-    if(nrd::SetCommonSettings(*g.nrd, cs) != nrd::Result::SUCCESS)
-    {
-        seterr(SAUER_NRD_ERR_NRD, "SetCommonSettings failed");
-        return SAUER_NRD_ERR_NRD;
-    }
-    nrd::ReblurSettings rs = {};
-    // Official defaults. Previous antilag / anti-firefly / stabilize=0 /
-    // maxBlur=8 were tuned on frames that never displayed NRD (flags died in
-    // float16). Hit-distance reconstruction stays OFF: every pixel has a
-    // skyvis sample, not a probabilistic skip. Diffuse prepass 0: hitlight
-    // already runs an experimental plane-tested 5x5; NRD's 30px prepass has
-    // no plane test (v1 snow bled into gravel). Not a "REBLUR needs 4 rays"
-    // rule — the pinned README targets 1 path/pixel.
-    rs.hitDistanceReconstructionMode = nrd::HitDistanceReconstructionMode::OFF;
-    rs.diffusePrepassBlurRadius = 0.0f;
-    // .w of the output is unused by skycompose (YCoCg luminance). History
-    // length in frames is the actual accumulation signal; occlusion AO is not.
-    rs.returnHistoryLengthInsteadOfOcclusion = true;
-    if(fr->options & SAUER_NRD_OPT_ANTILAG_OFF)
-    {
-        // README: first integration with antilag disabled. Huge sensitivity
-        // makes ComputeAntilag ≈ 1 (mode 2: 1 / (1 + d * N / magic)).
-        rs.antilagSettings.luminanceSigmaScale = 100.0f;
-        rs.antilagSettings.luminanceSensitivity = 1.0e6f;
-    }
-    if(fr->options & SAUER_NRD_OPT_FAST_OFF)
-        rs.maxFastAccumulatedFrameNum = rs.maxAccumulatedFrameNum;
-    if(nrd::SetDenoiserSettings(*g.nrd, kIdent, &rs) != nrd::Result::SUCCESS)
-    {
-        seterr(SAUER_NRD_ERR_NRD, "SetDenoiserSettings failed");
-        return SAUER_NRD_ERR_NRD;
-    }
-
-    const nrd::DispatchDesc *dis = nullptr;
-    uint32_t ndis = 0;
-    nrd::Identifier id = kIdent;
-    if(nrd::GetComputeDispatches(*g.nrd, &id, 1, dis, ndis) != nrd::Result::SUCCESS)
-    {
-        seterr(SAUER_NRD_ERR_NRD, "GetComputeDispatches failed");
-        return SAUER_NRD_ERR_NRD;
-    }
-
-    g.qframe++;
-    uint32_t pooli = g.qframe % g.queued;
-    g.vk.vkResetDescriptorPool(g.device, g.pools[pooli], 0);
-    g.lastDisp = ndis;
-
-    VkCommandBuffer cmd = (VkCommandBuffer)fr->command_buffer;
-    uint32_t cbBytes = (g.idesc->constantBufferMaxDataSize + g.cbAlign - 1) / g.cbAlign * g.cbAlign;
-    if(cbBytes < g.cbAlign) cbBytes = g.cbAlign;
-
+// The first use of fresh pools: from UNDEFINED to GENERAL.
+static void freshbarriers(VkCommandBuffer cmd)
+{
     if(g.poolsFresh)
     {
         VkImageMemoryBarrier bars[64];
@@ -966,31 +904,11 @@ extern "C" __declspec(dllexport) int32_t sauer_nrd_denoise(const SauerNrdFrame *
                                       0, 0, nullptr, 0, nullptr, nb, bars);
         g.poolsFresh = false;
     }
+}
 
-    if(g.probeArmed && g.probeN)
-    {
-        float rsW = float(cs.resourceSize[0]);
-        float rsH = float(cs.resourceSize[1]);
-        float physW = float(g.maxw);
-        float physH = float(g.maxh);
-        for(uint32_t i = 0; i < g.probeN; i++)
-        {
-            float originX = float(g.probeX[i]);
-            float originY = float(g.probeY[i]);
-            float gatherUvX = (originX + 1.0f) / rsW;
-            float gatherUvY = (originY + 1.0f) / rsH;
-            int gx = (int)floorf(gatherUvX * physW - 0.5f);
-            int gy = (int)floorf(gatherUvY * physH - 0.5f);
-            if(gx < 0) gx = 0;
-            if(gy < 0) gy = 0;
-            if(gx > int(g.maxw) - 1) gx = int(g.maxw) - 1;
-            if(gy > int(g.maxh) - 1) gy = int(g.maxh) - 1;
-            g.probeGX[i] = (uint16_t)gx;
-            g.probeGY[i] = (uint16_t)gy;
-        }
-        probexfer(cmd, true);
-    }
-
+// Records the dispatches NRD asked for, with their descriptors and constants.
+static int32_t recorddispatches(VkCommandBuffer cmd, const nrd::DispatchDesc *dis, uint32_t ndis, uint32_t pooli, uint32_t cbBytes)
+{
     for(uint32_t d = 0; d < ndis; d++)
     {
         const nrd::DispatchDesc &dd = dis[d];
@@ -1086,6 +1004,133 @@ extern "C" __declspec(dllexport) int32_t sauer_nrd_denoise(const SauerNrdFrame *
         g.vk.vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, p.layout, 0, 2, sets, 0, nullptr);
         g.vk.vkCmdDispatch(cmd, dd.gridWidth, dd.gridHeight, 1);
     }
+    return SAUER_NRD_OK;
+}
+
+extern "C" __declspec(dllexport) int32_t sauer_nrd_denoise(const SauerNrdFrame *fr)
+{
+    if(!g.alive || !g.nrd) return SAUER_NRD_ERR_STATE;
+    if(!fr || fr->struct_bytes != sizeof(SauerNrdFrame)) return SAUER_NRD_ERR_SIZE;
+    if(!fr->command_buffer) return SAUER_NRD_ERR_ARGS;
+    if(fr->w < 8 || fr->h < 8 || fr->w > g.maxw || fr->h > g.maxh)
+        return SAUER_NRD_ERR_ARGS;
+
+    using TU = nrd::ResourceType;
+    Tex &userZ = g.user[(size_t)TU::IN_VIEWZ];
+    Tex &userOut = g.user[(size_t)TU::OUT_DIFF_RADIANCE_HITDIST];
+    if(!userZ.view || userZ.w != g.maxw || userZ.h != g.maxh ||
+       !userOut.view || userOut.w != g.maxw || userOut.h != g.maxh)
+    {
+        char m[SAUER_NRD_MSG];
+        snprintf(m, sizeof(m), "size mismatch pool %ux%u userZ %ux%u userOut %ux%u rect %ux%u",
+                 unsigned(g.maxw), unsigned(g.maxh), unsigned(userZ.w), unsigned(userZ.h),
+                 unsigned(userOut.w), unsigned(userOut.h), unsigned(fr->w), unsigned(fr->h));
+        seterr(SAUER_NRD_ERR_ARGS, m);
+        return SAUER_NRD_ERR_ARGS;
+    }
+    /* Circumscribed contract: every VkImage is the active size. resourceSize
+     * is the physical allocation (pools + user). DRS would keep a larger
+     * capacity and pass a smaller rectSize; that needs every image, including
+     * guides, at that capacity. Recreate on change instead of mixing sizes. */
+    if(fr->w != g.maxw || fr->h != g.maxh)
+    {
+        char m[SAUER_NRD_MSG];
+        snprintf(m, sizeof(m), "rect %ux%u != pool %ux%u (recreate instance)",
+                 unsigned(fr->w), unsigned(fr->h), unsigned(g.maxw), unsigned(g.maxh));
+        seterr(SAUER_NRD_ERR_ARGS, m);
+        return SAUER_NRD_ERR_ARGS;
+    }
+
+    nrd::CommonSettings cs = {};
+    fillcommon(fr, cs);
+
+    if(nrd::SetCommonSettings(*g.nrd, cs) != nrd::Result::SUCCESS)
+    {
+        seterr(SAUER_NRD_ERR_NRD, "SetCommonSettings failed");
+        return SAUER_NRD_ERR_NRD;
+    }
+    nrd::ReblurSettings rs = {};
+    // Official defaults. Previous antilag / anti-firefly / stabilize=0 /
+    // maxBlur=8 were tuned on frames that never displayed NRD (flags died in
+    // float16). Hit-distance reconstruction stays OFF: every pixel has a
+    // skyvis sample, not a probabilistic skip. Diffuse prepass 0: hitlight
+    // already runs an experimental plane-tested 5x5; NRD's 30px prepass has
+    // no plane test (v1 snow bled into gravel). Not a "REBLUR needs 4 rays"
+    // rule — the pinned README targets 1 path/pixel.
+    rs.hitDistanceReconstructionMode = nrd::HitDistanceReconstructionMode::OFF;
+    rs.diffusePrepassBlurRadius = 0.0f;
+    // .w of the output is unused by skycompose (YCoCg luminance). History
+    // length in frames is the actual accumulation signal; occlusion AO is not.
+    rs.returnHistoryLengthInsteadOfOcclusion = true;
+    if(fr->options & SAUER_NRD_OPT_ANTILAG_OFF)
+    {
+        // README: first integration with antilag disabled. Huge sensitivity
+        // makes ComputeAntilag ≈ 1 (mode 2: 1 / (1 + d * N / magic)).
+        rs.antilagSettings.luminanceSigmaScale = 100.0f;
+        rs.antilagSettings.luminanceSensitivity = 1.0e6f;
+    }
+    if(fr->options & SAUER_NRD_OPT_FAST_OFF)
+        rs.maxFastAccumulatedFrameNum = rs.maxAccumulatedFrameNum;
+    if(fr->options & (SAUER_NRD_OPT_LIGHT | SAUER_NRD_OPT_LIGHTER))
+    {
+        // One dispatch less (temporal stabilisation) and no firefly clamp.
+        rs.maxStabilizedFrameNum = 0;
+        rs.enableAntiFirefly = false;
+    }
+    if(fr->options & SAUER_NRD_OPT_LIGHTER)
+        rs.maxBlurRadius = 15.0f;
+    if(nrd::SetDenoiserSettings(*g.nrd, kIdent, &rs) != nrd::Result::SUCCESS)
+    {
+        seterr(SAUER_NRD_ERR_NRD, "SetDenoiserSettings failed");
+        return SAUER_NRD_ERR_NRD;
+    }
+
+    const nrd::DispatchDesc *dis = nullptr;
+    uint32_t ndis = 0;
+    nrd::Identifier id = kIdent;
+    if(nrd::GetComputeDispatches(*g.nrd, &id, 1, dis, ndis) != nrd::Result::SUCCESS)
+    {
+        seterr(SAUER_NRD_ERR_NRD, "GetComputeDispatches failed");
+        return SAUER_NRD_ERR_NRD;
+    }
+
+    g.qframe++;
+    uint32_t pooli = g.qframe % g.queued;
+    g.vk.vkResetDescriptorPool(g.device, g.pools[pooli], 0);
+    g.lastDisp = ndis;
+
+    VkCommandBuffer cmd = (VkCommandBuffer)fr->command_buffer;
+    uint32_t cbBytes = (g.idesc->constantBufferMaxDataSize + g.cbAlign - 1) / g.cbAlign * g.cbAlign;
+    if(cbBytes < g.cbAlign) cbBytes = g.cbAlign;
+
+    freshbarriers(cmd);
+
+    if(g.probeArmed && g.probeN)
+    {
+        float rsW = float(cs.resourceSize[0]);
+        float rsH = float(cs.resourceSize[1]);
+        float physW = float(g.maxw);
+        float physH = float(g.maxh);
+        for(uint32_t i = 0; i < g.probeN; i++)
+        {
+            float originX = float(g.probeX[i]);
+            float originY = float(g.probeY[i]);
+            float gatherUvX = (originX + 1.0f) / rsW;
+            float gatherUvY = (originY + 1.0f) / rsH;
+            int gx = (int)floorf(gatherUvX * physW - 0.5f);
+            int gy = (int)floorf(gatherUvY * physH - 0.5f);
+            if(gx < 0) gx = 0;
+            if(gy < 0) gy = 0;
+            if(gx > int(g.maxw) - 1) gx = int(g.maxw) - 1;
+            if(gy > int(g.maxh) - 1) gy = int(g.maxh) - 1;
+            g.probeGX[i] = (uint16_t)gx;
+            g.probeGY[i] = (uint16_t)gy;
+        }
+        probexfer(cmd, true);
+    }
+
+    int32_t de = recorddispatches(cmd, dis, ndis, pooli, cbBytes);
+    if(de) return de;
     {
         VkMemoryBarrier bar = { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
         bar.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
@@ -1218,4 +1263,112 @@ extern "C" __declspec(dllexport) int32_t sauer_nrd_probe_read(SauerNrdProbeOut *
         p.data1_frames = roundf((float)p.data1 / 255.0f * 63.0f);
     }
     return SAUER_NRD_OK;
+}
+
+// SIGMA_SHADOW_TRANSLUCENCY for the soft shadows: its own instance, created only when the game turns it on, fed
+// with the REBLUR guides (view Z, normals, motion) and the same camera data.
+extern "C" __declspec(dllexport) int32_t sauer_nrd_sigma_create(const SauerNrdInit *init)
+{
+    UseGateway use(gsigma);
+    return createinstance(init, nrd::Denoiser::SIGMA_SHADOW_TRANSLUCENCY);
+}
+
+extern "C" __declspec(dllexport) void sauer_nrd_sigma_destroy(void)
+{
+    UseGateway use(gsigma);
+    destroyall();
+    g = {};
+}
+
+extern "C" __declspec(dllexport) int32_t sauer_nrd_sigma_set_images(const SauerNrdSigmaImages *im)
+{
+    UseGateway use(gsigma);
+    if(!g.alive) return SAUER_NRD_ERR_STATE;
+    if(!im || im->struct_bytes != sizeof(SauerNrdSigmaImages)) return SAUER_NRD_ERR_SIZE;
+    if(!im->in_penumbra || !im->in_translucency || !im->in_viewz || !im->in_normal || !im->in_mv || !im->out_shadow)
+        return SAUER_NRD_ERR_ARGS;
+    using T = nrd::ResourceType;
+    int32_t e;
+    e = viewuser(g.user[(size_t)T::IN_PENUMBRA], (VkImage)im->in_penumbra, VK_FORMAT_R16_SFLOAT, im->w, im->h);
+    if(e) return e;
+    e = viewuser(g.user[(size_t)T::IN_TRANSLUCENCY], (VkImage)im->in_translucency, VK_FORMAT_R8G8B8A8_UNORM, im->w, im->h);
+    if(e) return e;
+    e = viewuser(g.user[(size_t)T::IN_VIEWZ], (VkImage)im->in_viewz, VK_FORMAT_R32_SFLOAT, im->w, im->h);
+    if(e) return e;
+    e = viewuser(g.user[(size_t)T::IN_NORMAL_ROUGHNESS], (VkImage)im->in_normal, VK_FORMAT_R16G16B16A16_UNORM, im->w, im->h);
+    if(e) return e;
+    e = viewuser(g.user[(size_t)T::IN_MV], (VkImage)im->in_mv, VK_FORMAT_R16G16B16A16_SFLOAT, im->w, im->h);
+    if(e) return e;
+    e = viewuser(g.user[(size_t)T::OUT_SHADOW_TRANSLUCENCY], (VkImage)im->out_shadow, VK_FORMAT_R8G8B8A8_UNORM, im->w, im->h);
+    if(e) return e;
+    return SAUER_NRD_OK;
+}
+
+extern "C" __declspec(dllexport) int32_t sauer_nrd_sigma_denoise(const SauerNrdSigmaFrame *sf)
+{
+    UseGateway use(gsigma);
+    if(!g.alive || !g.nrd) return SAUER_NRD_ERR_STATE;
+    if(!sf || sf->struct_bytes != sizeof(SauerNrdSigmaFrame) || sf->common.struct_bytes != sizeof(SauerNrdFrame))
+        return SAUER_NRD_ERR_SIZE;
+    const SauerNrdFrame *fr = &sf->common;
+    if(!fr->command_buffer) return SAUER_NRD_ERR_ARGS;
+    if(fr->w != g.maxw || fr->h != g.maxh) return SAUER_NRD_ERR_ARGS;
+    using TU = nrd::ResourceType;
+    Tex &userZ = g.user[(size_t)TU::IN_VIEWZ];
+    Tex &userOut = g.user[(size_t)TU::OUT_SHADOW_TRANSLUCENCY];
+    if(!userZ.view || userZ.w != g.maxw || userZ.h != g.maxh ||
+       !userOut.view || userOut.w != g.maxw || userOut.h != g.maxh)
+    {
+        seterr(SAUER_NRD_ERR_ARGS, "SIGMA images missing or of another size");
+        return SAUER_NRD_ERR_ARGS;
+    }
+
+    nrd::CommonSettings cs = {};
+    fillcommon(fr, cs);
+    if(nrd::SetCommonSettings(*g.nrd, cs) != nrd::Result::SUCCESS)
+    {
+        seterr(SAUER_NRD_ERR_NRD, "SetCommonSettings failed");
+        return SAUER_NRD_ERR_NRD;
+    }
+    nrd::SigmaSettings ss = {};
+    ss.lightDirection[0] = sf->light_direction[0];
+    ss.lightDirection[1] = sf->light_direction[1];
+    ss.lightDirection[2] = sf->light_direction[2];
+    if(sf->plane_distance_sensitivity > 0.0f) ss.planeDistanceSensitivity = sf->plane_distance_sensitivity;
+    ss.maxStabilizedFrameNum = std::min(sf->stabilized_frames, nrd::SIGMA_MAX_HISTORY_FRAME_NUM);
+    if(nrd::SetDenoiserSettings(*g.nrd, kIdent, &ss) != nrd::Result::SUCCESS)
+    {
+        seterr(SAUER_NRD_ERR_NRD, "SetDenoiserSettings failed");
+        return SAUER_NRD_ERR_NRD;
+    }
+    const nrd::DispatchDesc *dis = nullptr;
+    uint32_t ndis = 0;
+    nrd::Identifier id = kIdent;
+    if(nrd::GetComputeDispatches(*g.nrd, &id, 1, dis, ndis) != nrd::Result::SUCCESS)
+    {
+        seterr(SAUER_NRD_ERR_NRD, "GetComputeDispatches failed");
+        return SAUER_NRD_ERR_NRD;
+    }
+    g.qframe++;
+    uint32_t pooli = g.qframe % g.queued;
+    g.vk.vkResetDescriptorPool(g.device, g.pools[pooli], 0);
+    g.lastDisp = ndis;
+    VkCommandBuffer cmd = (VkCommandBuffer)fr->command_buffer;
+    uint32_t cbBytes = (g.idesc->constantBufferMaxDataSize + g.cbAlign - 1) / g.cbAlign * g.cbAlign;
+    if(cbBytes < g.cbAlign) cbBytes = g.cbAlign;
+    freshbarriers(cmd);
+    int32_t de = recorddispatches(cmd, dis, ndis, pooli, cbBytes);
+    if(de) return de;
+    VkMemoryBarrier bar = { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+    bar.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    bar.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    g.vk.vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                              0, 1, &bar, 0, nullptr, 0, nullptr);
+    return SAUER_NRD_OK;
+}
+
+extern "C" __declspec(dllexport) int32_t sauer_nrd_sigma_stats(SauerNrdStats *st)
+{
+    UseGateway use(gsigma);
+    return sauer_nrd_stats(st);
 }

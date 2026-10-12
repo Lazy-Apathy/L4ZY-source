@@ -438,8 +438,10 @@ class Walker:
             act = a(2)
             action = ""
             if act is not None:
-                mm = re.search(r"bind \$j \[([^\]]*)\]", subst(act.text, env))
-                action = mm.group(1) if mm else ""
+                st = subst(act.text, env)
+                mm = re.search(r"bind \$j \[", st)
+                # balanced: an action may hold its own [ ] ("if (...) [togglevar thirdperson]")
+                action = st[mm.end():_skip_group(st, mm.end() - 1)] if mm else ""
             self.add(box, Item("key", var="", cmd=action), conds)
             return
         if w == "guicolorswatch":
@@ -668,6 +670,7 @@ class CondText:
     def __init__(self, pages):
         self.radio = {}    # var -> {value: label}
         self.check = {}    # var -> label
+        self.tabs = {}     # var -> {value: tab label} (views of one page)
         for p in pages:
             for it in iter_items(p.root):
                 if it.kind == "radiogroup":
@@ -675,6 +678,11 @@ class CondText:
                         self.radio.setdefault(it.var, {}).setdefault(val, lab)
                 elif it.kind == "check" and it.label:
                     self.check.setdefault(it.var, it.label)
+                elif it.kind == "button" and it.label and it.cmd:
+                    # view tabs of a page (MENU_tab VAR VALUE "Label"): the button sets VAR = VALUE
+                    mt = re.match(r'^(?:concat\s+)?(\w+)\s+"?="?\s+(-?[\w.]+)$', it.cmd)
+                    if mt:
+                        self.tabs.setdefault(mt.group(1), {}).setdefault(mt.group(2), it.label)
 
     def truth(self, var):
         r = self.radio.get(var)
@@ -714,6 +722,9 @@ class CondText:
                 lab = self.radio.get(var, {}).get(b.text)
                 if lab:
                     return f'"{lab}" chosen ({var} {b.text})'
+                lab = self.tabs.get(var, {}).get(b.text)
+                if lab:
+                    return f'tab "{lab}" open'
             left = a.text[1:] if a.kind == "word" and a.text.startswith("$") else self.expr(a)
             right = b.text[1:] if b.kind == "word" and b.text.startswith("$") else self.expr(b)
             return f"{left} {CMP[fn]} {right}"

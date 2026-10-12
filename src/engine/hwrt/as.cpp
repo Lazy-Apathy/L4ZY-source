@@ -28,6 +28,7 @@ struct hwrtbuf
     VkDeviceMemory memory;
     VkDeviceAddress address;
     VkDeviceSize size;
+    bool bar;   // allocated from the BAR window (hwrtbaraccount)
 };
 
 // tc/lm as before, plus a world-space unit normal and the world position.
@@ -88,6 +89,7 @@ static void destroybuf(hwrtbuf &b)
         if(b.buffer) vkDestroyBuffer(hwrtdev.device, b.buffer, NULL);
         if(b.memory) vkFreeMemory(hwrtdev.device, b.memory, NULL);
     }
+    if(b.bar) hwrtbaraccount(b.size, false);
     memset(&b, 0, sizeof(b));
 }
 
@@ -251,6 +253,89 @@ static bool uploadstorage(hwrtbuf &b, const void *data, VkDeviceSize bytes)
     memcpy(mapped, data, size_t(bytes));
     vkUnmapMemory(hwrtdev.device, b.memory);
     return true;
+}
+
+// Device-local storage buffer, filled by a copy (no shadefail: the caller falls
+// back to system memory, so a failure here is not an error).
+static bool createdevicestorage(hwrtbuf &b, VkDeviceSize size)
+{
+    memset(&b, 0, sizeof(b));
+    if(size < 16) size = 16;
+    VkBufferCreateInfo info = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+    info.size = size;
+    info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT|VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    if(vkCreateBuffer(hwrtdev.device, &info, NULL, &b.buffer) != VK_SUCCESS) { memset(&b, 0, sizeof(b)); return false; }
+    VkMemoryRequirements req;
+    vkGetBufferMemoryRequirements(hwrtdev.device, b.buffer, &req);
+    int memtype = hwrtfindmemtype(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    VkMemoryAllocateInfo alloc = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+    alloc.allocationSize = req.size;
+    alloc.memoryTypeIndex = uint32_t(max(memtype, 0));
+    if(memtype < 0 || vkAllocateMemory(hwrtdev.device, &alloc, NULL, &b.memory) != VK_SUCCESS ||
+       vkBindBufferMemory(hwrtdev.device, b.buffer, b.memory, 0) != VK_SUCCESS)
+    {
+        destroybuf(b);
+        return false;
+    }
+    b.size = req.size;
+    return true;
+}
+
+// The three world shade buffers in device memory, through one staging buffer and
+// one blocking copy (the world build is already a wait-idle path). False leaves
+// nothing allocated.
+static bool uploaddevicestorage(hwrtbuf &vb, hwrtbuf &ib, hwrtbuf &tb, const void *const data[3],
+                                VkDeviceSize vbytes, VkDeviceSize ibytes, VkDeviceSize tbytes)
+{
+    hwrtbuf *dst[3] = { &vb, &ib, &tb };
+    const VkDeviceSize bytes[3] = { vbytes, ibytes, tbytes };
+    VkDeviceSize offs[3], total = 0;
+    loopi(3)
+    {
+        offs[i] = total;
+        total += alignup(bytes[i], 16);
+    }
+    hwrtbuf staging;
+    memset(&staging, 0, sizeof(staging));
+    bool ok = ensurecmd() && createdevicestorage(vb, vbytes) && createdevicestorage(ib, ibytes) && createdevicestorage(tb, tbytes) &&
+              createstorage(staging, total, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    if(ok)
+    {
+        void *mapped = NULL;
+        ok = vkMapMemory(hwrtdev.device, staging.memory, 0, total, 0, &mapped) == VK_SUCCESS && mapped;
+        if(ok)
+        {
+            loopi(3) memcpy((uchar *)mapped + offs[i], data[i], size_t(bytes[i]));
+            vkUnmapMemory(hwrtdev.device, staging.memory);
+        }
+    }
+    VkCommandBufferBeginInfo begin = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+    begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    ok = ok && vkResetCommandBuffer(world.cmd, 0) == VK_SUCCESS && vkBeginCommandBuffer(world.cmd, &begin) == VK_SUCCESS;
+    if(ok)
+    {
+        loopi(3)
+        {
+            VkBufferCopy region = { offs[i], 0, bytes[i] };
+            vkCmdCopyBuffer(world.cmd, staging.buffer, dst[i]->buffer, 1, &region);
+        }
+        VkMemoryBarrier barrier = { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        vkCmdPipelineBarrier(world.cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                             0, 1, &barrier, 0, NULL, 0, NULL);
+        VkSubmitInfo submit = { VK_STRUCTURE_TYPE_SUBMIT_INFO };
+        submit.commandBufferCount = 1;
+        submit.pCommandBuffers = &world.cmd;
+        ok = vkEndCommandBuffer(world.cmd) == VK_SUCCESS &&
+             vkQueueSubmit(hwrtdev.queue, 1, &submit, VK_NULL_HANDLE) == VK_SUCCESS &&
+             hwrtwaitidle("vkDeviceWaitIdle (shade buffers)");
+    }
+    destroybuf(staging);
+    if(!ok) loopi(3) destroybuf(*dst[i]);
+    else logoutf("hwrt: world shade buffers in video memory (%.1f MB)", double(total) / (1024.0*1024.0));
+    return ok;
 }
 
 bool hwrtcreatesampler(bool repeat, VkSampler &out, bool mips)
@@ -2113,12 +2198,16 @@ static bool buildshade(const vector<hwrtshadevert> &sverts, const vector<uint> &
     const VkBufferUsageFlags usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
     const VkMemoryPropertyFlags props = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
 
-    if(!createstorage(world.shadevert, vertbytes, usage, props) ||
-       !createstorage(world.shadeidx, idxbytes, usage, props) ||
-       !createstorage(world.shadetri, tribytes, usage, props) ||
-       !uploadstorage(world.shadevert, sverts.getbuf(), vertbytes) ||
-       !uploadstorage(world.shadeidx, indices.getbuf(), idxbytes) ||
-       !uploadstorage(world.shadetri, stris.getbuf(), tribytes))
+    // Every primary hit and every traced reflection reads these, so they go to
+    // device memory. System memory (the old place) is kept if that fails.
+    const void *shadedata[3] = { sverts.getbuf(), indices.getbuf(), stris.getbuf() };
+    if(!uploaddevicestorage(world.shadevert, world.shadeidx, world.shadetri, shadedata, vertbytes, idxbytes, tribytes) &&
+       (!createstorage(world.shadevert, vertbytes, usage, props) ||
+        !createstorage(world.shadeidx, idxbytes, usage, props) ||
+        !createstorage(world.shadetri, tribytes, usage, props) ||
+        !uploadstorage(world.shadevert, sverts.getbuf(), vertbytes) ||
+        !uploadstorage(world.shadeidx, indices.getbuf(), idxbytes) ||
+        !uploadstorage(world.shadetri, stris.getbuf(), tribytes)))
     {
         destroyshade();
         return false;

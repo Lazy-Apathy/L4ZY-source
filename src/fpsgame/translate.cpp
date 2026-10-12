@@ -38,6 +38,8 @@ struct tjob
     int uid, cn;
     int type;
     bool outgoing, preview, team, done, ok, reply, own, force, serv, board;
+    bool think; // /tsayr: careful translation, sent only if it succeeds
+    int waituid; // its "Translating carefully..." console line
     int femme;
     char name[MAXSTRLEN];
     char speaker[MAXSTRLEN];
@@ -350,7 +352,10 @@ static void thdrlang(const char *resp, const char *end, const char *key, char *d
     }
 }
 
-static bool thttp(const char *lang, const char *speaker, const char *dir, int team, int preview, int femme, int reply, int force, int board, const char *last, const char *lastspk, const char *body, char *out, int outlen, char *langout, int langoutlen, char *srcout, int srcoutlen)
+// The service gives up on a careful translation after 25 s; wait a bit longer.
+enum { TTHINKWAIT = 35000 };
+
+static bool thttp(const char *lang, const char *speaker, const char *dir, int team, int preview, int femme, int reply, int force, int board, int think, const char *last, const char *lastspk, const char *body, char *out, int outlen, char *langout, int langoutlen, char *srcout, int srcoutlen)
 {
     out[0] = 0;
     if(langout && langoutlen) langout[0] = 0;
@@ -372,6 +377,7 @@ static bool thttp(const char *lang, const char *speaker, const char *dir, int te
     else addr.sin_addr.s_addr = ip;
 
     int timeout = clamp(translatetimeout, 100, 120000);
+    if(think) timeout = max(timeout, int(TTHINKWAIT));
     if(!tconnect(sock, addr, min(timeout, 3000)))
     {
         closesocket(sock);
@@ -401,8 +407,8 @@ static bool thttp(const char *lang, const char *speaker, const char *dir, int te
         nformatstring(query, sizeof(query), "lang=%s&speaker=%s&dir=%s&team=%d&preview=%d&genre=%s&reply=1&force=%d&lastspk=%s&last=%s",
             lang, encspk, dir, team, preview, femme ? "f" : "", force, enclastspk, enclast);
     else
-        nformatstring(query, sizeof(query), "lang=%s&speaker=%s&dir=%s&team=%d&preview=%d&genre=%s&force=%d",
-            lang, encspk, dir, team, preview, femme ? "f" : "", force);
+        nformatstring(query, sizeof(query), "lang=%s&speaker=%s&dir=%s&team=%d&preview=%d&genre=%s&force=%d%s",
+            lang, encspk, dir, team, preview, femme ? "f" : "", force, think ? "&think=1" : "");
 
     char utf8body[TBUF*3];
     size_t bodylen = 0;
@@ -1510,7 +1516,7 @@ static int SDLCALL tworker(void *data)
     tjob *j = (tjob *)data;
     char out[TBUF], detected[16], srclang[16];
     detected[0] = srclang[0] = 0;
-    bool ok = thttp(j->lang, j->speaker, j->outgoing ? "out" : "in", j->team ? 1 : 0, j->preview ? 1 : 0, j->femme, j->reply ? 1 : 0, j->force ? 1 : 0, j->board ? 1 : 0, j->last, j->lastspk, j->original, out, sizeof(out), detected, sizeof(detected), srclang, sizeof(srclang));
+    bool ok = thttp(j->lang, j->speaker, j->outgoing ? "out" : "in", j->team ? 1 : 0, j->preview ? 1 : 0, j->femme, j->reply ? 1 : 0, j->force ? 1 : 0, j->board ? 1 : 0, j->think ? 1 : 0, j->last, j->lastspk, j->original, out, sizeof(out), detected, sizeof(detected), srclang, sizeof(srclang));
     tlock();
     j->ok = ok;
     if(ok) copystring(j->result, out, TBUF);
@@ -2024,6 +2030,7 @@ static bool tparsecmd(const char *buf, char *text, int textlen, char *lang, int 
         *team = !strcmp(cmd, "trepteam");
         copystring(text, s, textlen);
     }
+    else if(!strcmp(cmd, "tsayr") || !strcmp(cmd, "tsayteamr")) return false; // careful mode: no preview
     else if(!strcmp(cmd, "tsayteam") || !strcmp(cmd, "tsay"))
     {
         *team = !strcmp(cmd, "tsayteam");
@@ -2057,7 +2064,7 @@ static bool tpreviewbusy()
 
 static bool tmatchjob(tjob *j, const char *text, const char *lang, bool reply, const char *mention)
 {
-    if(!j->outgoing || j->reply != reply || strcmp(j->original, text) || j->femme != translatefemme) return false;
+    if(!j->outgoing || j->think || j->reply != reply || strcmp(j->original, text) || j->femme != translatefemme) return false;
     if(strcmp(j->mention, mention ? mention : "")) return false;
     if(reply) return true;
     return !strcmp(j->lang, lang);
@@ -2110,6 +2117,66 @@ static void tstart(const char *text, const char *lang, bool team, bool preview, 
     if(!tqueue(j))
     {
         if(!preview) tsendtranslated(text, text, team, mention, lang);
+        delete j;
+    }
+}
+
+// /tsayr, /tsayteamr: the model reasons before translating (slower, for a
+// line that must be right). Sent only when a real translation comes back:
+// never the original line, never the model's reasoning.
+static bool tcarefulbusy()
+{
+    bool busy = false;
+    tlock();
+    loopv(tjobs) if(tjobs[i]->think) { busy = true; break; }
+    tunlock();
+    return busy;
+}
+
+// The waiting line goes as soon as the answer is in: removed when the line
+// is sent, replaced in place by the reason when nothing is sent.
+static void tfinishcareful(tjob *j)
+{
+    if(!j->ok)
+        conreplaceid(j->waituid, CON_INFO, "\f3careful translation failed or took too long, nothing sent: \f4%s", j->original);
+    else if(!j->result[0] || j->result[0]=='=' || tsameish(j->result, j->original))
+        conreplaceid(j->waituid, CON_INFO, "\f4nothing to translate, nothing sent (/say sends it as typed): %s", j->original);
+    else
+    {
+        conremoveid(j->waituid);
+        tsendtranslated(j->original, j->result, j->team, NULL, j->lang);
+    }
+}
+
+static void tsayrdo(char *text, bool team)
+{
+    char buf[TBUF];
+    copystring(buf, text ? text : "", TBUF);
+    ttrim(buf);
+    if(!buf[0])
+    {
+        conoutf("/%s <message> : careful translation (slower), sent only if it succeeds", team ? "tsayteamr" : "tsayr");
+        return;
+    }
+    if(tcarefulbusy())
+    {
+        conoutf("\f4still translating the previous line carefully, nothing sent: %s", buf);
+        return;
+    }
+    tjob *j = new tjob;
+    memset(j, 0, sizeof(*j));
+    j->outgoing = true;
+    j->think = true;
+    j->team = team;
+    copystring(j->name, player1 ? player1->name : "");
+    copystring(j->speaker, j->name);
+    copystring(j->original, buf, TBUF);
+    copystring(j->lang, tlangout(), sizeof(j->lang));
+    j->femme = translatefemme;
+    j->waituid = conoutfid(CON_INFO, "\f4Translating carefully...");
+    if(!tqueue(j))
+    {
+        conreplaceid(j->waituid, CON_INFO, "\f3translation queue full, nothing sent: \f4%s", buf);
         delete j;
     }
 }
@@ -2167,6 +2234,15 @@ void polltranslation()
         if(!j->done) continue;
         tjobs.remove(i--);
         tunlock();
+        if(j->think)
+        {
+            // a slow careful request must not pause translation for 15 s
+            if(j->ok) tnoteconn(true);
+            tfinishcareful(j);
+            delete j;
+            tlock();
+            continue;
+        }
         tnoteconn(j->ok);
         if(!j->own && !j->serv && !j->outgoing && j->srclang[0])
         {
@@ -2694,6 +2770,8 @@ static void tcmdline(const char *cmd, char *s)
 
 ICOMMAND(tsay, "C", (char *s), tsaydo(s, false, false, NULL, NULL, NULL));
 ICOMMAND(tsayteam, "C", (char *s), tsaydo(s, true, false, NULL, NULL, NULL));
+ICOMMAND(tsayr, "C", (char *s), tsayrdo(s, false));
+ICOMMAND(tsayteamr, "C", (char *s), tsayrdo(s, true));
 ICOMMAND(trep, "C", (char *s), trepdo(s, false));
 ICOMMAND(trepteam, "C", (char *s), trepdo(s, true));
 ICOMMAND(to, "C", (char *s), tcmdline("to", s));

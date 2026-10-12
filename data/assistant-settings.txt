@@ -89,7 +89,7 @@ wallclocksecs: clock with seconds
 deathscore: show the scoreboard automatically when I die
 showmodeinfo: show the game mode description when the game starts
 outlinemeters: outline around capture meters
-flagfeed: CTF: big messages in the middle top of the screen when a flag is stolen, picked up or scored (with the run time)
+flagfeed: CTF: big messages in the middle top of the screen when a flag is stolen, picked up, dropped, returned (or put back by itself) or scored (with the run time)
 flagfeedfade: seconds a big flag message stays
 flagtimer: CTF: timer at the bottom right while I (or the player I watch) carry a flag stolen from the enemy base (not one picked up from the ground)
 basenumbers: numbers on capture bases
@@ -139,8 +139,9 @@ killfeedy: vertical position of the kill feed (0 top .. 1 bottom)
 killfeedscale: size of the kill feed
 killfeedfade: seconds before a kill feed line fades
 killfeedmax: number of lines in the kill feed
-reacttime: reaction times (view / crosshair, in ms) on my kills and deaths in the kill feed
+reacttime: after each of my frags and deaths the kill feed shows seen / aim in ms: how long the enemy was really on my screen / under my crosshair before the killing shot; accurate to about 5 ms (older measure: off by 40-55 ms)
 reacttimeall: also the reaction times of frags between other players, measured by their killer (compatible server, killer with reacttime on). 0 off (default), 1 on
+reacttimemode: how those reaction times are measured. 1 Precise (default): the enemy counts from the first frame he is really on my screen (my real field of view with zoom, line of sight to his head, body or feet, at least 5 pixels visible, glass does not hide him) until my killing shot. 0 Classic: the older measure, kept only to compare (console only, not in a menu). Costs about 7 microseconds per frame, no fps change
 killfeedvs: kills-deaths against each player, next to their name in the kill feed
 # killstreak
 killstreak: announce my killing sprees on screen (display only)
@@ -185,7 +186,7 @@ ragdollmillis: how long a dead body stays, in milliseconds
 ragdollfade: how long a dead body takes to fade, in milliseconds
 hidedead: hide dead players. 0 show them, 1 hide them, 2 hide them but keep my own body visible when I die
 deadpush: how far dead bodies are pushed by explosions
-lookselfshadow: my own shadow (sun) when ray tracing is on
+lookselfshadow: classic lighting: my own body casts a sun shadow in first person (Classic shadows only: shadowmap must be on). 1 on (default), 0 off (if it looks dirty indoors). With ray tracing, my shadow is set by hwrtshadowself instead
 explodebright: brightness of explosions (0..1)
 maxdebris: number of debris pieces from explosions
 maxbarreldebris: number of debris pieces from barrels
@@ -246,32 +247,60 @@ hdroutpref: display output. -1 automatic (HDR if Windows HDR is on), 0 SDR (defa
 hdroutref: HDR paper white: brightness of normal white in HDR, in nits
 hdroutmax: HDR peak brightness in nits (0 = what the screen reports)
 hdrouthud: brightness of the HUD and menus in HDR, in nits (0 = same as paper white)
-hwrt: ray traced lighting (RTX). 1 on, 0 off (classic lighting)
-hwrtngxmode: anti-aliasing / upscaling. 0 native, 1 DLAA, 2 DLSS quality, 3 DLSS balanced, 4 DLSS performance (DLAA/DLSS need an NVIDIA RTX card), 5 FSR native, 6 FSR quality, 7 FSR balanced, 8 FSR performance (AMD FSR, any graphics card)
+hwrt: lighting. 0 Classic (the original Sauerbraten lighting; default, fastest, any graphics card), 1 Ray tracing: hardware ray-traced lamps and glowing lights with shadows, the sun, sky light, reflections and weapon lights (needs a graphics card with hardware ray tracing; tested on NVIDIA RTX)
+hwrtngxmode: anti-aliasing / upscaling. 0 native (default), 1 DLAA (NVIDIA AI anti-aliasing at full resolution, best picture), 2 DLSS quality, 3 DLSS balanced, 4 DLSS performance (fewer pixels rebuilt by AI: more fps, softer as you go down; DLAA/DLSS need an NVIDIA RTX card), 5 FSR native, 6 FSR quality, 7 FSR balanced, 8 FSR performance (AMD FSR, no AI, any graphics card). Blurry with DLSS -> DLSS quality or DLAA
 hwrtfsrsharpness: extra sharpening after AMD FSR, 0 off to 100
-hwrtnrd: denoiser for ray traced lighting
+hwrtnrd: sky light denoiser. 1 NRD (default, cleaner, 1 ray per pixel), 0 built-in filter (always 4 rays: slower, more grain in motion). Needed by the soft shadow denoiser. Same 1 in all profiles
 hwrtreflections: sharp ray traced reflections on water and reflective surfaces (ray tracing). 1 on, 0 off
+hwrtquality: RT quality. 2 Full (best), 1 Half sky: sky light on half the pixels, a bit grainier; 0 + only 1 glowing light, softer far textures. Small gain here (~0.1 ms). Profiles: Ultra/High 2, Medium 1, Low 0
 hwrtspecular: shine of lamps and sun on glossy surfaces (ray tracing). 1 on, 0 off
-hwrtdiffupscale: how small wall and floor textures are enlarged with ray tracing (blocky, shimmering steps up close otherwise). 2 bicubic (default), 3 Lanczos (a little sharper, slower map load), 0 nearest (old blocky look), 1 bilinear (softer)
-hwrtdiffmipbias: detail of distant wall and floor textures with ray tracing (Graphics > RT Textures > Distance detail). 0 Stable (default, less shimmer in motion with DLAA/DLSS), -0.5 Sharper (a little more detail far away, more shimmer)
+hwrtskyrange: how far sky rays look. 0 full (default); 1024 / 512 / 256: faster but halls with high ceilings get too bright (256: brightness changes as you turn). Profiles: Ultra/High 0, Medium/Low 1024
+hwrtrtadapt: adaptive rays: fewer rays at screen edges, far and dark spots and while turning fast. 0 off (default), 1 on: ~0.3 ms faster, slightly softer in motion. Profiles: Ultra/High 0, Medium/Low 1
+hwrtskyopaque: sky light through leaves. 0 exact (default); 1 leaves solid: denser shade under trees, up to 1.4 ms faster on tree maps (triforts). Profiles: Ultra 0, others 1
+hwrtdlsscnn: DLSS/DLAA model. 0 Transformer (default): sharper, steadier; 1 CNN: softer, ~0.35-0.55 ms faster at 1440p. Blurry picture -> Transformer. Profiles: Ultra 0, High/Medium/Low 1
+hwrtnrdlight: NRD sky denoiser work. 0 full (default), 1 light, 2 lightest: ~0.1 ms faster, a little more flicker in sky shadows. NRD only. Profiles: Ultra 0, High 1, Medium/Low 2
+hwrtvelstatic: motion of still map models for DLAA/DLSS/FSR. 0 drawn again (default), 1 from depth: same picture, 0.2-0.8 ms less CPU on maps with many models. Profiles: Ultra 0, others 1
+hwrtdiffupscale: how small wall textures are enlarged with RT. 2 bicubic (default), 3 Lanczos: a little sharper up close (slower map load only), 0 nearest: blocky. No in-game speed cost. Same 2 in all profiles
+hwrtdiffmipbias: detail of far textures with RT. 0 Stable (default): less shimmer in motion with DLAA/DLSS; -0.5 Sharper: more detail far, more shimmer. Same 0 in all profiles
 hwrtsmoothnormals: smooth lighting across faceted floors, slopes and rocks with ray tracing, like classic lighting (no light steps between faces). 1 on (default), 0 off (flat faces, the old RT look)
 hwrtdynlights: muzzle flashes, rockets and grenades in flight and explosions light the walls, floor, players and my gun with ray tracing (custom colours tint the light: the trail colour for muzzle flashes, the projectile colour for rockets, grenades and their explosions). 1 on (default), 0 off (as before: these lights do not light the RT image)
-hwrtshadowself: which lights cast my own shadow with ray tracing. 0 none, 1 the sun, 2 + small lights, 3 + nearest lamps, 4 + sky
+hwrtshadowself: ray tracing: which lights draw my own shadow in first person. 0 none, 1 the sun only (default: the only one that always looks right), 2 + glowing lights evaluated every frame (teleporters, lava...), 3 + the nearest lamps (the shadow stretches and breaks up next to a lamp), 4 + the sky (a dark patch around me). Not the same as lookselfshadow (classic lighting)
+hwrtshadowothers: which lights draw the shadows of others (players, bots, rockets, pickups): 0 none, 1 sun and sky, 2 + teleporters, lava, jump pads (default), 3 + map lamps (a hidden lamp can add a 2nd shadow; ~+0.2-0.3 ms)
+hwrtsoftsigma: soft shadow denoiser NRD SIGMA (Soft shadows on): 1 on (default): smooth, true soft edges even with 1 ray, +0.6-1.3 ms; 0 off: grainy edges. Grainy shadows -> turn it on first. Needs NRD. On in all profiles
+hwrtsoftsigmahistory: soft shadow denoiser steadiness (frames kept): 0 follows motion at once, more grain; 5 (default); 7 calmest. If soft shadows smear when moving, lower it (3 or 0). 5 in all profiles
+hwrtsoftshadowrays: soft shadow rays per light (Soft shadows on): 1 fast but grainy, too pale edges; 2 (default) 3-4x truer; 4 near perfect; 8 = 16. Each step costs (2: +0.4-0.9 ms over 1). Profiles: Ultra/High 2, Medium/Low 1
+hwrtsoftshadows: RT soft shadows (sun, lamps, torches, teleporters): edges blur with distance, sharp at contact. 2 On (default); 0 Off: sharp, faster. Cost ~1.1-2.5 ms at 1440p (17-25 % fewer fps). Low profile: off. 1 = sun only (console)
 hwrtteleportlight: teleporters glow and light the room (ray tracing)
 hwrtjumppadlight: jump pads glow and light the room (ray tracing)
 hwrtsmokeshadow: weapon smoke (rifle trail, rockets, grenades, any trail colour) casts soft shadows from the sun, lamps and sky with ray tracing. 1 on, 0 off (no smoke shadow)
 hwrtsmokeshadowdensity: how dark weapon smoke shadows are, percent (ray tracing). 100 default, 10 to 400
-hwrtsundisk: draw the sun disk in the sky
-hwrtskytemporal: smooths sky light over several frames (higher = smoother, slower to react)
+hwrtsundisk: draw the sun as a plain disk instead of the map's sky picture. 0 off (default). A look choice, no speed effect. Same 0 in all profiles
+hwrtskytemporal: built-in sky filter smoothing over frames (default 32, 0 off): higher = smoother sky light but slower to react to changes; no speed cost. Same 32 in all profiles
+hwrtwaterwaves: animated waves on water with ray tracing: the RT reflections ripple like real water (the water stays flat for the game). Needs RT reflections. 1 on, 0 off (default, flat mirror)
+waterwaves: animated waves on water with classic lighting (and wherever the water is not ray traced): reflection, refraction and shine ripple (the water stays flat for the game). 1 on, 0 off (default)
+waterwaveamp: strength of the animated water waves (waterwaves, hwrtwaterwaves). 0.25 to 3, 1 default
+waterwavespeed: speed of the animated water waves. 0.25 to 3, 1 default
+waterwavesize: detail of the animated water waves (FFT grid). 64, 128 (default) or 256
+waterwavetile: -
+waterwavewind: -
+waterwavewinddir: -
+waterwavedistort: -
+waterwavelayer: -
+waterwavefade: -
+waterwaveshore: -
+waterwavegpu: -
+waterwavestats: -
+hwrtsundisk: draw the sun as a plain disk instead of the map's sky picture. 0 off (default). A look choice, no speed effect. Same 0 in all profiles
+hwrtskytemporal: built-in sky filter smoothing over frames (default 32, 0 off): higher = smoother sky light but slower to react to changes; no speed cost. Same 32 in all profiles
 hwrtworldgain: -
 hwrtdebug: -
 hwrttimes: -
 hwrtmask: -
 hwrtdepthmask: -
-hwrtdlights: -
-hwrtglowdlights: -
-hwrtskyrays: -
-hwrtskyfilter: -
+hwrtdlights: map lamps per pixel that cast a shadow (default 4). Fewer = faster (2: ~0.1-0.4 ms, 1: ~0.9 ms on triforts) but rooms get darker near many lamps. Profiles: Ultra/High 4, Medium 3, Low 2
+hwrtglowdlights: glowing lights traced (teleporters, lava, jump pads; default 8). Fewer = a bit faster (2: ~0.25 ms on triforts), fewer glows light the room. RT quality 0 keeps only 1. Profiles: 8, 8, 4, 2
+hwrtskyrays: sky rays per pixel with NRD. 1 (default) to 4: more = less grain in sky shadows but slower (4: +0.5 ms on triforts). Same 1 in all profiles
+hwrtskyfilter: 5x5 blur of the sky light between neighbour pixels (1 on, default): less grain; needed for the half-pixel sky of Medium/Low (else very grainy). Same 1 in all profiles
 hwrtskinbudget: -
 hwrtmaxinsts: -
 hwrthdrexp: -
@@ -282,9 +311,9 @@ dlaa: -
 dlss: -
 dlssquality: -
 gtao: ambient occlusion in classic lighting (darkens corners, wall bases and contacts with props, only the ambient and sky part of the light; never players, guns, water or effects). 0 off, 1 low (small, close occlusion), 2 high (wider). Not used with ray tracing
-lookao: old "Creases" soft shadows in corners, classic lighting only and only when Ambient Occlusion (gtao) is off; no longer in the menus, never applied with ray tracing. Prefer gtao (Graphics > Lighting > Ambient Occlusion)
-lookaoscale: strength of that ambient occlusion
-lookaoradius: size of that ambient occlusion
+lookao: old corner shading ("Creases"), classic lighting only, applied only when Ambient Occlusion (gtao) is Off; never with ray tracing. 1 on (default), 0 off. Graphics > Classic > Shading, next to Ambient Occlusion
+lookaoscale: strength of the old corner shading (lookao), 0 to 1 (default 0.48)
+lookaoradius: size of the old corner shading (lookao), 0.4 to 3 (default 1.15)
 looktaa: temporal anti-aliasing (smoother edges, a bit blurry)
 lookfxaa: FXAA in Native (smoother edges, but softer, blurrier textures). 0 by default: Native is then as sharp as stock Sauerbraten. Never used with Temporal AA, DLAA, DLSS or FSR
 motionblur: motion blur
@@ -295,9 +324,9 @@ aniso: anisotropic filtering (sharper textures at an angle): 0 off, 2, 4, 8, 16
 bilinear: bilinear texture filtering
 trilinear: trilinear texture filtering (mipmaps)
 caustics: moving light patterns on the floor under water. 1 on (default), 0 off
-shadowmap: soft shadows cast by players and models on the floor and walls. 0 off (default), 1 on. When off, blob shadows can be used instead
-shadowmapsize: quality of the soft shadows: 9 medium (default), 10 high (7 to 11)
-blobs: round dark shadow under players and items (used when soft shadows are off). 1 on (default), 0 off
+shadowmap: Classic shadows (classic lighting only, not ray tracing): shadows of players and models from the sun on floors and walls, Classic tab. 0 off (default), 1 on. When off, blob shadows can be used instead
+shadowmapsize: classic lighting only: resolution of the classic shadow map: 9 medium (default), 10 high (7 to 11)
+blobs: round dark shadow under players and items (classic lighting, used when Classic shadows are off). 1 on (default), 0 off
 glare: glow around bright lights. 0 off (default), 1 on; the Subtle / Glowy / Soft / Intense buttons set its blur and strength
 depthfx: soft particles: smoke and explosions fade where they touch walls and floor instead of cutting into them. 1 on (default), 0 off
 depthfxsize: quality of the soft particles: 7 low (default), 10 medium, 12 high
@@ -372,6 +401,7 @@ matchkeep: how many match videos to keep (oldest deleted)
 matchrecquality: video quality. 1 720p light, 2 720p normal, 3 720p high, 4 1080p, 5 1080p high
 demohdrecord: record HD demos (exact aim) along with normal demos
 demohdplay: play HD demos with exact aim when available
+demohdvis: also write in my HD demos which enemies were really on my screen and when, to study my demos later. Nothing changes in game; the demo grows about 10 KB per minute. 0 off (default), 1 on. Menu: Demos with HD aim
 hdlivedelay: when spectating live on a compatible server, how far in the past (ms) the exact HD aim is shown, so it plays smooth and complete; same delay for every player. Default 200, 0 to 1000
 demokeep: how many demos to keep (oldest deleted)
 screenshotformat: screenshot format. 0 BMP, 1 TGA, 2 PNG, 3 JPG

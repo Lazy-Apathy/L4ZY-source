@@ -1,5 +1,5 @@
 // temporal.cpp: lot 6 HUD-less native-res capture + trial jitter for a
-// future DLAA evaluate. Does not load Streamline, NGX, or apply DLSS.
+// future DLAA evaluate. Does not load NGX or apply DLSS.
 //
 // Capture point (hwrttemporalcapture): after renderavatar(), before the
 // velocity overlay, glare, fog overlay, postfx, and gl_drawhud. The FPS

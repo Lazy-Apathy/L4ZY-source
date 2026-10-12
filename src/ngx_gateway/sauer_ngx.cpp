@@ -669,7 +669,9 @@ static int32_t create_feature_common(uint64_t device, uint64_t command_buffer,
     unsigned preset = 0;
     if(preset_k)
     {
-        preset = preset_value_for_mode(mode);
+        /* preset_k 2: the CNN model, preset E (deprecated in SDK 310.6 but still
+         * in the runtime): cheaper than the transformer presets, softer image. */
+        preset = preset_k == 2 ? (unsigned)NVSDK_NGX_DLSS_Hint_Render_Preset_E : preset_value_for_mode(mode);
         NVSDK_NGX_Parameter_SetUI(g_params, preset_name_for_mode(mode), preset);
     }
 
@@ -848,7 +850,7 @@ int32_t __cdecl sauer_ngx_evaluate(uint64_t handle, const SauerNgxEval *in, uint
     eval.InJitterOffsetY = in->jitter_y;
     eval.InReset = in->reset ? 1 : 0;
     /* Helpers treat 0 as 1. Packed MVs are already in pixels, so pass 1 explicitly.
-     * Do not copy Streamline mvecScale (1/w, 1/h): that API wants [-1,1], NGX wants pixels. */
+     * NGX wants pixels here, not a normalised [-1,1] scale (1/w, 1/h). */
     eval.InMVScaleX = (in->mv_scale_x != 0.0f) ? in->mv_scale_x : 1.0f;
     eval.InMVScaleY = (in->mv_scale_y != 0.0f) ? in->mv_scale_y : 1.0f;
     eval.InRenderSubrectDimensions.Width = in->render_w ? in->render_w : in->color.width;

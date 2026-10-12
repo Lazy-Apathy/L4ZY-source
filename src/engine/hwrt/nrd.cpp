@@ -32,6 +32,10 @@ VAR(hwrtnrddbg, 0, 0, 10);
 VAR(hwrtnrdantilag, 0, 1, 1);
 // Fast history on (6 frames). 0 = disabled (>= maxAccumulatedFrameNum).
 VAR(hwrtnrdfast, 0, 1, 1);
+// rt-performance-lot4: lighter sky denoiser, off by default (image changes).
+// 1 = no temporal stabilisation pass and no anti-firefly; 2 = also half the
+// blur radius. Needs the gateway built from this source (older ones ignore it).
+VARP(hwrtnrdlight, 0, 0, 2);
 
 static void hwrtnrdonchanged();
 // Preference is saved. Default NRD when no config has chosen yet.
@@ -51,6 +55,19 @@ static PFN_sauer_nrd_destroy p_destroy = NULL;
 static PFN_sauer_nrd_stats p_stats = NULL;
 static PFN_sauer_nrd_probe_arm p_probe_arm = NULL;
 static PFN_sauer_nrd_probe_read p_probe_read = NULL;
+// NRD SIGMA for the soft shadows: optional exports of the same gateway (an older one has none: no SIGMA).
+static PFN_sauer_nrd_sigma_create p_sigcreate = NULL;
+static PFN_sauer_nrd_sigma_set_images p_sigimages = NULL;
+static PFN_sauer_nrd_sigma_denoise p_sigdenoise = NULL;
+static PFN_sauer_nrd_sigma_destroy p_sigdestroy = NULL;
+static PFN_sauer_nrd_sigma_stats p_sigstats = NULL;
+static bool sigmacreated = false, sigmafailed = false, sigmatold = false;
+static int sigmamaxw = 0, sigmamaxh = 0, sigmaframe = 0;
+static matrix4 sigmaprevworldtoview, sigmaprevviewtoclip;
+static bool sigmahasprev = false;
+static uint32_t sigmalastw = 0, sigmalasth = 0, sigmasetw = 0, sigmaseth = 0;
+static uint64_t sigmalastimgs[6];
+void hwrtdestroysigma();
 static bool nrdcreated = false;
 static bool nrdfailed = false;
 static int nrdmaxw = 0, nrdmaxh = 0;
@@ -169,6 +186,11 @@ static bool loadnrddll()
         p_probe_read = NULL;
         return false;
     }
+    p_sigcreate = (PFN_sauer_nrd_sigma_create)GetProcAddress(nrddll, "sauer_nrd_sigma_create");
+    p_sigimages = (PFN_sauer_nrd_sigma_set_images)GetProcAddress(nrddll, "sauer_nrd_sigma_set_images");
+    p_sigdenoise = (PFN_sauer_nrd_sigma_denoise)GetProcAddress(nrddll, "sauer_nrd_sigma_denoise");
+    p_sigdestroy = (PFN_sauer_nrd_sigma_destroy)GetProcAddress(nrddll, "sauer_nrd_sigma_destroy");
+    p_sigstats = (PFN_sauer_nrd_sigma_stats)GetProcAddress(nrddll, "sauer_nrd_sigma_stats");
     hwrtnrdavailable = 1;
     conoutf("hwrt nrd: loaded %s (NRD v4.17.3 REBLUR_DIFFUSE)", path);
     return true;
@@ -185,6 +207,7 @@ void hwrtnrdpreload()
 
 void hwrtdestroynrd()
 {
+    hwrtdestroysigma();
     if(nrdcreated && p_destroy) p_destroy();
     nrdcreated = false;
     hwrtnrdready = 0;
@@ -372,6 +395,8 @@ bool hwrtnrddenoise(VkCommandBuffer cmd, int w, int h, int reset)
     fr.options = 0;
     if(!hwrtnrdantilag) fr.options |= SAUER_NRD_OPT_ANTILAG_OFF;
     if(!hwrtnrdfast) fr.options |= SAUER_NRD_OPT_FAST_OFF;
+    if(hwrtnrdlight == 1) fr.options |= SAUER_NRD_OPT_LIGHT;
+    else if(hwrtnrdlight >= 2) fr.options |= SAUER_NRD_OPT_LIGHTER;
     nrdlastaccum = int(fr.accum);
     nrdlastjx = fr.jitter[0];
     nrdlastjy = fr.jitter[1];
@@ -517,6 +542,7 @@ COMMAND(hwrtnrdprobedump, "");
 void hwrtnrdinvalidate()
 {
     nrdhasprev = false;
+    sigmahasprev = false;
 }
 
 ICOMMAND(hwrtnrdtoggle, "", (),
@@ -527,3 +553,202 @@ ICOMMAND(hwrtnrdtoggle, "", (),
 
 ICOMMAND(hwrtnrdsession, "", (), intret(hwrtnrdsession() ? 1 : 0));
 ICOMMAND(hwrtnrdfallback, "", (), intret((hwrtnrd && (!hwrtnrdavailable || hwrtnrdfailed)) ? 1 : 0));
+
+// NRD SIGMA (SIGMA_SHADOW_TRANSLUCENCY) for the soft shadows: the sun's and the extended lamps' lit fractions,
+// denoised in a second instance of the same gateway while lights.cpp hwrtsoftsigma is on and the REBLUR session
+// runs (the compose pass that applies them exists only then). trace.cpp owns the images.
+VAR(hwrtsigmaactive, 1, 0, 0);
+
+bool hwrtsigmaavailable()
+{
+    return loadnrddll() && p_sigcreate && p_sigimages && p_sigdenoise && p_sigdestroy;
+}
+
+void hwrtdestroysigma()
+{
+    if(sigmacreated && p_sigdestroy) p_sigdestroy();
+    sigmacreated = false;
+    sigmamaxw = sigmamaxh = 0;
+    sigmahasprev = false;
+    memset(sigmalastimgs, 0, sizeof(sigmalastimgs));
+    sigmasetw = sigmaseth = 0;
+}
+
+// lights.cpp hwrtsoftsigma changed: SIGMA may try again after a failure.
+void hwrtsigmaretry()
+{
+    sigmafailed = false;
+    sigmatold = false;
+}
+
+bool hwrtsigmasession()
+{
+    return sigmacreated && !sigmafailed && hwrtnrdsession();
+}
+
+static void sigmafail(const char *what, int32_t r)
+{
+    sigmafailed = true;
+    hwrtsigmaactive = 0;
+    if(sigmatold) return;
+    sigmatold = true;
+    SauerNrdStats st;
+    memset(&st, 0, sizeof(st));
+    st.struct_bytes = sizeof(st);
+    if(p_sigstats) p_sigstats(&st);
+    conoutf(CON_WARN, "hwrt nrd sigma: %s failed (%d) %s", what, int(r), st.message);
+    conoutf(CON_WARN, "Soft shadow denoiser could not start: soft shadows stay as before.");
+}
+
+bool hwrtsigmaensure(int w, int h)
+{
+    if(sigmafailed || !hwrtnrdsession()) return false;
+    if(!hwrtsigmaavailable())
+    {
+        if(!sigmatold) conoutf(CON_WARN, "Soft shadow denoiser unavailable: the denoiser files of the game are too old.");
+        sigmatold = true;
+        sigmafailed = true;
+        return false;
+    }
+    if(w < 8 || h < 8) return false;
+    if(sigmacreated && sigmamaxw == w && sigmamaxh == h) return true;
+    if(sigmacreated)
+    {
+        hwrtwaitidle("nrd sigma resize");
+        hwrtdestroysigma();
+    }
+    SauerNrdInit in;
+    memset(&in, 0, sizeof(in));
+    in.struct_bytes = sizeof(in);
+    in.instance = (uint64_t)(uintptr_t)hwrtdev.instance;
+    in.physical_device = (uint64_t)(uintptr_t)hwrtdev.phys;
+    in.device = (uint64_t)(uintptr_t)hwrtdev.device;
+    in.gipa = (uint64_t)(uintptr_t)vkGetInstanceProcAddr;
+    in.gdpa = (uint64_t)(uintptr_t)vkGetDeviceProcAddr;
+    in.queue_family = hwrtdev.queuefamily;
+    in.queued_frames = HWRT_FRAMES_IN_FLIGHT;
+    in.max_w = uint32_t(w);
+    in.max_h = uint32_t(h);
+    int32_t r = p_sigcreate(&in);
+    if(r != SAUER_NRD_OK)
+    {
+        sigmafail("create", r);
+        return false;
+    }
+    sigmacreated = true;
+    sigmamaxw = w;
+    sigmamaxh = h;
+    sigmahasprev = false;
+    sigmaframe = 0;
+    return true;
+}
+
+bool hwrtsigmasetimages(VkImage pen, VkImage frac, VkImage viewz, VkImage normal, VkImage mv, VkImage out, int w, int h)
+{
+    if(!hwrtsigmasession() || !p_sigimages) return false;
+    uint64_t ids[6] = {
+        (uint64_t)(uintptr_t)pen, (uint64_t)(uintptr_t)frac, (uint64_t)(uintptr_t)viewz,
+        (uint64_t)(uintptr_t)normal, (uint64_t)(uintptr_t)mv, (uint64_t)(uintptr_t)out
+    };
+    if(sigmasetw == uint32_t(w) && sigmaseth == uint32_t(h) && !memcmp(sigmalastimgs, ids, sizeof(ids)))
+        return true;
+    SauerNrdSigmaImages im;
+    memset(&im, 0, sizeof(im));
+    im.struct_bytes = sizeof(im);
+    im.in_penumbra = ids[0];
+    im.in_translucency = ids[1];
+    im.in_viewz = ids[2];
+    im.in_normal = ids[3];
+    im.in_mv = ids[4];
+    im.out_shadow = ids[5];
+    im.w = uint32_t(w);
+    im.h = uint32_t(h);
+    int32_t r = p_sigimages(&im);
+    if(r != SAUER_NRD_OK)
+    {
+        sigmafail("images", r);
+        return false;
+    }
+    memcpy(sigmalastimgs, ids, sizeof(ids));
+    sigmasetw = uint32_t(w);
+    sigmaseth = uint32_t(h);
+    return true;
+}
+
+// Same camera data as the REBLUR frame (hwrtnrddenoise), with SIGMA's own history.
+bool hwrtsigmadenoise(VkCommandBuffer cmd, int w, int h, int frames)
+{
+    if(!hwrtsigmasession() || !p_sigdenoise || !cmd) return false;
+    matrix4 worldtoview, unjitproj;
+    hwrtnrdcameramats(worldtoview, unjitproj);
+    matrix4 clip = unjitproj;
+    nrdflipclipy(clip);
+    matrix4 clipprev = sigmahasprev ? sigmaprevviewtoclip : unjitproj;
+    nrdflipclipy(clipprev);
+    SauerNrdSigmaFrame sf;
+    memset(&sf, 0, sizeof(sf));
+    sf.struct_bytes = sizeof(sf);
+    SauerNrdFrame &fr = sf.common;
+    fr.struct_bytes = sizeof(fr);
+    fr.command_buffer = (uint64_t)(uintptr_t)cmd;
+    copym4(fr.view_to_clip, clip);
+    copym4(fr.world_to_view, worldtoview);
+    if(sigmahasprev && sigmalastw == uint32_t(w) && sigmalasth == uint32_t(h))
+    {
+        copym4(fr.view_to_clip_prev, clipprev);
+        copym4(fr.world_to_view_prev, sigmaprevworldtoview);
+        fr.accum = SAUER_NRD_ACCUM_CONTINUE;
+    }
+    else
+    {
+        copym4(fr.view_to_clip_prev, clip);
+        copym4(fr.world_to_view_prev, worldtoview);
+        fr.accum = SAUER_NRD_ACCUM_CLEAR;
+    }
+    fr.w_prev = uint32_t(w);
+    fr.h_prev = uint32_t(h);
+    float jx = 0, jy = 0, pjx = 0, pjy = 0;
+    hwrttemporaljitterpixels(jx, jy, pjx, pjy);
+    fr.jitter[0] = clamp(jx, -0.5f, 0.5f);
+    fr.jitter[1] = clamp(jy, -0.5f, 0.5f);
+    fr.jitter_prev[0] = clamp(pjx, -0.5f, 0.5f);
+    fr.jitter_prev[1] = clamp(pjy, -0.5f, 0.5f);
+    fr.mv_scale[0] = 1.0f;
+    fr.mv_scale[1] = 1.0f;
+    fr.mv_scale[2] = 1.0f;
+    fr.time_delta_ms = hwrttime.frame > 0 ? hwrttime.frame : 16.0f;
+    fr.denoising_range = float(max(farplane, 1024));
+    fr.frame_index = uint32_t(sigmaframe++);
+    fr.w = uint32_t(w);
+    fr.h = uint32_t(h);
+    vec sd = sunlightdir;
+    if(sd.magnitude() > 1e-6f) sd.normalize();
+    sf.light_direction[0] = sd.x;
+    sf.light_direction[1] = sd.y;
+    sf.light_direction[2] = sd.z;
+    sf.stabilized_frames = uint32_t(clamp(frames, 0, 7));
+    int32_t r = p_sigdenoise(&sf);
+    sigmaprevworldtoview = worldtoview;
+    sigmaprevviewtoclip = unjitproj;
+    sigmahasprev = true;
+    sigmalastw = uint32_t(w);
+    sigmalasth = uint32_t(h);
+    if(r != SAUER_NRD_OK)
+    {
+        sigmafail("denoise", r);
+        return false;
+    }
+    return true;
+}
+
+void hwrtsigmastats()
+{
+    SauerNrdStats st;
+    memset(&st, 0, sizeof(st));
+    st.struct_bytes = sizeof(st);
+    if(p_sigstats && sigmacreated) p_sigstats(&st);
+    conoutf("hwrt nrd sigma: available %d created %d failed %d active %d instance %dx%d frame %d pipes %u dispatches %u pool %u+%u MiB (%s)",
+            int(p_sigcreate != NULL), int(sigmacreated), int(sigmafailed), hwrtsigmaactive, sigmamaxw, sigmamaxh, sigmaframe,
+            st.pipelines, st.dispatches, st.permanent_mb, st.transient_mb, st.message);
+}
+COMMAND(hwrtsigmastats, "");

@@ -107,21 +107,24 @@ L4ZY ships its own `menus.cfg`: a new main menu, and an Options hub with pages f
 - This is not full path tracing.
 - *Classic* keeps the original Sauerbraten lighting and builds no RT scene.
 
-**Menu:** Options → Graphics → *Lighting*
+**Menu:** Options → Graphics → *General* tab → *Lighting*
 
 | Setting | Values | Default |
 |---|---|---|
 | `hwrt` | `0` Classic (no RT), `1` ray tracing | `0` |
 | `hwrtshadowself` | own-body RT shadow: `0` off, `1` sun, `2` + small/glow lights, `3` + nearest lamps, `4` + sky | `1` |
+| `hwrtshadowothers` | RT shadows of the others (players, bots, corpses, projectiles, flags, pickups): `0` none, `1` sun and sky, `2` + teleporters / lava / jump pads, `3` + the map's lamps | `2` |
+| `hwrtsoftshadows` | RT soft shadows (penumbra that widens with the distance from the object; Options → Graphics → *Ray tracing* tab → *Shadows*, *Off* / *On*): `2` On, the sun and the lamps (lamps, fires, teleporters, lava), `0` Off (hard shadows), `1` the sun only (console). The *Low* profile turns them off | `2` |
 | `hwrtteleportlight` / `hwrtjumppadlight` | light cast by teleporters / jump pads | `1` / `0` |
 | `hwrtsmokeshadow` | weapon smoke (rifle trail, rockets, grenades, any trail colour) casts soft RT shadows; `hwrtsmokeshadowdensity` sets how dark (10–400, `100`) | `0` |
 | `hwrtdynlights` | muzzle flashes, rockets and grenades in flight and explosions light the scene (*RT Weapon Lights*); custom colours tint the light | `1` |
 | `hwrtsundisk` | hide the skybox and draw a sun disk | `0` |
 | `hwrtreflections` | sharp RT reflections on water and on surfaces the map made reflective (*RT Reflections*) | `1` |
+| `hwrtwaterwaves` | animated waves on ray-traced water (Options → Graphics → *Ray tracing* → *Surfaces*): the RT reflections ripple like real water, the water stays flat for the game; needs `hwrtreflections`. Strength `waterwaveamp` (0.25–3, `1`), speed `waterwavespeed` (0.25–3, `1`), detail `waterwavesize` (64/128/256, `128`), shared with `waterwaves` | `0` |
 | `hwrtspecular` | shine of lamps and the sun on glossy surfaces (*RT Specular*) | `1` |
-| `hwrtdiffupscale` | RT texture upscaling (Options → Graphics → *RT Textures*): `2` Bicubic, `3` Lanczos, `0` Nearest (old blocky look); `1` bilinear (console only) | `2` |
-| `hwrtdiffmipbias` | distant RT texture detail (Options → Graphics → *RT Textures*): `0` Stable (less shimmer in motion), `-0.5` Sharper | `0` |
-| `hwrtsmoothnormals` | smooth RT lighting across faceted floors, slopes and rocks, like classic lighting (Options → Graphics → *RT Normals*): `1` On, `0` Off (flat faces, old RT look) | `1` |
+| `hwrtdiffupscale` | RT texture upscaling (Options → Graphics → *Performance* tab → *Advanced* → *Lamps and textures*): `2` Bicubic, `3` Lanczos, `0` Nearest (old blocky look); `1` bilinear (console only) | `2` |
+| `hwrtdiffmipbias` | distant RT texture detail (Options → Graphics → *Performance* tab → *Advanced* → *Lamps and textures*): `0` Stable (less shimmer in motion), `-0.5` Sharper | `0` |
+| `hwrtsmoothnormals` | smooth RT lighting across faceted floors, slopes and rocks, like classic lighting (Options → Graphics → *Ray tracing* tab → *Surfaces*): `1` On, `0` Off (flat faces, old RT look) | `1` |
 
 Useful commands:
 
@@ -135,13 +138,14 @@ If your graphics card or driver cannot run ray tracing, *Ray tracing* is greyed 
 
 ### Ray tracing performance
 
+- Graphics profiles *Ultra*, *High*, *Medium* and *Low* (Options → Graphics → *Performance* tab → *Profile*); changing one of their options on its own gives *Custom*.
 - Teleporter lights are gathered once per light update instead of every frame: about twice the FPS on maps with many teleporters.
 - When the model cache is full, models that cannot be added are skipped before any GPU work.
 - Sky rays use blue noise with NRD: cleaner sky light at the same cost.
 - Item models (boost, armour, quad…) are prepared behind the loading screen, and new skins are added without waiting for the GPU: no more freeze when an item respawns.
 - Room for 128 different models in the ray-traced scene (was 64): items no longer go missing on big maps.
 - Lamps are sorted per screen tile, so each pixel only tests the lamps near it: in our tests, about +40 to +80 % FPS on the heaviest maps at 1600×900, less on lighter ones.
-- If ray tracing cannot run (no hardware RT, no Vulkan driver, driver too old, failed to start), *Ray tracing* is greyed out in Options → Graphics → *Lighting*, with the reason. The settings search and the assistant show it greyed out too.
+- If ray tracing cannot run (no hardware RT, no Vulkan driver, driver too old, failed to start), *Ray tracing* is greyed out in Options → Graphics → *General* → *Lighting*, with the reason. The settings search and the assistant show it greyed out too.
 
 Commands:
 
@@ -150,7 +154,7 @@ Commands:
 
 ### Anti-aliasing and upscaling: DLAA / DLSS / FSR
 
-**Menu:** Options → Graphics → *Anti-Aliasing*
+**Menu:** Options → Graphics → *General* tab → *Anti-Aliasing*
 
 | Setting | Values | Default |
 |---|---|---|
@@ -163,18 +167,19 @@ Commands:
 
 ### RT sky denoising: NRD
 
-**Menu:** Options → Graphics → *RT Sky Denoise*
+**Menu:** Options → Graphics → *Performance* tab → *Advanced* → *Sky light*
 
 | Setting | Values | Default |
 |---|---|---|
-| `hwrtnrd` | `0` Sauer filter, `1` NVIDIA NRD | `1` |
+| `hwrtnrd` | `0` built-in filter, `1` NVIDIA NRD | `1` |
 
 - It only applies with ray tracing, and works with Native and DLSS.
-- If NRD is unavailable, the Sauer filter is used.
+- If NRD is unavailable, the built-in filter is used.
+- *Rays per pixel* (`hwrtskyrays`) only counts with NRD: the built-in filter always traces 4 rays and smooths over frames (`hwrtskytemporal`).
 
 ### HDR output
 
-**Menu:** Options → Graphics → *Display output* and *HDR calibration*
+**Menu:** Options → Graphics → *HDR screen* tab
 
 | Setting | Values | Default |
 |---|---|---|
@@ -210,7 +215,7 @@ Commands:
 
 The game reads your mouse once the GPU has caught up, instead of queueing frames ahead. Your aim reaches the screen sooner, with the same image. It helps most with ray tracing, native HDR or V-Sync; with classic lighting and no V-Sync there is little to gain.
 
-**Menu:** Options → Display → *Low Latency*
+**Menu:** Options → Display → *Screen* tab → *Speed and latency*
 
 | Setting | Values | Default |
 |---|---|---|
@@ -222,14 +227,15 @@ The game reads your mouse once the GPU has caught up, instead of queueing frames
 
 ### Look
 
-**Menu:** Options → Graphics → *Look*
+**Menu:** Options → Graphics → *General* tab (anti-aliasing) and *Classic* tab (shading, own shadow)
 
 | Setting | What it does | Default |
 |---|---|---|
 | `looktaa` | Temporal AA | `0` |
-| `lookfxaa` | FXAA in Native (Options → Graphics → *Anti-Aliasing*): smoother edges, softer textures. Off = as sharp as stock Sauerbraten | `0` |
-| `lookselfshadow` | your own body casts a sun shadow in first person (classic shadows) | `1` |
-| `gtao` | Ambient Occlusion, classic lighting only (Options → Graphics → *Lighting*): `0` off, `1` Low, `2` High. Slightly darker corners and wall bases; players are never darkened | `1` |
+| `lookfxaa` | FXAA in Native (Options → Graphics → *General* → *Anti-Aliasing*): smoother edges, softer textures. Off = as sharp as stock Sauerbraten | `0` |
+| `lookselfshadow` | classic lighting: your own body casts a sun shadow in first person (needs Classic shadows, Graphics → Classic). With ray tracing it is `hwrtshadowself` (Graphics → *Ray tracing* → *Shadows*) | `1` |
+| `waterwaves` | animated waves on classic water (Options → Graphics → *Classic* → *Detail*): reflection, refraction and shine ripple, the water stays flat for the game. Same strength / speed / detail settings as `hwrtwaterwaves` | `0` |
+| `gtao` | Ambient Occlusion, classic lighting only (Options → Graphics → *Classic* → *Shading*): `0` off, `1` Low, `2` High. Slightly darker corners and wall bases; players are never darkened | `1` |
 
 ### Chat translation (local AI)
 
@@ -258,6 +264,7 @@ Supported codes: `bg ca cs da de en es et fi fr hr hu id it nl no pl pt ro ru sk
 - `/say <msg>`: sent as typed.
 - `/tsay <msg>`, `/tsayteam <msg>`: translated to your send language.
 - `/tsay<code> <msg>`, `/tsayt<code> <msg>`: translated once into that language (team version with `t`). Example: `/tsayde hallo`.
+- `/tsayr <msg>`, `/tsayteamr <msg>`: careful translation into your send language: the model thinks before translating. Slower (about 4-10 s, never more than 25 s); with the Normal model it often handles slang and abbreviations better, not always. While it works the console shows *Translating carefully...*; the line goes away when the message is sent. If it fails or takes too long, nothing is sent (never the untranslated line), and the model's reasoning is never sent. Chat from others is translated once it is done. No preview.
 - `/trep <msg>`, `/trepteam <msg>`: reply in the language of the last chat line.
 
 **Addressing a player** (puts `@name` in front; Tab completes the name, Up/Down cycles)
@@ -315,7 +322,7 @@ Ask in plain words how to find or change a setting, and the translation model an
 - It can change game settings, put actions on keys, including up to 4 actions on one key (e.g. `bind LSHIFT "setweapon RI; attack"`), open a settings page, and open the HUD editor.
 - It can never run scripts, quit, connect, chat, record, touch files, servers or keys: every proposal is checked by the game before it is shown and again when you click, whatever the model writes.
 - It uses your installed translation model (no internet unless you set an API key).
-- It knows the real menu path of every setting (for example Options → Mouse → *crosshair:*) and can open the page for you.
+- It knows the real menu path of every setting (for example Options → HUD → *Crosshair…*) and can open the page for you.
 
 **Menu:** Options → *Settings assistant (AI)…*, or `/assistant`
 
@@ -338,7 +345,7 @@ Ask in plain words how to find or change a setting, and the translation model an
 ### CTF: flag timer and flag messages
 
 - **Flag timer:** bottom right, how long you (or the player you watch) have carried a flag stolen from the enemy base. Not shown for a flag picked up from the ground.
-- **Flag messages:** big lines in the upper middle of the screen, apart from the kill feed, when a flag is stolen, picked up or scored, with the run time of a flag that came from the base.
+- **Flag messages:** big lines in the upper middle of the screen, apart from the kill feed, when a flag is stolen, picked up, dropped, returned (or put back by itself) or scored, with the run time of a flag that came from the base.
 
 **Menu:** Options → HUD
 
@@ -356,7 +363,7 @@ Ask in plain words how to find or change a setting, and the translation model an
   - Also on the first-person arm of the friend you spectate, and in demos.
 - *Find friends online* scans the public server list, and lets you join a friend's server.
 
-**Menu:** Options → Friends; colours in Options → HUD → Friends
+**Menu:** Options → *Friends and colours* (colours: *Player colours* tab)
 
 | Setting / command | What it does | Default |
 |---|---|---|
@@ -373,7 +380,7 @@ Tints your body, name, HUD gun and chat/kill-feed name. Click the player preview
 | `mycolor` | `-1` off, `0` green, `1` blue, `2` yellow, `3` red, `4` gray, `5` magenta, `6` orange, `7` white, `8` cyan, `9` rose | `9` |
 | `cyclemycolor` | next colour | |
 
-**Team colours (optional):** Options → HUD → *Team colours*. One colour for all teammates and one for all enemies (bots included), instead of blue and red. Off by default.
+**Team colours (optional):** Options → *Friends and colours* → *Player colours*. One colour for all teammates and one for all enemies (bots included), instead of blue and red. Off by default.
 
 | Setting | Values | Default |
 |---|---|---|
@@ -386,7 +393,7 @@ Tints your body, name, HUD gun and chat/kill-feed name. Click the player preview
 
 Pick the colour of each weapon's trail: for everyone (*All*), and if you want, differently for your own shots (*Me*) and everyone else's (*Others*). Nothing changes until you pick a colour. There is no team-based colour.
 
-**Menu:** Options → HUD → *Weapon Trails: Colours* → *Me*, *Others* or *All*, then one line per weapon (hex code, presets, *same as All* / *stock*).
+**Menu:** Options → HUD → *Weapons and trails…* → *Me…*, *Others…* or *All…*, then one line per weapon (hex code, presets, *same as All* / *stock*).
 
 | Setting / command | What it does | Default |
 |---|---|---|
@@ -408,19 +415,21 @@ Idea from p1xbraten; written for L4ZY.
 
 - **Kill feed:** `killer [weapon] victim`, fading out, with an `xN` tag on your streaks.
 - **Kills-deaths against each player:** `[3-1]` next to a kill feed line is how many times you killed that player and they killed you this match.
-- **React times:** on your own kills and deaths, how long the target had been in view and under your crosshair (`view / crosshair ms`).
+- **React times:** on your own kills and deaths, the time from the first frame the enemy was really visible on your screen to the killing shot, and how long he was under your crosshair (`view / crosshair ms`).
   - On your deaths the value is approximate (`~`) unless the killer also runs this client on a compatible server.
 - **Others' react times** (`reacttimeall`, off by default): on a compatible server, frags between two other players also show the killer's own react times, when the killer runs this client with react times on. Spectators too.
 - **Kill streak popups:** display only, no gameplay effect.
+- **Enemy visibility in HD demos** (`demohdvis`, off by default, Options → Recording → *Demos (HD aim)*): your HD demos also record which enemies were really on your screen. Nothing changes in game.
 - When you spectate someone or watch a demo, "mine" and "my team" (filter, streaks, kills-deaths, react times) are the player you watch. React times of another player are only shown when their aim is exact (HD demo, compatible server).
 
-**Menu:** Options → HUD → *Kill Feed* / *Kill Streak*; place and size them with the HUD editor
+**Menu:** Options → HUD → *Adjust…* next to *Kill feed* / *Kill streak*; place and size them with the HUD editor
 
 | Setting | Default |
 |---|---|
 | `killfeed`, `killfeedconsole`, `killfeedfilter` (0 all, 1 team, 2 mine) | `1`, `0`, `0` |
 | `killfeedx`, `killfeedy`, `killfeedscale`, `killfeedalign`, `killfeedfade` (s), `killfeedmax` | `0.02`, `0.40`, `0.5`, `-1`, `5`, `5` |
 | `reacttime`, `reacttimeall` (frags between other players) | `1`, `0` |
+| `demohdvis` (record enemy visibility in HD demos) | `0` |
 | `killfeedvs` (kills-deaths against each player) | `1` |
 | `killstreak`, `killstreakothers`, `killstreaktk`, `killstreakstep` | `1`, `1`, `1`, `5` |
 | `killstreakx`, `killstreaky`, `killstreakscale`, `killstreakalign`, `killstreakfade` (s) | `0.50`, `0.18`, `0.85`, `0`, `3` |
@@ -461,7 +470,8 @@ Idea from p1xbraten; written for L4ZY.
 - A playback bar has −10 s, play/pause, +10 s, a seek slider, 50%/100% speed, and hide.
 - While you watch a player whose exact aim is used (HD demo, or live on a compatible server), a small grey **HD** sits next to their name; nothing is shown otherwise.
 - Live on a compatible server, the exact aim is shown `hdlivedelay` ms late (200 by default, the same for every player) and drawn along smooth curves, so it plays fluid and complete. The rest of the game (other players, shots, sounds, deaths, kill feed, scores) is replayed with the same delay, so you see exactly what the watched player saw; chat and server messages sent on their own are not delayed. The delay applies as soon as you spectate on a server with the clan extras, the same whoever you watch (with or without exact aim, bots) and in free cam; joining the game puts you back on time. Long HD aim files (over 31 MB) come in parts from compatible servers and are joined automatically.
-- On a compatible server, while you record, the server's demo of the match (with the HD aim of every L4ZY player) is downloaded during the map vote and replaces your local one, only if it arrived complete and is the same match. Your own recording is kept for 7 days in `demoeplaced`. One try per match, never retried; if the server demo has no HD aim, your local one is kept.
+- On a compatible server, while you record, the server's demo of the match (with the HD aim of every L4ZY player) is downloaded during the map vote and replaces your local one, only if it arrived complete and is the same match. Your own recording is kept for 7 days in `demo
+eplaced`. One try per match, never retried; if the server demo has no HD aim, your local one is kept.
 
 **Menu:** Options → Recording
 
@@ -477,9 +487,9 @@ Idea from p1xbraten; written for L4ZY.
 
 ### Scoreboard, sound and mouse
 
-- **Scoreboard columns** (Options → HUD → Scoreboard): `showfrags` (`1`), `showkd`, `showflags`, `showaccuracy`, `showstatus` (`0`), `showlang` (`1`), `showvs` (`1`: your kills-deaths against each player), and `scoreboardalpha` for the background opacity (`40`).
+- **Scoreboard columns** (Options → HUD → *Scoreboard (Tab)…*): `showfrags` (`1`), `showkd`, `showflags`, `showaccuracy`, `showstatus` (`0`), `showlang` (`1`), `showvs` (`1`: your kills-deaths against each player), and `scoreboardalpha` for the background opacity (`40`).
   - Admin, auth and master are shown as a tag after the name; names are dimmed while a player is dead.
-- **Crosshair** (Options → Mouse → *crosshair:*): resting colour in hex (`crosshaircolour`, or `crosshairhex FF8800`; default white), with white/green/cyan/yellow/pink presets. The hit crosshair takes the colour of the player you hit (friend colour, otherwise blue or red); `crosshairreloaddim` dims it while reloading (`0`).
+- **Crosshair** (Options → HUD → *Crosshair…*, also from Options → Mouse): resting colour in hex (`crosshaircolour`, or `crosshairhex FF8800`; default white), with white/green/cyan/yellow/pink presets. The hit crosshair takes the colour of the player you hit (friend colour, otherwise blue or red); `crosshairreloaddim` dims it while reloading (`0`).
 - **Sound mix** (Options → Sound → Mix): `mixweapons`, `mixhits`, `mixpain`, `mixitems`, `mixannounce`, `mixflags`, `mixmove`, `mixworld`.
   - All go from 0 to 200 (`100` = normal). `mixreset` puts them all back to 100.
 - **Mouse** (Options → Mouse): `mousedpi` (`800`), `setcm360 <cm>` and `getcm360`, for hipfire cm per 360°.
@@ -508,7 +518,19 @@ Idea from p1xbraten; written for L4ZY.
 
 Each release is listed on the [Releases](https://github.com/Lazy-Apathy/L4ZY/releases) page, newest first.
 
-### 2026.10.8.1 (test)
+### 2026.10.12.1 (test)
+
+- New graphics profiles *Ultra*, *High*, *Medium* and *Low* (Options → Graphics → *Performance*); each of their options can also be set on its own.
+- Ray tracing: soft shadows, on by default, with their own denoiser (NRD SIGMA).
+- Ray tracing: teleporters now light and shadow other players, bots and items; new setting *Shadows of the others*.
+- Optional animated waves on water, off by default.
+- All settings pages reorganised: cleaner and easier to find your way around.
+- Keys page: every game action can now be bound there.
+- More accurate kill feed react times; new option to record enemy visibility in HD demos (off by default).
+- CTF: big flag messages also when a flag is dropped, returned or reset.
+- Chat translation: new `/tsayr` and `/tsayteamr` commands (translation with the model's reasoning).
+
+### 2026.10.8.1 (stable)
 
 - Sharper image in Native: the FXAA filter that softened textures and player models is now off by default. If you liked the smoother edges, tick *FXAA in Native* in Options → Graphics → *Anti-Aliasing*.
 - Exclusive fullscreen: choosing a resolution now applies it right away; the *Custom* fields apply at once too.

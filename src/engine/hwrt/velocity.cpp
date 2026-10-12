@@ -3,7 +3,7 @@
 // the first-person hudgun (lot 5), and lot 6 unjittered motion + HUD-less
 // capture for a future DLAA evaluate.
 //
-// This lot does not turn on DLAA / DLSS / FSR / Streamline / HDR.
+// This lot does not turn on DLAA / DLSS / FSR / HDR.
 //
 // Image (hwrtvelocitytex, RGBA16F):
 //   RG  motion in pixels, previous_unjittered - current_unjittered
@@ -18,7 +18,7 @@
 //       first-person hudgun), 0 = unsupported
 //   A   1 = skinned character / attachment / hudgun pixel, 0 = scenery
 //
-// B/A are internal engine marks. They are not Streamline transparency,
+// B/A are internal engine marks. They are not DLSS transparency,
 // bias, or reactivity masks.
 //
 // Matrices: main-camera camproj captured immediately after
@@ -2423,6 +2423,27 @@ static void velendskelgl()
     glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
 }
 
+extern bool mapmodeldrawnthisframe(int i);
+
+// Motion vectors (DLAA/DLSS/FSR) of the mapmodels: 0 (default) draws every
+// rigid mapmodel inside the view frustum, as before. 1 draws only those the main
+// view drew this frame (renderva.cpp): far less CPU on maps with many mapmodels
+// (triforts: about 1100 drawn twice a frame, -1.1 ms of CPU), and a model the
+// main view left out (occluded) no longer writes its motion over the wall that
+// hides it. That last part can change a few pixels of the upscaled picture,
+// hence off by default (shots/rt-performance-lot3).
+VARP(hwrtvelvisible, 0, 0, 1);
+// 1: rigid mapmodels that neither spin nor animate, and that the main view drew
+// this frame, are not drawn again here. Their depth is in the depth buffer, and
+// the full-screen pass before this one already gives those pixels the motion of
+// the camera, which is all such a model moves by. Models that move, and models
+// the main view left out (occluded last frame, but the RT image can show them
+// again this frame), are still drawn as before. The motion of the skipped ones
+// is rebuilt from 24-bit depth instead of their vertices (sub-pixel
+// differences). Much less CPU on maps with many mapmodels. Off by default: the
+// upscaled image changes slightly (shots/rt-performance-lot4).
+VARP(hwrtvelstatic, 0, 0, 1);
+
 static void veldrawrigid()
 {
     if(!camera1 || !veltex) return;
@@ -2455,7 +2476,10 @@ static void veldrawrigid()
     {
         extentity &e = *ents[i];
         if(e.type != ET_MAPMODEL || (e.flags&EF_NOVIS)) continue;
+        // hwrtvelvisible: only what the main view drew this frame.
+        if(hwrtvelvisible && !mapmodeldrawnthisframe(i)) continue;
         if(!hwrtvelrigidmapmodel(e)) continue;
+        if(hwrtvelstatic && mapmodeldrawnthisframe(i) && hwrtvelstaticmapmodel(e)) continue;
         model *m = loadmapmodel(e.attr2);
         if(!m) continue;
         vec center, radius;
@@ -3130,7 +3154,9 @@ void hwrtgenvelocity()
         velsceneslot ^= 1;
         velscenehasprev = true;
     }
-    if(velcutframe || velpostcut == 1 || velpostcut == 2)
+    // The probe reads the velocity image back, which waits for the GPU: only
+    // while the velocity diagnostic view is on, not on every respawn or teleport.
+    if(hwrtveldebug && (velcutframe || velpostcut == 1 || velpostcut == 2))
         velprobelog(velcutframe ? "CUT" : "POSTCUT");
 }
 

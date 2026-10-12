@@ -156,9 +156,9 @@ static PFN_sauer_ngx_get_stats p_gwStats = NULL;
 static PFN_sauer_ngx_release p_gwRelease = NULL;
 static PFN_sauer_ngx_shutdown p_gwShutdown = NULL;
 static PFN_sauer_ngx_last_error p_gwErr = NULL;
-static bool slinited = false; /* true once sauer_ngx.dll is loaded (not Streamline) */
-static uint32_t slextragfx = 0, slextracompute = 0;
-static uint32_t slnfeat12 = 0, slnfeat13 = 0;
+static bool gwloaded = false; /* true once sauer_ngx.dll is loaded */
+static uint32_t gwextragfx = 0, gwextracompute = 0;
+static uint32_t gwnfeat12 = 0, gwnfeat13 = 0;
 static int lastevalcode = 0;
 
 
@@ -568,9 +568,9 @@ bool hwrtdlaainitbeforeinstance()
         }
     }
     ngxloaded = true;
-    slinited = true;
+    gwloaded = true;
     setreason("NGX gateway loaded, waiting for Vulkan device");
-    conoutf(CON_INIT, "hwrt dlaa: public NGX Vulkan SDK via sauer_ngx.dll from %s. Streamline is not loaded. Present remains SDL_GL_SwapWindow.", ngxdir);
+    conoutf(CON_INIT, "hwrt dlaa: public NGX Vulkan SDK via sauer_ngx.dll from %s. Present remains SDL_GL_SwapWindow.", ngxdir);
     return true;
 }
 
@@ -630,9 +630,9 @@ int hwrtdlaacollectdeviceexts(const char **names, int maxnames)
     return collectnamed(names, maxnames, devextptrs, ndevexts);
 }
 
-uint32_t hwrtdlaaextraqueues() { return slextragfx + slextracompute; }
-bool hwrtdlaawantsfeatures12() { return slnfeat12 > 0; }
-bool hwrtdlaawantsfeatures13() { return slnfeat13 > 0; }
+uint32_t hwrtdlaaextraqueues() { return gwextragfx + gwextracompute; }
+bool hwrtdlaawantsfeatures12() { return gwnfeat12 > 0; }
+bool hwrtdlaawantsfeatures13() { return gwnfeat13 > 0; }
 
 void hwrtdlaamergefeatures12(void *) {}
 void hwrtdlaamergefeatures13(void *) {}
@@ -681,7 +681,7 @@ bool hwrtdlaaondevice()
     hwrtdlaaavailable = 1;
     hwrtngx = 1;
     setreason("available (inactive until hwrtngxmode 1 DLAA, 2 Quality, 3 Balanced or 4 Performance)");
-    conoutf(CON_INIT, "hwrt dlaa: NGX Vulkan Init_with_ProjectID ok on %s. Evaluate is NGX_VULKAN_EVALUATE_DLSS_EXT via sauer_ngx.dll. Streamline is not loaded. Present remains SDL_GL_SwapWindow.",
+    conoutf(CON_INIT, "hwrt dlaa: NGX Vulkan Init_with_ProjectID ok on %s. Evaluate is NGX_VULKAN_EVALUATE_DLSS_EXT via sauer_ngx.dll. Present remains SDL_GL_SwapWindow.",
             hwrtdev.name);
     return true;
 }
@@ -1058,8 +1058,16 @@ static int enginefromgwmode(uint32_t m)
     return 1;
 }
 
+// rt-performance-lot4: DLSS/DLAA with the older CNN model (preset E, deprecated
+// in SDK 310.6 but still shipped) instead of the transformer presets K/M. Cheaper
+// on the tensor cores, softer image. Off by default (the image changes).
+// configure() recreates the feature when this changes.
+static int ngxcfgcnn = -1;
+VARP(hwrtdlsscnn, 0, 0, 1);
+
 static const char *ngxpresetname(int enginemode)
 {
+    if(ngxcfgcnn == 1) return "E (CNN)";
     if(enginemode == 4) return "M";
     return "K";
 }
@@ -2531,7 +2539,7 @@ static bool configure(int inw, int inh, int outw, int outh, int mode)
         return false;
     }
     int wantHdr = (scenehdr && scenecolorfmt == GL_RGBA16F && texcolorin.format == VK_FORMAT_R16G16B16A16_SFLOAT && texcolorout.format == VK_FORMAT_R16G16B16A16_SFLOAT) ? 1 : 0;
-    if(dlaaconfigured && int(dlaainw) == inw && int(dlaainh) == inh && int(dlaaoutw) == outw && int(dlaaouth) == outh && ngxmodeapp == mode && ngxcfghdr == wantHdr)
+    if(dlaaconfigured && int(dlaainw) == inw && int(dlaainh) == inh && int(dlaaoutw) == outw && int(dlaaouth) == outh && ngxmodeapp == mode && ngxcfghdr == wantHdr && ngxcfgcnn == int(hwrtdlsscnn))
         return dlaaoptok;
     if((ngxcfghdr == 0 || ngxcfghdr == 1) && ngxcfghdr != wantHdr)
         logoutf("comparateur ngx historique recree IsHDR %d -> %d, carte non rechargee", ngxcfghdr, wantHdr);
@@ -2559,7 +2567,8 @@ static bool configure(int inw, int inh, int outw, int outh, int mode)
     c.in_w = uint32_t(inw);
     c.in_h = uint32_t(inh);
     c.mode = gwmodefromengine(mode);
-    c.preset_k = 1;
+    c.preset_k = hwrtdlsscnn ? 2 : 1;
+    ngxcfgcnn = int(hwrtdlsscnn);
     c.hdr = uint32_t(wantHdr);
     c.auto_exposure = wantHdr ? 0u : 1u;
     SauerNgxCreateInfo info;
@@ -2627,52 +2636,33 @@ static bool configure(int inw, int inh, int outw, int outh, int mode)
     return true;
 }
 
-// Row-major multiply copied from Streamline 2.12 sl_matrix_helpers.h::matrixMul
-// (result = a * b, column vectors). Used only to audit tomat/fillconstants.
-static void slrowmul(float r[16], const float a[16], const float b[16])
+// Row-major 4x4 helpers (rows of the transposed engine matrix, column vectors).
+// Used only by the hwrtdlaacontract self-check of tomat().
+static void rowmul(float r[16], const float a[16], const float b[16])
 {
-    r[0]  = a[0]*b[0]  + a[1]*b[4]  + a[2]*b[8]  + a[3]*b[12];
-    r[1]  = a[0]*b[1]  + a[1]*b[5]  + a[2]*b[9]  + a[3]*b[13];
-    r[2]  = a[0]*b[2]  + a[1]*b[6]  + a[2]*b[10] + a[3]*b[14];
-    r[3]  = a[0]*b[3]  + a[1]*b[7]  + a[2]*b[11] + a[3]*b[15];
-    r[4]  = a[4]*b[0]  + a[5]*b[4]  + a[6]*b[8]  + a[7]*b[12];
-    r[5]  = a[4]*b[1]  + a[5]*b[5]  + a[6]*b[9]  + a[7]*b[13];
-    r[6]  = a[4]*b[2]  + a[5]*b[6]  + a[6]*b[10] + a[7]*b[14];
-    r[7]  = a[4]*b[3]  + a[5]*b[7]  + a[6]*b[11] + a[7]*b[15];
-    r[8]  = a[8]*b[0]  + a[9]*b[4]  + a[10]*b[8] + a[11]*b[12];
-    r[9]  = a[8]*b[1]  + a[9]*b[5]  + a[10]*b[9] + a[11]*b[13];
-    r[10] = a[8]*b[2]  + a[9]*b[6]  + a[10]*b[10]+ a[11]*b[14];
-    r[11] = a[8]*b[3]  + a[9]*b[7]  + a[10]*b[11]+ a[11]*b[15];
-    r[12] = a[12]*b[0] + a[13]*b[4] + a[14]*b[8] + a[15]*b[12];
-    r[13] = a[12]*b[1] + a[13]*b[5] + a[14]*b[9] + a[15]*b[13];
-    r[14] = a[12]*b[2] + a[13]*b[6] + a[14]*b[10]+ a[15]*b[14];
-    r[15] = a[12]*b[3] + a[13]*b[7] + a[14]*b[11]+ a[15]*b[15];
+    loopi(4) loopj(4) r[i*4 + j] = a[i*4]*b[j] + a[i*4 + 1]*b[4 + j] + a[i*4 + 2]*b[8 + j] + a[i*4 + 3]*b[12 + j];
 }
 
-static bool slrowinvert(float r[16], const float m[16])
+// Gauss-Jordan inverse with partial pivoting, in double precision.
+static bool rowinvert(float r[16], const float m[16])
 {
-    const float *pMat = m;
-    float *pResult = r;
-    pResult[0] = pMat[5]*pMat[10]*pMat[15] - pMat[5]*pMat[11]*pMat[14] - pMat[9]*pMat[6]*pMat[15] + pMat[9]*pMat[7]*pMat[14] + pMat[13]*pMat[6]*pMat[11] - pMat[13]*pMat[7]*pMat[10];
-    pResult[4] = -pMat[4]*pMat[10]*pMat[15] + pMat[4]*pMat[11]*pMat[14] + pMat[8]*pMat[6]*pMat[15] - pMat[8]*pMat[7]*pMat[14] - pMat[12]*pMat[6]*pMat[11] + pMat[12]*pMat[7]*pMat[10];
-    pResult[8] = pMat[4]*pMat[9]*pMat[15] - pMat[4]*pMat[11]*pMat[13] - pMat[8]*pMat[5]*pMat[15] + pMat[8]*pMat[7]*pMat[13] + pMat[12]*pMat[5]*pMat[11] - pMat[12]*pMat[7]*pMat[9];
-    pResult[12] = -pMat[4]*pMat[9]*pMat[14] + pMat[4]*pMat[10]*pMat[13] + pMat[8]*pMat[5]*pMat[14] - pMat[8]*pMat[6]*pMat[13] - pMat[12]*pMat[5]*pMat[10] + pMat[12]*pMat[6]*pMat[9];
-    pResult[1] = -pMat[1]*pMat[10]*pMat[15] + pMat[1]*pMat[11]*pMat[14] + pMat[9]*pMat[2]*pMat[15] - pMat[9]*pMat[3]*pMat[14] - pMat[13]*pMat[2]*pMat[11] + pMat[13]*pMat[3]*pMat[10];
-    pResult[5] = pMat[0]*pMat[10]*pMat[15] - pMat[0]*pMat[11]*pMat[14] - pMat[8]*pMat[2]*pMat[15] + pMat[8]*pMat[3]*pMat[14] + pMat[12]*pMat[2]*pMat[11] - pMat[12]*pMat[3]*pMat[10];
-    pResult[9] = -pMat[0]*pMat[9]*pMat[15] + pMat[0]*pMat[11]*pMat[13] + pMat[8]*pMat[1]*pMat[15] - pMat[8]*pMat[3]*pMat[13] - pMat[12]*pMat[1]*pMat[11] + pMat[12]*pMat[3]*pMat[9];
-    pResult[13] = pMat[0]*pMat[9]*pMat[14] - pMat[0]*pMat[10]*pMat[13] - pMat[8]*pMat[1]*pMat[14] + pMat[8]*pMat[2]*pMat[13] + pMat[12]*pMat[1]*pMat[10] - pMat[12]*pMat[2]*pMat[9];
-    pResult[2] = pMat[1]*pMat[6]*pMat[15] - pMat[1]*pMat[7]*pMat[14] - pMat[5]*pMat[2]*pMat[15] + pMat[5]*pMat[3]*pMat[14] + pMat[13]*pMat[2]*pMat[7] - pMat[13]*pMat[3]*pMat[6];
-    pResult[6] = -pMat[0]*pMat[6]*pMat[15] + pMat[0]*pMat[7]*pMat[14] + pMat[4]*pMat[2]*pMat[15] - pMat[4]*pMat[3]*pMat[14] - pMat[12]*pMat[2]*pMat[7] + pMat[12]*pMat[3]*pMat[6];
-    pResult[10] = pMat[0]*pMat[5]*pMat[15] - pMat[0]*pMat[7]*pMat[13] - pMat[4]*pMat[1]*pMat[15] + pMat[4]*pMat[3]*pMat[13] + pMat[12]*pMat[1]*pMat[7] - pMat[12]*pMat[3]*pMat[5];
-    pResult[14] = -pMat[0]*pMat[5]*pMat[14] + pMat[0]*pMat[6]*pMat[13] + pMat[4]*pMat[1]*pMat[14] - pMat[4]*pMat[2]*pMat[13] - pMat[12]*pMat[1]*pMat[6] + pMat[12]*pMat[2]*pMat[5];
-    pResult[3] = -pMat[1]*pMat[6]*pMat[11] + pMat[1]*pMat[7]*pMat[10] + pMat[5]*pMat[2]*pMat[11] - pMat[5]*pMat[3]*pMat[10] - pMat[9]*pMat[2]*pMat[7] + pMat[9]*pMat[3]*pMat[6];
-    pResult[7] = pMat[0]*pMat[6]*pMat[11] - pMat[0]*pMat[7]*pMat[10] - pMat[4]*pMat[2]*pMat[11] + pMat[4]*pMat[3]*pMat[10] + pMat[8]*pMat[2]*pMat[7] - pMat[8]*pMat[3]*pMat[6];
-    pResult[11] = -pMat[0]*pMat[5]*pMat[11] + pMat[0]*pMat[7]*pMat[9] + pMat[4]*pMat[1]*pMat[11] - pMat[4]*pMat[3]*pMat[9] - pMat[8]*pMat[1]*pMat[7] + pMat[8]*pMat[3]*pMat[5];
-    pResult[15] = pMat[0]*pMat[5]*pMat[10] - pMat[0]*pMat[6]*pMat[9] - pMat[4]*pMat[1]*pMat[10] + pMat[4]*pMat[2]*pMat[9] + pMat[8]*pMat[1]*pMat[6] - pMat[8]*pMat[2]*pMat[5];
-    float det = pMat[0]*pResult[0] + pMat[1]*pResult[4] + pMat[2]*pResult[8] + pMat[3]*pResult[12];
-    if(det == 0) return false;
-    det = 1.0f / det;
-    loopi(16) pResult[i] *= det;
+    double a[4][8];
+    loopi(4) loopj(4) { a[i][j] = m[i*4 + j]; a[i][4 + j] = i == j ? 1 : 0; }
+    loopk(4)
+    {
+        int p = k;
+        for(int i = k + 1; i < 4; i++) if(fabs(a[i][k]) > fabs(a[p][k])) p = i;
+        if(a[p][k] == 0) return false;
+        if(p != k) loopj(8) swap(a[p][j], a[k][j]);
+        double inv = 1.0 / a[k][k];
+        loopj(8) a[k][j] *= inv;
+        loopi(4) if(i != k && a[i][k] != 0)
+        {
+            double f = a[i][k];
+            loopj(8) a[i][j] -= f * a[k][j];
+        }
+    }
+    loopi(4) loopj(4) r[i*4 + j] = float(a[i][4 + j]);
     return true;
 }
 
@@ -2725,10 +2715,10 @@ static void runcontract(FILE *f)
 
     float row[16], rowinv[16], engineinvrow[16];
     tomat(world, row);
-    if(!slrowinvert(rowinv, row))
+    if(!rowinvert(rowinv, row))
     {
-        copystring(lastcontractnote, "slrowinvert failed on known T*R", sizeof(lastcontractnote));
-        if(f) fprintf(f, "contract FAIL slrowinvert\n");
+        copystring(lastcontractnote, "rowinvert failed on known T*R", sizeof(lastcontractnote));
+        if(f) fprintf(f, "contract FAIL rowinvert\n");
         return;
     }
     matrix4 engineinv;
@@ -2746,11 +2736,11 @@ static void runcontract(FILE *f)
     engineinv.transform(tp, back);
     float err_round = max(fabsf(back.x - p.x), max(fabsf(back.y - p.y), max(fabsf(back.z - p.z), fabsf(back.w - p.w))));
 
-    float slp[4], slback[4];
-    xform4(row, 1, 0, 0, 1, slp);
-    xform4(rowinv, slp[0], slp[1], slp[2], slp[3], slback);
-    float err_sl = max(fabsf(slback[0] - 1), max(fabsf(slback[1]), max(fabsf(slback[2]), fabsf(slback[3] - 1))));
-    float err_path = max(fabsf(slp[0] - tp.x), max(fabsf(slp[1] - tp.y), max(fabsf(slp[2] - tp.z), fabsf(slp[3] - tp.w))));
+    float rowp[4], rowback[4];
+    xform4(row, 1, 0, 0, 1, rowp);
+    xform4(rowinv, rowp[0], rowp[1], rowp[2], rowp[3], rowback);
+    float err_rowinv = max(fabsf(rowback[0] - 1), max(fabsf(rowback[1]), max(fabsf(rowback[2]), fabsf(rowback[3] - 1))));
+    float err_path = max(fabsf(rowp[0] - tp.x), max(fabsf(rowp[1] - tp.y), max(fabsf(rowp[2] - tp.z), fabsf(rowp[3] - tp.w))));
 
     matrix4 viewtoclip;
     viewtoclip.identity();
@@ -2775,7 +2765,7 @@ static void runcontract(FILE *f)
     float arow[16], brow[16], prod[16], engineprod[16];
     tomat(prev, arow);
     tomat(cliptoworld, brow);
-    slrowmul(prod, arow, brow);
+    rowmul(prod, arow, brow);
     tomat(cliptoprev, engineprod);
     float err_mul = matmaxabsdiff(prod, engineprod);
 
@@ -2785,25 +2775,25 @@ static void runcontract(FILE *f)
     float clipr[16], prevr[16], c2p[16];
     tomat(cliptoworld, clipr);
     tomat(prev, prevr);
-    slrowmul(c2p, prevr, clipr);
+    rowmul(c2p, prevr, clipr);
     float prevclip_s[4];
     xform4(c2p, clip.x, clip.y, clip.z, clip.w, prevclip_s);
     float err_pt = max(fabsf(prevclip_s[0] - prevclip_e.x), max(fabsf(prevclip_s[1] - prevclip_e.y), max(fabsf(prevclip_s[2] - prevclip_e.z), fabsf(prevclip_s[3] - prevclip_e.w))));
 
-    lastcontracterr = max(err_inv, max(err_round, max(err_sl, max(err_path, max(err_mul, err_pt)))));
+    lastcontracterr = max(err_inv, max(err_round, max(err_rowinv, max(err_path, max(err_mul, err_pt)))));
     lastcontractok = lastcontracterr < 1e-4f ? 1 : 0;
     nformatstring(lastcontractnote, sizeof(lastcontractnote),
-                  "%s maxabs %.6g invert %.6g roundtrip %.6g sl %.6g tomat_vs_engine_xform %.6g mul %.6g clipToPrev point %.6g",
-                  lastcontractok ? "PASS" : "FAIL", lastcontracterr, err_inv, err_round, err_sl, err_path, err_mul, err_pt);
+                  "%s maxabs %.6g invert %.6g roundtrip %.6g rowinv %.6g tomat_vs_engine_xform %.6g mul %.6g clipToPrev point %.6g",
+                  lastcontractok ? "PASS" : "FAIL", lastcontracterr, err_inv, err_round, err_rowinv, err_path, err_mul, err_pt);
 
     if(f)
     {
         fprintf(f, "contract %s\n", lastcontractnote);
-        fprintf(f, "tomat: engine columns a,b,c,d -> NGX/SL row-major rows (transpose of column-major). Multiplication compared to sl_matrix_helpers.h matrixMul (row-major, column vectors).\n");
+        fprintf(f, "tomat: engine columns a,b,c,d -> row-major rows (transpose of column-major). Row-major multiply and inverse compared with the engine matrix4 (column vectors).\n");
         fprintf(f, "known transform: T(10,20,30) * RotZ(30deg). Point (1,0,0,1).\n");
         fprintf(f, "engine T*R*(1,0,0,1) = %.6f %.6f %.6f %.6f\n", tp.x, tp.y, tp.z, tp.w);
-        fprintf(f, "slrow same point = %.6f %.6f %.6f %.6f\n", slp[0], slp[1], slp[2], slp[3]);
-        fprintf(f, "clipToPrevClip = prevWorldToClip * clipToWorld (engine mul(prev, cliptoworld)); matches sl_consts.h clipToPrevClip = clipToView * viewToViewPrev * viewToClipPrev for this camera-only case.\n");
+        fprintf(f, "row same point = %.6f %.6f %.6f %.6f\n", rowp[0], rowp[1], rowp[2], rowp[3]);
+        fprintf(f, "clipToPrevClip = prevWorldToClip * clipToWorld (engine mul(prev, cliptoworld)) = clipToView * viewToViewPrev * viewToClipPrev for this camera-only case.\n");
         fprintf(f, "clip Y flip: GL clip +Y up -> D3D +Y down by negating matrix row Y (columns' .y). GL rowY.y=%.6f D3D rowY.y=%.6f product %.6f (expect -1)\n",
                 pgl[5], pd3d[5], clip_y_sign);
         fprintf(f, "yflip_applied %s\n", yflipped ? "yes" : "no");
@@ -2862,7 +2852,43 @@ static bool packinputs(const hwrttemporalinput *tin)
     GLuint targets[4] = { texcolorin.gltex, texdepth.gltex, texmotion.gltex, texbias.gltex };
     int npass = biaswanted() ? 4 : 3;
     bool packok = true;
-    loopi(npass)
+    int firstpass = 0;
+    // hwrtperfpath bit 4: colour, depth and motion in one pass with three targets
+    // (hwrtdlaapack3, the same expressions as the three passes below). The
+    // separate passes stay as the fallback if that shader is missing.
+    if(hwrtperfpath & 4)
+    {
+        static Shader *pack3 = NULL;
+        static bool pack3tried = false;
+        if(!pack3tried)
+        {
+            pack3tried = true;
+            pack3 = useshaderbyname("hwrtdlaapack3");
+            if(!pack3 || pack3->invalid()) { pack3 = NULL; conoutf(CON_WARN, "hwrt ngx: hwrtdlaapack3 unavailable, packing in three passes"); }
+        }
+        if(pack3)
+        {
+            loopi(3) glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + i, GL_TEXTURE_2D, targets[i], 0);
+            GLenum fbstatus = glCheckFramebufferStatus_(GL_FRAMEBUFFER);
+            if(fbstatus == GL_FRAMEBUFFER_COMPLETE)
+            {
+                GLenum bufs[3] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2 };
+                glDrawBuffers_(3, bufs);
+                pack3->set();
+                LOCALPARAM(dlaainvused, tin->invcamproj_used);
+                LOCALPARAM(dlaacurrunjit, tin->camproj_unjit);
+                LOCALPARAM(dlaaprevunjit, hasprevunjit ? prevunjit : tin->camproj_unjit);
+                LOCALPARAMF(dlaaparam, float(tin->width), float(tin->height), hasprevunjit && !tin->reset ? 1.0f : 0.0f, tin->velocitytex ? 1.0f : 0.0f);
+                screenquad(1, 1);
+                firstpass = 3;
+            }
+            glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, 0, 0);
+            glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, GL_TEXTURE_2D, 0, 0);
+            glDrawBuffers_(1, &buf);
+            if(firstpass && npass > 3) s->set();
+        }
+    }
+    for(int i = firstpass; i < npass; i++)
     {
         glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, targets[i], 0);
         GLenum fbstatus = glCheckFramebufferStatus_(GL_FRAMEBUFFER);
@@ -2990,6 +3016,28 @@ static bool draininterop()
     vkWaitForFences(hwrtdev.device, 1, &fences[fifslot], VK_TRUE, UINT64_MAX);
     return true;
 }
+
+// GL -> Vulkan handoff of the packed inputs and the output image.
+static void signalready()
+{
+    GLuint texs[6];
+    GLenum layouts[6];
+    texs[0] = texcolorin.gltex;
+    texs[1] = texdepth.gltex;
+    texs[2] = texmotion.gltex;
+    texs[3] = texcolorout.gltex;
+    int ntex = 4;
+    if(texbias.gltex) texs[ntex++] = texbias.gltex;
+    if(texexposure.gltex) texs[ntex++] = texexposure.gltex;
+    loopi(ntex) layouts[i] = GL_LAYOUT_GENERAL_EXT;
+    dlaaSignalSem(glglready, 0, NULL, ntex, texs, layouts);
+    glFlush();
+    glsignaled = true;
+}
+
+// hwrtperfpath bit 2: the evaluate is recorded first and the GL signal goes out
+// right before its submit (same commands, same image).
+static bool latesignal = false;
 
 static bool submitvk(bool roundtrip, const hwrttemporalinput *tin, bool reset, bool &submitted)
 {
@@ -3163,6 +3211,7 @@ static bool submitvk(bool roundtrip, const hwrttemporalinput *tin, bool reset, b
         return false;
     }
 
+    if(latesignal && !glsignaled) signalready();
     vkResetFences(hwrtdev.device, 1, &fences[fifslot]);
     VkPipelineStageFlags waitstage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
     VkSubmitInfo submit = { VK_STRUCTURE_TYPE_SUBMIT_INFO };
@@ -3635,7 +3684,7 @@ void hwrtdlaashutdown()
         FreeLibrary(gwmod);
         gwmod = NULL;
     }
-    slinited = false;
+    gwloaded = false;
     ngxinited = false;
     ngxloaded = false;
     ngxsupported = false;
@@ -3827,29 +3876,8 @@ void hwrtdlaaframe()
     }
     writeexposuretex();
 
-    GLuint texs[6];
-    GLenum layouts[6];
-    texs[0] = texcolorin.gltex;
-    texs[1] = texdepth.gltex;
-    texs[2] = texmotion.gltex;
-    texs[3] = texcolorout.gltex;
-    int ntex = 4;
-    if(texbias.gltex)
-    {
-        texs[ntex] = texbias.gltex;
-        layouts[ntex] = GL_LAYOUT_GENERAL_EXT;
-        ntex++;
-    }
-    if(texexposure.gltex)
-    {
-        texs[ntex] = texexposure.gltex;
-        layouts[ntex] = GL_LAYOUT_GENERAL_EXT;
-        ntex++;
-    }
-    loopi(4) layouts[i] = GL_LAYOUT_GENERAL_EXT;
-    dlaaSignalSem(glglready, 0, NULL, ntex, texs, layouts);
-    glFlush();
-    glsignaled = true;
+    latesignal = (hwrtperfpath & 2) != 0;
+    if(!latesignal) signalready();
 
     bool reset = tin->reset || !hasprevunjit;
     bool submitted = false;
@@ -4059,9 +4087,8 @@ static void hwrtdlaastats()
     conoutf("hwrt ngx: preference %s (%d)  applied %s (%d)  blocked %s  available %d  active %d  reason: %s",
             ngxmodename(hwrtngxmode), int(hwrtngxmode), ngxmodename(ngxmodeapp), ngxmodeapp,
             ngxblocked ? "yes" : "no", int(hwrtdlaaavailable), int(hwrtdlaaok), ngxreason);
-    conoutf("  SDK NGX Vulkan public (sauer_ngx.dll)  inited %s  supported %s  configured %s  Streamline loaded %s",
-            slinited ? "yes" : "no", ngxsupported ? "yes" : "no", dlaaconfigured ? "yes" : "no",
-            GetModuleHandleA("sl.interposer.dll") ? "YES-BUG" : "no");
+    conoutf("  SDK NGX Vulkan public (sauer_ngx.dll)  inited %s  supported %s  configured %s",
+            gwloaded ? "yes" : "no", ngxsupported ? "yes" : "no", dlaaconfigured ? "yes" : "no");
     conoutf("  current window %dx%d  current scene/RT %dx%d bound %s  (native when Off)",
             screenw, screenh, lastscenew, lastsceneh, hwrtsceneinternal() ? "yes" : "no");
     conoutf("  NGX active in %ux%u out %ux%u  (0x0 when feature released)  last NGX resources in %ux%u out %ux%u",
@@ -4075,7 +4102,7 @@ static void hwrtdlaastats()
     conoutf("  CPU sandwich %.3f ms. GPU pack→blit %.3f ms last, %.3f ms mean of %d samples. Bias mask GPU %.3f ms last (before sandwich).",
             lastcostms, lastgpums, gpumean(), gpuringn, lastbiasgpums);
     conoutf("  present OpenGL SDL_GL_SwapWindow. NGX has no presentCommon. Create/ReleaseFeature/Shutdown1 through sauer_ngx.dll.");
-    conoutf("  colour LDR UNORM RGBA8  depth R32F window 0-1 not inverted  MV prev-curr pixels Y-flipped for D3D  NGX InMVScale 1,1 (pixel space; not Streamline 1/w,1/h)");
+    conoutf("  colour LDR UNORM RGBA8  depth R32F window 0-1 not inverted  MV prev-curr pixels Y-flipped for D3D  NGX InMVScale 1,1 (pixel space)");
     conoutf("  autonomy drivers: hwrtvelocity %d hwrtveldebug %d hwrtdlaajitter %d hwrtdlaaneedsdata %s",
             int(hwrtvelocity), int(hwrtveldebug), int(hwrtdlaajitter), hwrtdlaaneedsdata() ? "yes" : "no");
     conoutf("  contract %s err %.6g  (%s)", lastcontractok ? "PASS" : "n/a-or-FAIL", lastcontracterr, lastcontractnote);
@@ -4180,8 +4207,7 @@ static void hwrtdlaadump(char *name)
     fprintf(f, "sdk NVIDIA NGX Vulkan public nvsdk_ngx_s.lib via sauer_ngx.dll ABI %u\n", SAUER_NGX_ABI_VERSION);
     fprintf(f, "projectId %s  engine %s  EngineType CUSTOM\n", NGX_PROJECT_ID, NGX_ENGINE_VER);
     fprintf(f, "lifecycle Init_with_ProjectID / CREATE_DLSS_EXT1 / EVALUATE_DLSS_EXT Color+Depth+MV+Output[+exposure 1x1 in HDR with preset K] / ReleaseFeature / Shutdown1\n");
-    fprintf(f, "present OpenGL SDL_GL_SwapWindow. NGX does not use presentCommon. Streamline loaded=%s\n",
-            GetModuleHandleA("sl.interposer.dll") ? "yes" : "no");
+    fprintf(f, "present OpenGL SDL_GL_SwapWindow. NGX does not use presentCommon.\n");
     fprintf(f, "mode %s  preset %s  IsHDR %d  AutoExposure %d  depthInverted false  InMVScale 1,1 (render-pixel space)  MVLowRes  mip bias %.3f\n", ngxmodename(ngxmodeapp ? ngxmodeapp : hwrtngxmode), ngxpresetname(ngxmodeapp ? ngxmodeapp : hwrtngxmode),
             ngxcfghdr, ngxcfgautoexp, getscenelodbias());
     extern int windowmode, scr_w, scr_h, thirdperson, hwrtfreezeself;
@@ -4212,12 +4238,12 @@ static void hwrtdlaadump(char *name)
     fprintf(f, "cost_scope GL_TIME_ELAPSED from pack through blit, including the GL wait on the Vulkan semaphore. Does not claim a dedicated NGX Evaluate GPU timestamp.\n");
     fprintf(f, "formats colorin/out VK_FORMAT_R8G8B8A8_UNORM GL_RGBA8  depth VK_FORMAT_R32_SFLOAT GL_R32F  motion VK_FORMAT_R16G16B16A16_SFLOAT\n");
     fprintf(f, "orientation pack flips V so memory row 0 is top of screen; blit flips back to GL window\n");
-    fprintf(f, "motion engine prev-curr pixels +Y up; packed MV.y negated; NGX InMVScale 1,1 (already pixel space, not Streamline 1/w,1/h); motionVectorsJittered false\n");
+    fprintf(f, "motion engine prev-curr pixels +Y up; packed MV.y negated; NGX InMVScale 1,1 (already pixel space); motionVectorsJittered false\n");
     fprintf(f, "jitterOffset pixel D3D (engine.y negated)\n");
     fprintf(f, "depth mixed world/avatar after gun, 0 near 1 far, depthInverted false. Gun pixels keep avatar MVs (B=1), not world unproject.\n");
     fprintf(f, "uncovered B<0.5: camera-only MVs from mixed depth via world inv(camproj_used)->unjit curr/prev. Sky rotation covered. Water/particles/unvalidated: limitation.\n");
-    fprintf(f, "B/A coverage is NOT a Streamline mask.\n");
-    fprintf(f, "matrices cameraViewToClip = unjittered proj with clip Y negated (GL->D3D). clipToPrevClip = prev_camproj_Yflip * inv(curr_camproj_Yflip). tomat is transpose of engine columns, same as sl row-major.\n");
+    fprintf(f, "B/A coverage is an internal mark, not an NGX mask.\n");
+    fprintf(f, "matrices cameraViewToClip = unjittered proj with clip Y negated (GL->D3D). clipToPrevClip = prev_camproj_Yflip * inv(curr_camproj_Yflip). tomat is transpose of engine columns (row-major).\n");
     fprintf(f, "autonomy hwrtvelocity %d hwrtveldebug %d hwrtdlaajitter %d needsdata %s\n",
             int(hwrtvelocity), int(hwrtveldebug), int(hwrtdlaajitter), hwrtdlaaneedsdata() ? "yes" : "no");
     runcontract(f);

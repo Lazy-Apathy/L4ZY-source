@@ -6,7 +6,7 @@
 // not take down the rest of the layer if the buffer fails to allocate.
 // Sun / sky (plus the fullbrightmodels floor, the world overbright, the
 // previous frame's camera for the temporal skyvis pass, and the world-diffuse
-// filter/vis knobs) live in a 432-byte std430 header in front of the point
+// filter/vis knobs, the extended-source settings) live in a 480-byte std430 header in front of the point
 // lights so the 128-byte push constants do not grow.
 // Radius-0 lights (baker unlimited omni) are packed first so the 256-cap
 // cannot drop them. The lighting shader always evaluates them.
@@ -27,6 +27,7 @@ extern int sunlight, skylight, hwrtskyrays, hwrtskyfilter, hwrtskytemporal;
 extern int fullbrightmodels;
 extern float hwrtworldgain;
 extern int hwrtshadowself;
+extern int hwrtshadowothers;
 extern int hwrtshadeglow;
 extern int hwrtteleportlight, hwrtjumppadlight, hwrtglowdlights;
 extern int farplane;
@@ -54,6 +55,16 @@ VAR(hwrtdiffmip, 0, 2, 2);
 FVARP(hwrtdiffmipbias, -3, 0, 2);
 VAR(hwrtdiffmipauto, 0, 1, 1);
 VAR(hwrtdiffaniso, 0, 1, 1);
+// RT quality (Graphics > Ray tracing), for mid-range graphics cards. 2 High is
+// the full picture and the default. 1 Medium traces the sky rays of half the
+// pixels (one row pair in two, alternating every frame, filled by the sky
+// filter and NRD). 0 Low also keeps a single glowing light (teleporters, lava) and drops
+// the anisotropic filtering of the world textures. Applied on top of the saved
+// settings, which it never changes.
+VARP(hwrtquality, 0, 2, 2);
+// The half-rate sky needs the sky filter to fill the pixels it skips.
+bool hwrtskyhalf() { return hwrtquality < 2 && hwrtskyfilter; }
+static int hwrtglowcap() { return hwrtquality < 1 ? min(int(hwrtglowdlights), 1) : int(hwrtglowdlights); }
 VAR(hwrtdifftexel, 0, 0, 2);
 extern bool hwrtdiffanisoready();
 // What hitlight.comp receives in env.diffFilter (see sampleWorldDiff).
@@ -64,7 +75,7 @@ static float diffmipfilter()
     if(hwrtdiffmipauto && hwrtio.w > 0 && screenw > 0 && hwrtio.w < screenw)
         bias += log2f(float(hwrtio.w) / float(screenw));
     bias = clamp(bias, -3.5f, 3.5f);
-    int m = 1 + (hwrtdiffaniso && hwrtdiffanisoready() ? 1 : 0) + 2 * hwrtdifftexel;
+    int m = 1 + (hwrtdiffaniso && hwrtquality >= 1 && hwrtdiffanisoready() ? 1 : 0) + 2 * hwrtdifftexel;
     return 8.0f * m + bias;
 }
 // Console witness: the effective footprint settings.
@@ -145,15 +156,27 @@ struct hwrtlightenv
     float diffFilter;   // hwrtdiffmip: 0 lod0, 1 textureGrad
     float diffVis;      // hwrtdiffvis: 0 play, 1 albedo, 2 lighting, 3 lod heat
     float skyStable;    // hwrtskystable: 0 pixel+frame RNG, 1 pixel only
-    float diffPad1;     // bit0 hold, bit1 bilinear hist, bits2-3 visdbg, bit4 age, bit5 nrd, bit14 smooth normals
+    float diffPad1;     // bit0 hold, bit1 bilinear hist, bits2-3 visdbg, bit4 age, bit5 nrd, bits10-11 3 - hwrtshadowothers, bit14 smooth normals
                         // bits6-9 nrddbg, bit12 hidden-retry
     float nrdWorldToView[16];
     float nrdWorldToViewPrev[16];
     float nrdViewToClip[16];
     float nrdViewToClipPrev[16];
     float nrdHitA, nrdHitB, nrdHitC, nrdRange;
+    // Extended light sources (hwrtsunsize, hwrtsoftrays, hwrtsoftnoise):
+    // tan of the sun disc's angular radius (0 = point sun, one exact ray), the
+    // shadow rays per extended source, the sampling pattern (bit 0 new
+    // pattern every frame, bit 1 blue noise), adaptive (hwrtsoftadapt).
+    float softSunTan, softRays, softNoise, softAdapt;
+    // Rays by apparent size (hwrtsoftraysangle, hwrtsoftraysmin): radians of
+    // source diameter per extra ray (0 = always softRays), the fewest rays.
+    float softRayAngle, softRayMin, softPad0, softPad1;
+    // Optimised extended sources (hwrtsoftopt): the smallest light a source must add to a pixel
+    // to keep its penumbra, the tangent of the smallest apparent half-angle (hwrtsoftmin, hwrtsoftminangle),
+    // the temporal weight of a new filtered fraction, the filter radius per pixel of penumbra.
+    float softMinContrib, softMinTan, softTemporal, softFilterScale;
 };
-static_assert(sizeof(hwrtlightenv) == 432, "light env header");
+static_assert(sizeof(hwrtlightenv) == 480, "light env header");
 
 struct hwrtlight
 {
@@ -161,7 +184,8 @@ struct hwrtlight
     float radius;   // 0 = unlimited
     float color[3]; // rgb/255
     float flags;    // 0 = shadow, 1 = EF_NOSHADOW, 2 = aura (no shadow),
-                    // 3 = always-eval lamp with shadow (teleport / lava)
+                    // 3 = always-eval lamp with shadow (teleport / lava);
+                    // 0 and 3 carry + source radius / 128 (extended sources)
 };
 static_assert(sizeof(hwrtlight) == 32, "light stride");
 
@@ -182,13 +206,20 @@ struct hwrtlightupload
     hwrtlight water[HWRT_MAX_WATERPLANES];
     float waterrect[HWRT_MAX_WATERRECTS][4];
 };
-static_assert(sizeof(hwrtlightupload) == 432 + 256 * 32 + 256 * 4 + HWRT_MAX_WATERPLANES * 32 + HWRT_MAX_WATERRECTS * 16, "light ssbo");
+static_assert(sizeof(hwrtlightupload) == 480 + 256 * 32 + 256 * 4 + HWRT_MAX_WATERPLANES * 32 + HWRT_MAX_WATERRECTS * 16, "light ssbo");
+
+// Animated water (water.cpp hwrtwaterwaves): 12 floats of parameters then up
+// to HWRT_WAVE_MAXN^2 slopes (x, y) behind the table, rewritten each frame;
+// with the waves off only the first float (0) matters.
+enum { HWRT_WAVE_MAXN = 256, HWRT_WAVE_BYTES = 12 * 4 + HWRT_WAVE_MAXN * HWRT_WAVE_MAXN * 2 * 4 };
+extern void hwrtwavewrite(void *dst, int maxn);
 
 struct hwrtlightstate
 {
     VkBuffer buffer;
     VkDeviceMemory memory;
     VkDeviceSize size;
+    bool bar;
     bool failed;
     bool logpending;
     int lastlogged;
@@ -197,7 +228,7 @@ struct hwrtlightstate
     int lastsun, lastsky;
 };
 
-static hwrtlightstate lights = { VK_NULL_HANDLE, VK_NULL_HANDLE, 0, false, true, -1, -1, -1, -1, -1 };
+static hwrtlightstate lights = { VK_NULL_HANDLE, VK_NULL_HANDLE, 0, false, false, true, -1, -1, -1, -1, -1 };
 
 // Visibility floor for ENT_PLAYER, not GL's flattening fullbright.
 //
@@ -232,6 +263,8 @@ static void destroylightbuf()
         if(lights.buffer) vkDestroyBuffer(hwrtdev.device, lights.buffer, NULL);
         if(lights.memory) vkFreeMemory(hwrtdev.device, lights.memory, NULL);
     }
+    if(lights.bar) hwrtbaraccount(lights.size, false);
+    lights.bar = false;
     lights.buffer = VK_NULL_HANDLE;
     lights.memory = VK_NULL_HANDLE;
     lights.size = 0;
@@ -248,7 +281,8 @@ static bool ensurelightbuf()
     if(lights.buffer) return true;
     if(!hwrtdev.ok()) return lightfail("no Vulkan device for point lights");
 
-    const VkDeviceSize bytes = sizeof(hwrtlightupload);
+    // Animated water (water.cpp) rides behind the table: hitlight.comp waveParams / waveSlope.
+    const VkDeviceSize bytes = sizeof(hwrtlightupload) + HWRT_WAVE_BYTES;
     VkBufferCreateInfo info = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
     info.size = bytes;
     info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
@@ -258,7 +292,11 @@ static bool ensurelightbuf()
 
     VkMemoryRequirements req;
     vkGetBufferMemoryRequirements(hwrtdev.device, lights.buffer, &req);
-    int memtype = hwrtfindmemtype(req.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    // Every pixel of the lighting pass reads it: the BAR window when there is
+    // room (video memory the CPU writes through), else system memory.
+    int memtype = hwrtfindbarmemtype(req.memoryTypeBits, req.size);
+    lights.bar = memtype >= 0;
+    if(memtype < 0) memtype = hwrtfindmemtype(req.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
     if(memtype < 0) memtype = hwrtfindmemtype(req.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
     if(memtype < 0)
     {
@@ -270,10 +308,19 @@ static bool ensurelightbuf()
     alloc.allocationSize = req.size;
     alloc.memoryTypeIndex = uint32_t(memtype);
     r = vkAllocateMemory(hwrtdev.device, &alloc, NULL, &lights.memory);
+    if(r != VK_SUCCESS && lights.bar)
+    {
+        lights.bar = false;
+        memtype = hwrtfindmemtype(req.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        if(memtype < 0) { destroylightbuf(); return lightfail("no memory type for a light buffer"); }
+        alloc.memoryTypeIndex = uint32_t(memtype);
+        r = vkAllocateMemory(hwrtdev.device, &alloc, NULL, &lights.memory);
+    }
     if(r != VK_SUCCESS) { destroylightbuf(); return lightfail("vkAllocateMemory (lights)", r); }
+    lights.size = req.size;
+    if(lights.bar) hwrtbaraccount(lights.size, true);
     r = vkBindBufferMemory(hwrtdev.device, lights.buffer, lights.memory, 0);
     if(r != VK_SUCCESS) { destroylightbuf(); return lightfail("vkBindBufferMemory (lights)", r); }
-    lights.size = req.size;
     return true;
 }
 
@@ -555,6 +602,8 @@ struct hwrtglowcand
     float radius;
     float flags;
     float dist;
+    bool ring;      // in a teleporter ring's hole
+    float ringang;  // world angle (radians) of the ring's horizontal normal, -1 unknown
 };
 
 // Close enough to light the room you are in (including behind the camera),
@@ -617,6 +666,8 @@ static int hwrtmergeglow(hwrtglowcand *c, int nc, float mergedist)
         vec col = c[i].col;
         float radius = c[i].radius;
         float flags = c[i].flags;
+        bool ring = c[i].ring;
+        float ringang = c[i].ringang;
         int n = 1;
         for(int j = i+1; j < nc; j++)
         {
@@ -636,9 +687,271 @@ static int hwrtmergeglow(hwrtglowcand *c, int nc, float mergedist)
         o.radius = radius;
         o.flags = flags;
         o.dist = 0;
+        o.ring = ring;
+        o.ringang = ringang;
     }
     return nout;
 }
+
+// Extended light sources (lab, not saved, all off by default). A point source
+// throws a hard shadow from a single ray; an extended one throws a penumbra
+// that is sharp where the occluder touches the receiver and widens with the
+// distance between them. 0 everywhere keeps the single exact ray.
+// hwrtsunsize: the sun's angular diameter in degrees (the real sun is about
+// 0.53); unlimited lamps (the baker's old-map sun) get at least that angular
+// size too. hwrtlampsize: radius in world units of every shadowed map lamp,
+// plus hwrtlampsizepct percent of the lamp's own radius (big lamps get bigger
+// bulbs; that part at most hwrtlampsizemax). hwrtflamesize: the radius instead for a lamp next to a fire or
+// flame particle emitter (torches, braziers); -1 takes it from the emitter. hwrtglowsize: teleporters and
+// lava. Each lamp's radius is kept below 0.8 times its distance to the
+// nearest wall, so no sample of the source sits inside a wall.
+// hwrtsoftrays: shadow rays per extended source per pixel. hwrtsoftnoise:
+// bit 0 draws a new pattern every frame (for the temporal anti-aliasing to
+// average), otherwise the pattern is fixed per pixel (a still dither); bit 1
+// takes the pattern from the sky's blue-noise tile instead of a hash.
+// Their defaults are the values Soft shadows 2 (the default, hwrtsoftshadows below) sets.
+FVAR(hwrtsunsize, 0, 1, 10);
+FVAR(hwrtlampsize, 0, 4, 32);
+FVAR(hwrtlampsizepct, 0, 0, 20);
+FVAR(hwrtlampsizemax, 0.5f, 8, 60);
+FVAR(hwrtflamesize, -1, -1, 32);
+FVAR(hwrtglowsize, 0, 3, 32);
+VAR(hwrtsoftrays, 1, 4, 16);
+VAR(hwrtsoftnoise, 0, 1, 3);
+// hwrtsoftadapt: with 4 rays or more, trace the two outermost first and stop
+// there when they agree (lit or shadowed), so only the penumbra pays every ray.
+VAR(hwrtsoftadapt, 0, 1, 1);
+// Rays by apparent size: a source seen under an angle a (its diameter over its
+// distance; the sun's own diameter) gets hwrtsoftraysmin + a / hwrtsoftraysangle
+// rays, at most hwrtsoftrays. Small sources (the sun, far lamps) then take one
+// ray whose pattern the anti-aliasing averages, and near big lamps, whose wide
+// penumbra mottles with one ray, take more. 0 = always hwrtsoftrays.
+FVAR(hwrtsoftraysangle, 0, 1.5f, 90);
+VAR(hwrtsoftraysmin, 1, 1, 16);
+// Optimised extended sources (sources-etendues-opti). 0 = the prototype's rays as they were (hwrtsoftrays,
+// hwrtsoftraysangle, hwrtsoftadapt, hwrtsoftnoise). 1 (default) = one ray per source per pixel to a point of the
+// source that changes with the pixel (blue noise) and with every frame: the same image as the prototype's "auto"
+// (1 to 4 rays by apparent size) for the cost of one ray, as the code is that of a point source with a moved
+// target. Optional parts on top of 1, each compiled into the lighting pass only when on (trace.cpp), measured
+// and not kept by default: 2 the source's other rays (by apparent size) only where the first rays of a 16x2
+// strip of pixels disagree, i.e. where a penumbra or a shadow edge crosses it; 4 the extended sources' light kept
+// as a lit fraction, filtered over the 5x5 pixels of the same surface with a radius set by the estimated
+// penumbra width (hwrtsoftfilter per pixel of penumbra); 8 (with 4, NRD on) that fraction also averaged over the
+// last frames on the same surface (hwrtsofttemporal: weight of the new frame), held inside the range of the
+// neighbouring pixels; 16 a single ray to the centre for a source that adds less than hwrtsoftmin to the pixel or
+// looks smaller than hwrtsoftminangle degrees.
+VAR(hwrtsoftopt, 0, 1, 31);
+FVAR(hwrtsoftmin, 0, 0.03f, 1);
+FVAR(hwrtsoftminangle, 0, 0.2f, 10);
+FVAR(hwrtsofttemporal, 0.05f, 0.25f, 1);
+FVAR(hwrtsoftfilter, 0, 0.25f, 2);
+// Soft shadows, the saved setting of the menu (Graphics > Ray tracing > Shadows: Off / On). 0 off (point
+// lights and hard shadows, the picture and cost of before), 1 the sun (1 degree; also the "sun" lamp of old
+// maps; console only), 2 the sun and the lamps (default, the menu's On: map lamps 4 units, flames sized from
+// their emitter, teleporters and lava 3 units). It sets the lab sizes above (their defaults are those of 2);
+// with hwrtsoftopt 1 (default) that is one ray per source per pixel.
+// The prototype's rays (hwrtsoftopt 0) get its recommended "auto" (1 to 4 rays by apparent size).
+static void softshadowsapply();
+VARFP(hwrtsoftshadows, 0, 2, 2, softshadowsapply());
+// Soft shadow rays, the saved setting under it: rays per soft light source per pixel with the optimised rays
+// (hwrtsoftopt 1), to points of the source that change with the pixel and every frame. 1 the single
+// ray of before: the anti-aliasing averages it, fast but grainy; 2 (default), 4, 8 a smoother penumbra, each extra ray
+// costing time (the lamps' rays most). Hard shadows (hwrtsoftshadows 0) cast none.
+VARP(hwrtsoftshadowrays, 1, 2, 8);
+// Soft shadow denoiser, the saved setting under them: the noisy lit fractions of the sun and the extended lamps (from
+// hwrtsoftshadowrays rays) denoised by NRD SIGMA (SIGMA_SHADOW_TRANSLUCENCY) before they are added to the light, so
+// the penumbra is smooth and as dark as with many rays. 0 off (the soft shadows of before), 1 on (default). Needs
+// NRD (hwrtnrd, on by default) and the default optimised rays (hwrtsoftopt 1); without them, the soft shadows of
+// before. hwrtsoftsigmahistory: the frames SIGMA keeps to steady it, 0 (none: follows motion at once, a little more
+// grain) to 7; 5 is NVIDIA's default.
+extern void hwrtsigmaretry();
+VARFP(hwrtsoftsigma, 0, 1, 1, hwrtsigmaretry());
+VARP(hwrtsoftsigmahistory, 0, 5, 7);
+static void softshadowsapply()
+{
+    bool lamps = hwrtsoftshadows >= 2;
+    hwrtsunsize = hwrtsoftshadows >= 1 ? 1.0f : 0.0f;
+    hwrtlampsize = lamps ? 4.0f : 0.0f;
+    hwrtlampsizepct = 0.0f;
+    hwrtlampsizemax = 8.0f;
+    hwrtflamesize = lamps ? -1.0f : 0.0f;
+    hwrtglowsize = lamps ? 3.0f : 0.0f;
+    if(hwrtsoftshadows >= 1)
+    {
+        hwrtsoftrays = 4;
+        hwrtsoftnoise = 1;
+        hwrtsoftraysangle = 1.5f;
+        hwrtsoftraysmin = 1;
+        hwrtsoftadapt = 1;
+    }
+    else
+    {
+        // Off: the pattern settings of hard shadows too (as before soft shadows were on by default).
+        hwrtsoftnoise = 0;
+        hwrtsoftraysangle = 0;
+    }
+}
+
+// Unlimited lamps (the baker's old-map sun) the last packing saw: with the sun's size they are extended too.
+static int softunlimited = 0;
+// A lamp may be extended (trace.cpp gives the lamps the extra rays of hwrtsoftshadowrays only then).
+bool hwrtsoftlampsextended()
+{
+    return hwrtlampsize > 0 || hwrtlampsizepct > 0 || hwrtflamesize != 0 || hwrtglowsize > 0 || (hwrtsunsize > 0 && softunlimited > 0);
+}
+
+// Any extended source on: trace.cpp then binds the hit-light pipeline built
+// with their code (the others leave it out).
+bool hwrtsoftactive()
+{
+    return hwrtsunsize > 0 || hwrtlampsize > 0 || hwrtlampsizepct > 0 || hwrtflamesize != 0 || hwrtglowsize > 0;
+}
+
+// NRD SIGMA asked for and possible with these rays: soft sources on, optimised rays without optional parts.
+bool hwrtsoftsigmawanted()
+{
+    return hwrtsoftsigma && hwrtsoftactive() && (hwrtsoftopt & 1) && !(hwrtsoftopt & 6);
+}
+
+// Distance from a lamp to the nearest world geometry along the 26 axis and
+// diagonal directions, up to 64. Lamps do not move outside edit mode, so it is
+// cached per map and entity.
+static vector<vec> softclearpos;
+static vector<float> softclearval;
+static string softclearmap = "";
+static int softclearents = -1;
+static int softcachegen = 0;
+
+static float softclearance(const vec &o)
+{
+    float best = 64.0f;
+    for(int x = -1; x <= 1; x++) for(int y = -1; y <= 1; y++) for(int z = -1; z <= 1; z++)
+    {
+        if(!x && !y && !z) continue;
+        vec d = vec(x, y, z).normalize();
+        best = min(best, raycube(o, d, best, 0));
+    }
+    return best;
+}
+
+static vector<float> softflameval;
+static float softnearflame(const vector<extentity *> &ents, const vec &o);
+
+// Clearance and nearby flame size of map lamp idx, recomputed when it moves.
+static float softcachedclearance(const vector<extentity *> &ents, int idx, const vec &o, float &flame)
+{
+    while(softclearpos.length() <= idx) { softclearpos.add(vec(-1e9f, -1e9f, -1e9f)); softclearval.add(0.0f); softflameval.add(-1.0f); }
+    if(softclearpos[idx] != o)
+    {
+        softclearpos[idx] = o;
+        softclearval[idx] = softclearance(o);
+        softflameval[idx] = softnearflame(ents, o);
+    }
+    flame = softflameval[idx];
+    return softclearval[idx];
+}
+
+static void softcachecheck(int nents)
+{
+    const char *m = game::getclientmap();
+    if(!m) m = "";
+    if(nents == softclearents && !strcmp(m, softclearmap)) return;
+    softclearpos.setsize(0);
+    softclearval.setsize(0);
+    softflameval.setsize(0);
+    copystring(softclearmap, m);
+    softclearents = nents;
+    softcachegen++;
+}
+
+// The nearest fire (0), fire ball (3) or flame (11) particle emitter within 24
+// units: the radius of the flame it draws (renderparticles.cpp makeparticles:
+// particles spawn within +-radius and are 2 * min(radius, height) wide), or -1.
+static float softnearflame(const vector<extentity *> &ents, const vec &o)
+{
+    float best = 24.0f, size = -1.0f;
+    loopv(ents)
+    {
+        const extentity &e = *ents[i];
+        if(e.type != ET_PARTICLES) continue;
+        if(e.attr1 != 0 && e.attr1 != 3 && e.attr1 != 11) continue;
+        float d = e.o.dist(o);
+        if(d >= best) continue;
+        best = d;
+        float r, h;
+        if(e.attr1 == 0) { r = e.attr2 ? e.attr2 / 100.0f : 1.5f; h = e.attr3 ? e.attr3 / 100.0f : r / 3; }
+        else if(e.attr1 == 11) { r = e.attr2 / 100.0f; h = e.attr3 / 100.0f; }
+        else { r = h = max(int(e.attr2), 1) / 4.0f; } // fire ball: size
+        size = clamp(1.5f * (r + min(r, h)), 1.0f, 12.0f);
+    }
+    return size;
+}
+
+// The source radius packed into a shadowed lamp's flags (+ radius / 128): the
+// wanted size, kept inside the wall clearance and below 60.
+// What the last frame packed (hwrtsoftstats): shadowed map lamps given a
+// source, how many the wall clearance cut down, and the radii.
+struct softstats
+{
+    int lamps, cut, flames, glows, glowcut;
+    float rsum, rmin, rmax, gmin, gmax;
+    void reset() { lamps = cut = flames = glows = glowcut = 0; rsum = 0; rmin = gmin = 1e9f; rmax = gmax = 0; }
+    void add(float r, bool wascut) { lamps++; if(wascut) cut++; rsum += r; rmin = min(rmin, r); rmax = max(rmax, r); }
+    void addglow(float r, bool wascut) { glows++; if(wascut) glowcut++; gmin = min(gmin, r); gmax = max(gmax, r); }
+};
+static softstats softstat, softstatlast;
+
+static float softlampradius(const vector<extentity *> &ents, int idx, const extentity &e)
+{
+    if(hwrtlampsize <= 0 && hwrtlampsizepct <= 0 && hwrtflamesize == 0) return 0.0f;
+    float flame;
+    float clear = softcachedclearance(ents, idx, e.o, flame);
+    float want = hwrtlampsize + min(hwrtlampsizepct * 0.01f * float(max(int(e.attr1), 0)), float(hwrtlampsizemax));
+    if(hwrtflamesize != 0 && flame > 0)
+    {
+        want = hwrtflamesize > 0 ? float(hwrtflamesize) : flame;
+        softstat.flames++;
+    }
+    if(want <= 0) return 0.0f;
+    float r = clamp(want, 0.0f, min(0.8f * clear, 60.0f));
+    softstat.add(r, r < want - 0.01f);
+    return r;
+}
+
+extern float hwrtteleportholeradius;
+extern int hwrtteleportholeaxis;
+
+// ring: the light sits in a teleporter ring's punched hole; its disc lies in the
+// ring's plane and stays inside the hole (else samples sit behind the rim).
+static float softglowradius(const vec &o, bool ring)
+{
+    if(hwrtglowsize <= 0) return 0.0f;
+    // Few glow lamps, merged per frame: a small cache by position.
+    static vec gpos[64];
+    static float gval[64];
+    static int gnum = 0, gents = -2;
+    if(gents != softcachegen) { gnum = 0; gents = softcachegen; }
+    float clear = -1.0f;
+    loopi(gnum) if(gpos[i] == o) { clear = gval[i]; break; }
+    if(clear < 0)
+    {
+        clear = softclearance(o);
+        if(gnum < 64) { gpos[gnum] = o; gval[gnum] = clear; gnum++; }
+    }
+    float r = clamp(float(hwrtglowsize), 0.0f, min(0.8f * clear, 60.0f));
+    if(ring) r = min(r, 0.95f * (hwrtteleportholeradius > 0 ? hwrtteleportholeradius : 2.0f));
+    softstat.addglow(r, r < hwrtglowsize - 0.01f);
+    return r;
+}
+
+ICOMMAND(hwrtsoftstats, "", (),
+{
+    const softstats &s = softstatlast;
+    conoutf("hwrt soft: %d shadowed lamps with a source (%d cut by the wall clearance, %d flames), radius min %.2f mean %.2f max %.2f",
+            s.lamps, s.cut, s.flames, s.lamps ? s.rmin : 0.0f, s.lamps ? s.rsum / s.lamps : 0.0f, s.rmax);
+    conoutf("hwrt soft: %d teleporter / lava sources (%d cut), radius min %.2f max %.2f, ring hole radius %.2f axis %d",
+            s.glows, s.glowcut, s.glows ? s.gmin : 0.0f, s.gmax, hwrtteleportholeradius, hwrtteleportholeaxis);
+});
 
 // Sky rays actually traced. hwrtskyrays (default 1) is tuned for NRD + blue
 // noise; whenever NRD is not the effective denoiser (off, unavailable or
@@ -689,7 +1002,18 @@ void hwrtupdatelights()
     packed.env.diffFilter = diffmipfilter();
     packed.env.diffVis = float(hwrtdiffvis);
     packed.env.skyStable = hwrtskystable ? 1.0f : 0.0f;
-        packed.env.diffPad1 = float(hwrtskyhold + (hwrtskyhistfilter ? 2 : 0) + ((hwrtskyvisdbg & 3) << 2) + (hwrtskyage ? 16 : 0) + (hwrtnrdsession() ? 32 : 0) + ((hwrtnrddbg & 15) << 6) + (hwrthiddenretry ? 4096 : 0) + (hwrtskybluenoise && hwrtskybluenoiseready() ? 8192 : 0) + (hwrtsmoothnormals ? 16384 : 0));
+    packed.env.softSunTan = hwrtsunsize > 0 ? tanf(0.5f * hwrtsunsize * RAD) : 0.0f;
+    packed.env.softRays = float(clamp(int(hwrtsoftrays), 1, 16));
+    // The optimised rays always take a pattern that changes with the pixel (blue noise) and every frame.
+    packed.env.softNoise = (hwrtsoftopt & 1) ? 3.0f : float(hwrtsoftnoise & 3);
+    packed.env.softAdapt = hwrtsoftadapt ? 1.0f : 0.0f;
+    packed.env.softRayAngle = hwrtsoftraysangle > 0 ? hwrtsoftraysangle * RAD : 0.0f;
+    packed.env.softRayMin = float(clamp(int(hwrtsoftraysmin), 1, 16));
+    packed.env.softMinContrib = (hwrtsoftopt & 17) == 17 ? hwrtsoftmin : 0.0f;
+    packed.env.softMinTan = (hwrtsoftopt & 17) == 17 ? tanf(0.5f * hwrtsoftminangle * RAD) : 0.0f;
+    packed.env.softTemporal = hwrtsofttemporal;
+    packed.env.softFilterScale = hwrtsoftfilter;
+        packed.env.diffPad1 = float(hwrtskyhold + (hwrtskyhistfilter ? 2 : 0) + ((hwrtskyvisdbg & 3) << 2) + (hwrtskyage ? 16 : 0) + (hwrtnrdsession() ? 32 : 0) + ((hwrtnrddbg & 15) << 6) + (hwrthiddenretry ? 4096 : 0) + (hwrtskybluenoise && hwrtskybluenoiseready() ? 8192 : 0) + (hwrtsmoothnormals ? 16384 : 0) + ((3 - clamp(hwrtshadowothers, 0, 3)) << 10));
     {
         matrix4 w2v, v2c;
         hwrtnrdcameramats(w2v, v2c);
@@ -719,6 +1043,8 @@ void hwrtupdatelights()
 
     int n = 0, dropped = 0, nunlim = 0;
     const vector<extentity *> &ents = entities::getents();
+    softcachecheck(ents.length());
+    softstat.reset();
     // Radius 0 is the baker's unlimited omni (old-map "sun"). Pack those
     // first so the 256-cap cannot drop them behind a pile of lamps.
     loopv(ents)
@@ -736,9 +1062,10 @@ void hwrtupdatelights()
         L.color[0] = float(e.attr2) / 255.0f;
         L.color[1] = float(e.attr3) / 255.0f;
         L.color[2] = float(e.attr4) / 255.0f;
-        L.flags = (e.flags & EF_NOSHADOW) ? 1.0f : 0.0f;
+        L.flags = (e.flags & EF_NOSHADOW) ? 1.0f : softlampradius(ents, i, e) / 128.0f;
         nunlim++;
     }
+    softunlimited = nunlim;
 
     // Teleporters, jumppads, lava. Finite radius but always evaluated
     // (flags >= 2), otherwise hwrtdlights nearest-N would hide them behind
@@ -787,6 +1114,8 @@ void hwrtupdatelights()
         g.radius = radius;
         g.col = col;
         g.flags = 3.0f;
+        g.ring = ring;
+        g.ringang = -1.0f;
         if(ring)
         {
             vec o;
@@ -796,6 +1125,8 @@ void hwrtupdatelights()
             float rad = yaw*RAD;
             float cs = cosf(rad), sn = sinf(rad);
             g.pos = vec(o.x + hole.x*cs - hole.y*sn, o.y + hole.x*sn + hole.y*cs, o.z + hole.z);
+            if(hwrtteleportholeaxis == 0 || hwrtteleportholeaxis == 1)
+                g.ringang = rad + (hwrtteleportholeaxis == 1 ? float(M_PI/2) : 0.0f);
         }
         else if(tp && tpmdl)
         {
@@ -815,9 +1146,15 @@ void hwrtupdatelights()
         g.col = vec(hwrtglowomnis[i].color[0], hwrtglowomnis[i].color[1], hwrtglowomnis[i].color[2]);
         g.radius = hwrtglowomnis[i].radius;
         g.flags = hwrtglowomnis[i].flags;
+        g.ring = false;
+        g.ringang = -1.0f;
     }
     ngcand = hwrtmergeglow(gcands, ngcand, 40.0f);
-    int nsel = hwrtpickglow(gcands, ngcand, hwrtglowdlights);
+    int nsel = hwrtpickglow(gcands, ngcand, hwrtglowcap());
+    // Extended teleporter rings: the source is a disc in the ring's plane (kind bit 2,
+    // bits 8-15 the normal's angle / 2pi), so no sample sits behind the rim.
+    uint orient[HWRT_MAX_LIGHTS];
+    memset(orient, 0, sizeof(orient));
     int nglow = 0;
     vec eglowpos[HWRT_MAX_GLOWOMNI];
     int neglow = 0;
@@ -833,6 +1170,14 @@ void hwrtupdatelights()
         L.color[1] = gcands[i].col.y;
         L.color[2] = gcands[i].col.z;
         L.flags = gcands[i].flags;
+        // Teleporter / lava (3): + source radius / 128, as the map lamps.
+        if(L.flags >= 2.5f && L.flags < 3.5f) L.flags = 3.0f + softglowradius(gcands[i].pos, gcands[i].ring) / 128.0f;
+        if(L.flags > 3.0f && gcands[i].ring && gcands[i].ringang >= 0)
+        {
+            float a = fmodf(gcands[i].ringang, float(2*M_PI));
+            if(a < 0) a += float(2*M_PI);
+            orient[n-1] = 4 | (uint(a / float(2*M_PI) * 256.0f) & 255) << 8;
+        }
         if(neglow < HWRT_MAX_GLOWOMNI) eglowpos[neglow++] = gcands[i].pos;
         nglow++;
     }
@@ -878,7 +1223,7 @@ void hwrtupdatelights()
         L.color[0] = float(e.attr2) / 255.0f;
         L.color[1] = float(e.attr3) / 255.0f;
         L.color[2] = float(e.attr4) / 255.0f;
-        L.flags = (e.flags & EF_NOSHADOW) ? 1.0f : 0.0f;
+        L.flags = (e.flags & EF_NOSHADOW) ? 1.0f : softlampradius(ents, i, e) / 128.0f;
     }
 
     // Weapon lights last (flags 4/5): every map lamp above keeps its slot.
@@ -904,7 +1249,7 @@ void hwrtupdatelights()
             else if(unlim) nunlimk++;
             else if(glowL) nglowk++;
             if(!unlim && L.flags < 1.5f) k |= 2;
-            packed.kind[i] = k;
+            packed.kind[i] = k | orient[i];
         }
     }
     {
@@ -926,15 +1271,17 @@ void hwrtupdatelights()
     }
 
     void *mapped = NULL;
-    VkResult r = vkMapMemory(hwrtdev.device, lights.memory, 0, sizeof(packed), 0, &mapped);
+    VkResult r = vkMapMemory(hwrtdev.device, lights.memory, 0, sizeof(packed) + HWRT_WAVE_BYTES, 0, &mapped);
     if(r != VK_SUCCESS || !mapped)
     {
         lightfail("vkMapMemory (lights)", r);
         return;
     }
     memcpy(mapped, &packed, sizeof(packed));
+    hwrtwavewrite((char *)mapped + sizeof(packed), HWRT_WAVE_MAXN);
     vkUnmapMemory(hwrtdev.device, lights.memory);
 
+    softstatlast = softstat;
     hwrtlightcount = n;
     hwrtunlimcount = nunlim;
     hwrtglowlightcount = nglow;

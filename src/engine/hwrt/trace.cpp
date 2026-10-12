@@ -14,6 +14,8 @@
 #include "shaders/hitshade_comp.h"
 #include "shaders/hitlight_comp.h"
 #include "shaders/hitlight_norefl_comp.h"
+#include "shaders/hitlight_half_comp.h"
+#include "shaders/hitlight_half_norefl_comp.h"
 #include "shaders/skycompose_comp.h"
 #include "shaders/bluenoise_tab.h"
 
@@ -32,6 +34,30 @@ struct hwrttracestate
     // options are off (optional: the full pipeline stands in if it fails).
     VkShaderModule lightmodulenorefl;
     VkPipeline lightpipelinenorefl;
+    // RT quality Medium / Low (hwrtskyhalf): the same two, with the sky rays of
+    // half the pixels. Created the first time they are wanted; the full-rate
+    // pipelines stand in if that fails.
+    VkShaderModule lightmodulehalf[2];
+    VkPipeline lightpipelinehalf[2];
+    bool lighthalftried[2];
+    // hitlight with the extended light sources compiled in (specialization
+    // constant 0), used while one of their sizes is not 0 (lights.cpp); the
+    // half-rate sky one is built on first use.
+    VkPipeline lightpipelinesoft, lightpipelinehalfsoft;
+    bool lighthalfsofttried;
+    // The optimised extended sources (lights.cpp hwrtsoftopt): one pipeline per set of parts compiled in
+    // (specialization constants 1-4), full or half-rate sky, built on first use.
+    VkPipeline lightpipelineopt[2][8];
+    bool lightopttried[2][8];
+    // The same without optional parts with 2 to 8 rays for the sun and the extended lamps or for the sun alone
+    // (lights.cpp hwrtsoftshadowrays, specialization constants 5 and 6), by full or half-rate sky, rays - 1, lamps.
+    VkPipeline lightpipelinerays[2][8][2];
+    bool lightraystried[2][8][2];
+    // The same with the soft sources' lit fractions handed to NRD SIGMA (specialization constant 7, lights.cpp
+    // hwrtsoftsigma) by full or half-rate sky, rays - 1, lamps; and the compose pass that adds them back.
+    VkPipeline lightpipelinesigma[2][8][2];
+    bool lightsigmatried[2][8][2];
+    VkPipeline composepipelinesigma;
     VkCommandPool cmdpool;
     VkCommandBuffer cmd[HWRT_FRAMES_IN_FLIGHT];
     VkFence fence[HWRT_FRAMES_IN_FLIGHT];
@@ -238,8 +264,12 @@ static VkFormat nrdimgformat(int i)
     return VK_FORMAT_R16G16B16A16_SFLOAT;
 }
 
+extern void hwrtdestroysigma();
+
 static void destroynrdimages()
 {
+    // SIGMA holds views of the guides.
+    hwrtdestroysigma();
     loopi(HWRT_NRD_IMG_COUNT) destroystorage2d(nrdimg[i]);
     nrdimgw = nrdimgh = 0;
 }
@@ -310,6 +340,58 @@ bool hwrtensurenrdguides()
         destroynrdimages();
         conoutf(CON_WARN, "hwrt nrd: 1x1 guide placeholder failed");
     }
+    return false;
+}
+
+// NRD SIGMA for the soft shadows (lights.cpp hwrtsoftsigma): 0 the extended lamps' light before their shadows (rgb)
+// and the sun's N.L (a), 1 the penumbra radius, 2 the noisy lit fractions (sun x, lamps yzw), 3 SIGMA's output.
+// Screen sized only while SIGMA runs, 1x1 otherwise: hitlight bindings 30-32 and compose 8-9 always need an image.
+enum { HWRT_SIGMA_IMG_COUNT = 4 };
+static hwrtskyhist sigimg[HWRT_SIGMA_IMG_COUNT];
+static int sigimgw = 0, sigimgh = 0;
+static bool sigimgfailed = false, sigimgfresh = true;
+
+static VkFormat sigimgformat(int i)
+{
+    if(i == 0) return VK_FORMAT_R16G16B16A16_SFLOAT;
+    if(i == 1) return VK_FORMAT_R16_SFLOAT;
+    return VK_FORMAT_R8G8B8A8_UNORM;
+}
+
+static void destroysigimages()
+{
+    hwrtdestroysigma();
+    loopi(HWRT_SIGMA_IMG_COUNT) destroystorage2d(sigimg[i]);
+    sigimgw = sigimgh = 0;
+}
+
+static bool createsigimages(int w, int h)
+{
+    VkImageUsageFlags extra = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    loopi(HWRT_SIGMA_IMG_COUNT)
+        if(!createstorage2d(sigimg[i], w, h, sigimgformat(i), extra)) { destroysigimages(); return false; }
+    sigimgw = w;
+    sigimgh = h;
+    sigimgfresh = true;
+    return true;
+}
+
+// Screen sized while want, else the 1x1 placeholders. True when SIGMA's images match the screen.
+static bool ensuresigimages(bool want)
+{
+    if(sigimgfailed) want = false;
+    int w = want ? hwrtio.w : 1, h = want ? hwrtio.h : 1;
+    if(sigimg[0].view && sigimgw == w && sigimgh == h) return want;
+    if(sigimg[0].image && !hwrtwaitidle("vkDeviceWaitIdle (nrd sigma images)")) return false;
+    destroysigimages();
+    if(want)
+    {
+        if(createsigimages(w, h)) return true;
+        sigimgfailed = true;
+        conoutf(CON_WARN, "hwrt nrd sigma: could not allocate the %dx%d images", w, h);
+        conoutf(CON_WARN, "Soft shadow denoiser off: not enough video memory.");
+    }
+    createsigimages(1, 1);
     return false;
 }
 
@@ -547,7 +629,7 @@ static bool initlightpipeline()
 
     if(!initskybluenoise()) return false;
 
-    VkDescriptorSetLayoutBinding bindings[30];
+    VkDescriptorSetLayoutBinding bindings[33];
     memset(bindings, 0, sizeof(bindings));
     bindings[0].binding = 0;
     bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
@@ -652,8 +734,16 @@ static bool initlightpipeline()
     bindings[29].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     bindings[29].descriptorCount = 1;
     bindings[29].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    // 30-32: the soft shadows' data for NRD SIGMA (written by the SOFT_SIGMA pipeline alone).
+    for(int i = 30; i < 33; i++)
+    {
+        bindings[i].binding = uint32_t(i);
+        bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        bindings[i].descriptorCount = 1;
+        bindings[i].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    }
     VkDescriptorSetLayoutCreateInfo setinfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-    setinfo.bindingCount = 30;
+    setinfo.bindingCount = 33;
     setinfo.pBindings = bindings;
     r = vkCreateDescriptorSetLayout(hwrtdev.device, &setinfo, NULL, &tr.lightsetlayout);
     if(r != VK_SUCCESS) { conoutf(CON_WARN, "hwrt: hit-light descriptor layout failed (%s)", hwrtresultstr(r)); return false; }
@@ -695,13 +785,143 @@ static bool initlightpipeline()
         conoutf(CON_WARN, "hwrt: hit-light pipeline without reflections failed (%s), the full one is used", hwrtresultstr(r));
         tr.lightpipelinenorefl = VK_NULL_HANDLE;
     }
+
+    // The full shader with the extended sources on (SOFT_SOURCES = true).
+    VkSpecializationMapEntry softentry = { 0, 0, sizeof(VkBool32) };
+    VkBool32 softon = VK_TRUE;
+    VkSpecializationInfo softspec = { 1, &softentry, sizeof(softon), &softon };
+    pipeinfo.stage.module = tr.lightmodule;
+    pipeinfo.stage.pSpecializationInfo = &softspec;
+    r = vkCreateComputePipelines(hwrtdev.device, VK_NULL_HANDLE, 1, &pipeinfo, NULL, &tr.lightpipelinesoft);
+    if(r != VK_SUCCESS)
+    {
+        conoutf(CON_WARN, "hwrt: hit-light pipeline with extended light sources failed (%s), point sources are used", hwrtresultstr(r));
+        tr.lightpipelinesoft = VK_NULL_HANDLE;
+    }
     return true;
 }
 
+// The optional hit-light variants: without reflections, with extended sources.
 static void destroylightnorefl()
 {
+    if(tr.lightpipelinesoft) { vkDestroyPipeline(hwrtdev.device, tr.lightpipelinesoft, NULL); tr.lightpipelinesoft = VK_NULL_HANDLE; }
+    if(tr.lightpipelinehalfsoft) { vkDestroyPipeline(hwrtdev.device, tr.lightpipelinehalfsoft, NULL); tr.lightpipelinehalfsoft = VK_NULL_HANDLE; }
+    tr.lighthalfsofttried = false;
+    loopi(2) loopj(8)
+    {
+        if(tr.lightpipelineopt[i][j]) { vkDestroyPipeline(hwrtdev.device, tr.lightpipelineopt[i][j], NULL); tr.lightpipelineopt[i][j] = VK_NULL_HANDLE; }
+        tr.lightopttried[i][j] = false;
+        loopk(2)
+        {
+            if(tr.lightpipelinerays[i][j][k]) { vkDestroyPipeline(hwrtdev.device, tr.lightpipelinerays[i][j][k], NULL); tr.lightpipelinerays[i][j][k] = VK_NULL_HANDLE; }
+            tr.lightraystried[i][j][k] = false;
+            if(tr.lightpipelinesigma[i][j][k]) { vkDestroyPipeline(hwrtdev.device, tr.lightpipelinesigma[i][j][k], NULL); tr.lightpipelinesigma[i][j][k] = VK_NULL_HANDLE; }
+            tr.lightsigmatried[i][j][k] = false;
+        }
+    }
     if(tr.lightpipelinenorefl) { vkDestroyPipeline(hwrtdev.device, tr.lightpipelinenorefl, NULL); tr.lightpipelinenorefl = VK_NULL_HANDLE; }
     if(tr.lightmodulenorefl) { vkDestroyShaderModule(hwrtdev.device, tr.lightmodulenorefl, NULL); tr.lightmodulenorefl = VK_NULL_HANDLE; }
+    loopi(2)
+    {
+        if(tr.lightpipelinehalf[i]) { vkDestroyPipeline(hwrtdev.device, tr.lightpipelinehalf[i], NULL); tr.lightpipelinehalf[i] = VK_NULL_HANDLE; }
+        if(tr.lightmodulehalf[i]) { vkDestroyShaderModule(hwrtdev.device, tr.lightmodulehalf[i], NULL); tr.lightmodulehalf[i] = VK_NULL_HANDLE; }
+        tr.lighthalftried[i] = false;
+    }
+}
+
+// The half-rate sky variant of the lighting pipeline (norefl: without the
+// reflection code), built on first use with the layout of the full one.
+static VkPipeline lighthalfpipeline(bool norefl)
+{
+    int k = norefl ? 1 : 0;
+    if(tr.lightpipelinehalf[k] || tr.lighthalftried[k] || !tr.lightpipelayout) return tr.lightpipelinehalf[k];
+    tr.lighthalftried[k] = true;
+    VkShaderModuleCreateInfo modinfo = { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+    modinfo.codeSize = norefl ? sizeof(hwrthitlighthalfnoreflspv) : sizeof(hwrthitlighthalfspv);
+    modinfo.pCode = norefl ? hwrthitlighthalfnoreflspv : hwrthitlighthalfspv;
+    VkResult r = vkCreateShaderModule(hwrtdev.device, &modinfo, NULL, &tr.lightmodulehalf[k]);
+    if(r == VK_SUCCESS)
+    {
+        VkComputePipelineCreateInfo pipeinfo = { VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
+        pipeinfo.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        pipeinfo.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+        pipeinfo.stage.module = tr.lightmodulehalf[k];
+        pipeinfo.stage.pName = "main";
+        pipeinfo.layout = tr.lightpipelayout;
+        r = vkCreateComputePipelines(hwrtdev.device, VK_NULL_HANDLE, 1, &pipeinfo, NULL, &tr.lightpipelinehalf[k]);
+    }
+    if(r != VK_SUCCESS)
+    {
+        conoutf(CON_WARN, "hwrt: hit-light pipeline for RT quality below High failed (%s), the full one is used", hwrtresultstr(r));
+        tr.lightpipelinehalf[k] = VK_NULL_HANDLE;
+    }
+    return tr.lightpipelinehalf[k];
+}
+
+// The half-rate sky variant with the extended light sources compiled in (the
+// half module with specialization constant 0), built on first use.
+static VkPipeline lighthalfsoftpipeline()
+{
+    if(tr.lightpipelinehalfsoft || tr.lighthalfsofttried || !tr.lightpipelayout) return tr.lightpipelinehalfsoft;
+    tr.lighthalfsofttried = true;
+    if(!lighthalfpipeline(false) || !tr.lightmodulehalf[0]) return VK_NULL_HANDLE;
+    VkSpecializationMapEntry softentry = { 0, 0, sizeof(VkBool32) };
+    VkBool32 softon = VK_TRUE;
+    VkSpecializationInfo softspec = { 1, &softentry, sizeof(softon), &softon };
+    VkComputePipelineCreateInfo pipeinfo = { VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
+    pipeinfo.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    pipeinfo.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+    pipeinfo.stage.module = tr.lightmodulehalf[0];
+    pipeinfo.stage.pName = "main";
+    pipeinfo.stage.pSpecializationInfo = &softspec;
+    pipeinfo.layout = tr.lightpipelayout;
+    VkResult r = vkCreateComputePipelines(hwrtdev.device, VK_NULL_HANDLE, 1, &pipeinfo, NULL, &tr.lightpipelinehalfsoft);
+    if(r != VK_SUCCESS)
+    {
+        conoutf(CON_WARN, "hwrt: hit-light pipeline with extended light sources for RT quality below High failed (%s)", hwrtresultstr(r));
+        tr.lightpipelinehalfsoft = VK_NULL_HANDLE;
+    }
+    return tr.lightpipelinehalfsoft;
+}
+
+// The optimised extended sources: SOFT_SOURCES and SOFT_LEAN on, plus SOFT_DETECT (parts bit 0), SOFT_FILTER
+// (bit 1), SOFT_TEMPORAL (bit 2), on the full module or on the half-rate sky one.
+// rays: 2 to 8 rays for the sun (specialization constant 5) and, with lamps, for each extended lamp (constant 6),
+// without optional parts only. sigma: the soft sources' lit fractions for NRD SIGMA (constant 7), without parts.
+static VkPipeline lightoptpipeline(bool half, int parts, int rays = 1, bool lamps = false, bool sigma = false)
+{
+    parts &= 7;
+    rays = parts ? 1 : clamp(rays, 1, 8);
+    if(parts) sigma = false;
+    if(rays == 1) lamps = false;
+    int lk = lamps ? 1 : 0;
+    VkPipeline &pipe = sigma ? tr.lightpipelinesigma[half ? 1 : 0][rays - 1][lk] : rays > 1 ? tr.lightpipelinerays[half ? 1 : 0][rays - 1][lk] : tr.lightpipelineopt[half ? 1 : 0][parts];
+    bool &tried = sigma ? tr.lightsigmatried[half ? 1 : 0][rays - 1][lk] : rays > 1 ? tr.lightraystried[half ? 1 : 0][rays - 1][lk] : tr.lightopttried[half ? 1 : 0][parts];
+    if(pipe || tried || !tr.lightpipelayout) return pipe;
+    tried = true;
+    if(half && (!lighthalfpipeline(false) || !tr.lightmodulehalf[0])) return VK_NULL_HANDLE;
+    VkShaderModule module = half ? tr.lightmodulehalf[0] : tr.lightmodule;
+    if(!module) return VK_NULL_HANDLE;
+    VkSpecializationMapEntry entries[8];
+    VkBool32 values[8] = { VK_TRUE, VK_TRUE, (parts & 1) ? VK_TRUE : VK_FALSE, (parts & 2) ? VK_TRUE : VK_FALSE, (parts & 4) ? VK_TRUE : VK_FALSE, VkBool32(rays), VkBool32(lamps ? rays : 1), sigma ? VK_TRUE : VK_FALSE };
+    loopi(8) { entries[i].constantID = uint32_t(i); entries[i].offset = uint32_t(i * sizeof(VkBool32)); entries[i].size = sizeof(VkBool32); }
+    // One ray: the five constants of before (constants 5 and 6 keep their default, 1); SIGMA: all eight.
+    uint32_t nspec = sigma ? 8 : rays > 1 ? 7 : 5;
+    VkSpecializationInfo spec = { nspec, entries, nspec * uint32_t(sizeof(VkBool32)), values };
+    VkComputePipelineCreateInfo pipeinfo = { VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
+    pipeinfo.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    pipeinfo.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+    pipeinfo.stage.module = module;
+    pipeinfo.stage.pName = "main";
+    pipeinfo.stage.pSpecializationInfo = &spec;
+    pipeinfo.layout = tr.lightpipelayout;
+    VkResult r = vkCreateComputePipelines(hwrtdev.device, VK_NULL_HANDLE, 1, &pipeinfo, NULL, &pipe);
+    if(r != VK_SUCCESS)
+    {
+        conoutf(CON_WARN, "hwrt: hit-light pipeline with optimised extended light sources (%d, %d rays%s%s) failed (%s), the prototype's rays are used", parts, rays, lamps ? "" : ", sun", sigma ? ", SIGMA" : "", hwrtresultstr(r));
+        pipe = VK_NULL_HANDLE;
+    }
+    return pipe;
 }
 
 static bool initcomposepipeline()
@@ -713,7 +933,7 @@ static bool initcomposepipeline()
     VkResult r = vkCreateShaderModule(hwrtdev.device, &modinfo, NULL, &tr.composemodule);
     if(r != VK_SUCCESS) { conoutf(CON_WARN, "hwrt: skycompose shader failed (%s)", hwrtresultstr(r)); return false; }
 
-    VkDescriptorSetLayoutBinding bindings[8];
+    VkDescriptorSetLayoutBinding bindings[10];
     memset(bindings, 0, sizeof(bindings));
     loopi(6)
     {
@@ -730,8 +950,16 @@ static bool initcomposepipeline()
     bindings[7].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
     bindings[7].descriptorCount = 1;
     bindings[7].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    // 8-9: the soft shadows from NRD SIGMA (read by the SIGMA_ON pipeline alone).
+    for(int i = 8; i < 10; i++)
+    {
+        bindings[i].binding = uint32_t(i);
+        bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        bindings[i].descriptorCount = 1;
+        bindings[i].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    }
     VkDescriptorSetLayoutCreateInfo setinfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-    setinfo.bindingCount = 8;
+    setinfo.bindingCount = 10;
     setinfo.pBindings = bindings;
     r = vkCreateDescriptorSetLayout(hwrtdev.device, &setinfo, NULL, &tr.composesetlayout);
     if(r != VK_SUCCESS) { conoutf(CON_WARN, "hwrt: skycompose layout failed (%s)", hwrtresultstr(r)); return false; }
@@ -755,6 +983,17 @@ static bool initcomposepipeline()
     pipeinfo.layout = tr.composepipelayout;
     r = vkCreateComputePipelines(hwrtdev.device, VK_NULL_HANDLE, 1, &pipeinfo, NULL, &tr.composepipeline);
     if(r != VK_SUCCESS) { conoutf(CON_WARN, "hwrt: skycompose pipeline failed (%s)", hwrtresultstr(r)); return false; }
+    // The same adding the soft shadows denoised by NRD SIGMA (specialization constant 0); optional.
+    VkSpecializationMapEntry sigentry = { 0, 0, sizeof(VkBool32) };
+    VkBool32 sigon = VK_TRUE;
+    VkSpecializationInfo sigspec = { 1, &sigentry, sizeof(sigon), &sigon };
+    pipeinfo.stage.pSpecializationInfo = &sigspec;
+    r = vkCreateComputePipelines(hwrtdev.device, VK_NULL_HANDLE, 1, &pipeinfo, NULL, &tr.composepipelinesigma);
+    if(r != VK_SUCCESS)
+    {
+        conoutf(CON_WARN, "hwrt: skycompose pipeline with soft shadow denoising failed (%s)", hwrtresultstr(r));
+        tr.composepipelinesigma = VK_NULL_HANDLE;
+    }
     return true;
 }
 
@@ -836,8 +1075,9 @@ bool hwrtinittrace()
     // Six SSBOs: verts, indices, tris, lights, model geometry, sky blue noise.
     // Plus the reflection image, the sky cubemap and the world normal maps
     // (traced reflections and world spec), and the anisotropic diffuse (29).
-    if(tr.lightpipeline) { nstorage += 15*copies; nas += copies; nssbo += 6*copies; ncombined += 8*copies; maxsets += copies; }
-    if(tr.composepipeline) { nstorage += 7*copies; nssbo += copies; maxsets += copies; }
+    // Plus the three images of the soft shadows for NRD SIGMA (light set) and its two for the compose set.
+    if(tr.lightpipeline) { nstorage += 18*copies; nas += copies; nssbo += 6*copies; ncombined += 8*copies; maxsets += copies; }
+    if(tr.composepipeline) { nstorage += 9*copies; nssbo += copies; maxsets += copies; }
     poolsizes[0].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
     poolsizes[0].descriptorCount = uint32_t(nstorage);
     if(nas)
@@ -979,7 +1219,7 @@ bool hwrtinittrace()
 
 void hwrtdestroytrace()
 {
-    if(!hwrtdev.device) { memset(&tr, 0, sizeof(tr)); memset(skyhist, 0, sizeof(skyhist)); memset(skyage, 0, sizeof(skyage)); skyhistw = skyhisth = 0; memset(nrdimg, 0, sizeof(nrdimg)); nrdimgw = nrdimgh = 0; return; }
+    if(!hwrtdev.device) { memset(&tr, 0, sizeof(tr)); memset(skyhist, 0, sizeof(skyhist)); memset(skyage, 0, sizeof(skyage)); skyhistw = skyhisth = 0; memset(nrdimg, 0, sizeof(nrdimg)); nrdimgw = nrdimgh = 0; memset(sigimg, 0, sizeof(sigimg)); sigimgw = sigimgh = 0; return; }
     vkDeviceWaitIdle(hwrtdev.device);
     hwrtdestroynrd();
     destroyskyhistory();
@@ -987,11 +1227,14 @@ void hwrtdestroytrace()
     hwrtinvalidateskyhistory();
     destroynrdimages();
     nrdimgfailed = false;
+    destroysigimages();
+    sigimgfailed = false;
 
     loopi(HWRT_FRAMES_IN_FLIGHT) if(tr.fence[i]) vkDestroyFence(hwrtdev.device, tr.fence[i], NULL);
     if(tr.stamps) vkDestroyQueryPool(hwrtdev.device, tr.stamps, NULL);
     if(tr.cmdpool) vkDestroyCommandPool(hwrtdev.device, tr.cmdpool, NULL);
     if(tr.composepipeline) vkDestroyPipeline(hwrtdev.device, tr.composepipeline, NULL);
+    if(tr.composepipelinesigma) vkDestroyPipeline(hwrtdev.device, tr.composepipelinesigma, NULL);
     if(tr.lightpipeline) vkDestroyPipeline(hwrtdev.device, tr.lightpipeline, NULL);
     destroylightnorefl();
     if(tr.shadepipeline) vkDestroyPipeline(hwrtdev.device, tr.shadepipeline, NULL);
@@ -1360,12 +1603,32 @@ static void writenrdimages(VkDescriptorSet set)
         writes[i].pImageInfo = &iminfo[i];
     }
     vkUpdateDescriptorSets(hwrtdev.device, 8, writes, 0, NULL);
+    // 30-32: the soft shadows' images for NRD SIGMA (1x1 while it is off).
+    if(!sigimg[0].view) createsigimages(1, 1);
+    if(!sigimg[0].view) return;
+    VkDescriptorImageInfo siginfo[3] = {};
+    VkWriteDescriptorSet sigwrites[3] = {};
+    loopi(3)
+    {
+        siginfo[i].imageView = sigimg[i].view;
+        siginfo[i].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        sigwrites[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        sigwrites[i].dstSet = set;
+        sigwrites[i].dstBinding = uint32_t(30 + i);
+        sigwrites[i].descriptorCount = 1;
+        sigwrites[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        sigwrites[i].pImageInfo = &siginfo[i];
+    }
+    vkUpdateDescriptorSets(hwrtdev.device, 3, sigwrites, 0, NULL);
 }
 
-static void writecomposebindings(VkDescriptorSet set, int usesrc)
+// sigsrc: the lit fractions the SIGMA_ON pipeline reads at binding 9 (3 SIGMA's output, 2 hitlight's noisy ones).
+static void writecomposebindings(VkDescriptorSet set, int usesrc, int sigsrc = 2)
 {
     if(!set || !nrdimg[0].view || !nrdimg[4].view) return;
-    VkDescriptorImageInfo iminfo[7] = {};
+    if(!sigimg[0].view) createsigimages(1, 1);
+    if(!sigimg[0].view) return;
+    VkDescriptorImageInfo iminfo[9] = {};
     iminfo[0].imageView = hwrtio.view;
     iminfo[0].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
     int src = usesrc;
@@ -1379,9 +1642,13 @@ static void writecomposebindings(VkDescriptorSet set, int usesrc)
     }
     iminfo[6].imageView = nrdimg[3].view;
     iminfo[6].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-    VkWriteDescriptorSet writes[7] = {};
-    const uint32_t bindimg[7] = { 0, 1, 2, 3, 4, 5, 7 };
-    loopi(7)
+    iminfo[7].imageView = sigimg[0].view;
+    iminfo[7].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    iminfo[8].imageView = sigimg[sigsrc == 3 ? 3 : 2].view;
+    iminfo[8].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    VkWriteDescriptorSet writes[9] = {};
+    const uint32_t bindimg[9] = { 0, 1, 2, 3, 4, 5, 7, 8, 9 };
+    loopi(9)
     {
         writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[i].dstSet = set;
@@ -1390,7 +1657,7 @@ static void writecomposebindings(VkDescriptorSet set, int usesrc)
         writes[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
         writes[i].pImageInfo = &iminfo[i];
     }
-    vkUpdateDescriptorSets(hwrtdev.device, 7, writes, 0, NULL);
+    vkUpdateDescriptorSets(hwrtdev.device, 9, writes, 0, NULL);
     hwrtwritelightbuffer(set);
 }
 
@@ -1435,6 +1702,66 @@ static void recordskyhistbarrier(VkCommandBuffer cmd)
                          VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                          0, 0, NULL, 0, NULL, 4, bars);
     skyhistfresh = false;
+}
+
+// rt-performance-lot4, all off by default (the image changes).
+// hwrtskyrange: how far a sky ray looks for an occluder (world units, 0 = to the
+// far plane). Beyond that it counts as open sky: far less traversal outdoors,
+// big halls with a ceiling higher than this get some sky light.
+VARP(hwrtskyrange, 0, 0, 2016);
+// hwrtrtadapt: rays spent where they show (a "variable rate" for the RT
+// lighting). Sky rays reach less far at the screen edges, on far surfaces and on
+// dark textures (1024 units at most when hwrtskyrange is 0); while the camera
+// turns or moves fast, where the upscaler blurs anyway, the sky rays reach half
+// as far and at most 2 nearest lamps cast shadow rays.
+VARP(hwrtrtadapt, 0, 0, 1);
+// hwrtskyopaque: sky rays treat alpha-tested models (leaves, grids) as solid and
+// ignore smoke. Every candidate then stays in the ray-tracing hardware instead of
+// coming back to the shader for an alpha test: cheaper under trees, and a denser
+// sky shadow below foliage.
+VARP(hwrtskyopaque, 0, 0, 1);
+// Turn rate (degrees/s) and speed (units/s) above which the camera counts as fast.
+VARP(hwrtrtadaptturn, 30, 240, 2000);
+VARP(hwrtrtadaptspeed, 50, 400, 5000);
+
+static bool camerafast()
+{
+    static vec lastpos(0, 0, 0);
+    static float lastyaw = 0, lastpitch = 0;
+    static double lasttime = 0;
+    static bool fast = false;
+    double now = hwrtnow();
+    if(!camera1) return false;
+    if(lasttime > 0 && now > lasttime)
+    {
+        float dt = float(now - lasttime);
+        float dyaw = fabs(camera1->yaw - lastyaw);
+        if(dyaw > 180) dyaw = 360 - dyaw;
+        float turn = (dyaw + fabs(camera1->pitch - lastpitch)) / dt;
+        float speed = camera1->o.dist(lastpos) / dt;
+        fast = turn > hwrtrtadaptturn || speed > hwrtrtadaptspeed;
+    }
+    lastpos = camera1->o;
+    lastyaw = camera1->yaw;
+    lastpitch = camera1->pitch;
+    lasttime = now;
+    return fast;
+}
+
+// The SOFT_SIGMA lighting pipeline when NRD SIGMA runs this frame (hwrtdispatch), else null.
+static VkPipeline sigmalightpipe = VK_NULL_HANDLE;
+
+// The SOFT_SIGMA pipeline for the current rays and sky rate (null if it cannot be built).
+static VkPipeline softsigmapipeline()
+{
+    extern int hwrtsoftshadowrays;
+    extern bool hwrtsoftlampsextended();
+    int rays = clamp(hwrtsoftshadowrays, 1, 8);
+    bool lamps = hwrtsoftlampsextended();
+    VkPipeline p = VK_NULL_HANDLE;
+    if(hwrtskyhalf()) p = lightoptpipeline(true, 0, rays, lamps, true);
+    if(!p) p = lightoptpipeline(false, 0, rays, lamps, true);
+    return p;
 }
 
 static void recordlight(VkCommandBuffer cmd, int mode, int slot)
@@ -1486,11 +1813,56 @@ static void recordlight(VkCommandBuffer cmd, int mode, int slot)
     }
     if(hwrtreflections) params.mode |= HWRT_MODE_REFL_WORLD;
     if(hwrtspecular) params.mode |= HWRT_MODE_SPEC;
+    if(hwrtskyrange > 0) params.mode |= clamp((hwrtskyrange + 31) / 32, 1, 63) << HWRT_MODE_SKYRANGE_SHIFT;
+    if(hwrtskyopaque) params.mode |= HWRT_MODE_SKYOPAQUE;
+    bool fast = camerafast();
+    if(hwrtrtadapt)
+    {
+        params.mode |= HWRT_MODE_RT_ADAPT;
+        if(fast)
+        {
+            params.mode |= HWRT_MODE_RT_FAST;
+            params.range[2] = float(min(int(hwrtdlights), 2));
+        }
+    }
 
     // Both options off: the variant without their code (same image as before
     // they existed); either one on: the full shader.
     bool norefl = !hwrtreflections && !hwrtspecular && tr.lightpipelinenorefl;
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, norefl ? tr.lightpipelinenorefl : tr.lightpipeline);
+    VkPipeline lightpipe = norefl ? tr.lightpipelinenorefl : tr.lightpipeline;
+    // RT quality Medium / Low: the half-rate sky variant when it could be built.
+    if(hwrtskyhalf())
+    {
+        VkPipeline half = lighthalfpipeline(norefl);
+        if(half) lightpipe = half;
+    }
+    // An extended light source size not 0: the full shader with their code
+    // (the reflection code stays, its mode bits are off), at the same sky rate.
+    extern bool hwrtsoftactive();
+    extern int hwrtsoftopt, hwrtsoftshadowrays;
+    extern bool hwrtsoftlampsextended();
+    if(hwrtsoftactive())
+    {
+        // hwrtsoftopt bit 0: the optimised rays, with the parts it asks for (the temporal part needs the filter),
+        // and without parts as many rays as hwrtsoftshadowrays for the sun and, when one may be extended, the lamps
+        // (one ray if that pipeline failed).
+        // NRD SIGMA this frame: its pipeline, chosen by hwrtdispatch.
+        VkPipeline soft = sigmalightpipe;
+        if(!soft && (hwrtsoftopt & 1))
+        {
+            int parts = ((hwrtsoftopt >> 1) & 3) | ((hwrtsoftopt & 12) == 12 ? 4 : 0);
+            int rays = parts ? 1 : clamp(hwrtsoftshadowrays, 1, 8);
+            bool lamps = hwrtsoftlampsextended();
+            if(hwrtskyhalf() && rays > 1) soft = lightoptpipeline(true, parts, rays, lamps);
+            if(!soft && rays > 1) soft = lightoptpipeline(false, parts, rays, lamps);
+            if(!soft && hwrtskyhalf()) soft = lightoptpipeline(true, parts);
+            if(!soft) soft = lightoptpipeline(false, parts);
+        }
+        if(!soft && hwrtskyhalf()) soft = lighthalfsoftpipeline();
+        if(!soft) soft = tr.lightpipelinesoft;
+        if(soft) lightpipe = soft;
+    }
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, lightpipe);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, tr.lightpipelayout, 0, 1, &tr.lightset[slot], 0, NULL);
     vkCmdPushConstants(cmd, tr.lightpipelayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(params), &params);
     // hitlight.comp is 16x16 so the skyvis filter has a usable radius. An
@@ -1523,10 +1895,35 @@ static void recordnrdbarrier(VkCommandBuffer cmd)
     nrdimgfresh = false;
 }
 
-static void recordcompose(VkCommandBuffer cmd, int mode, int slot, int src)
+// sigsrc: -1 without NRD SIGMA, else the image of the lit fractions to add back (3 SIGMA's output, 2 the noisy input).
+static void recordsigbarrier(VkCommandBuffer cmd)
+{
+    if(!sigimg[0].image) return;
+    VkImageMemoryBarrier bars[HWRT_SIGMA_IMG_COUNT];
+    loopi(HWRT_SIGMA_IMG_COUNT)
+    {
+        bars[i] = VkImageMemoryBarrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+        bars[i].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        bars[i].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        bars[i].image = sigimg[i].image;
+        bars[i].subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        bars[i].subresourceRange.levelCount = 1;
+        bars[i].subresourceRange.layerCount = 1;
+        bars[i].oldLayout = sigimgfresh ? VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_GENERAL;
+        bars[i].newLayout = VK_IMAGE_LAYOUT_GENERAL;
+        bars[i].srcAccessMask = sigimgfresh ? 0 : VK_ACCESS_SHADER_WRITE_BIT;
+        bars[i].dstAccessMask = VK_ACCESS_SHADER_READ_BIT|VK_ACCESS_SHADER_WRITE_BIT;
+    }
+    vkCmdPipelineBarrier(cmd, sigimgfresh ? VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT : VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         0, 0, NULL, 0, NULL, HWRT_SIGMA_IMG_COUNT, bars);
+    sigimgfresh = false;
+}
+
+static void recordcompose(VkCommandBuffer cmd, int mode, int slot, int src, int sigsrc = -1)
 {
     if(!tr.composepipeline || !tr.composeset[slot]) return;
-    writecomposebindings(tr.composeset[slot], src);
+    writecomposebindings(tr.composeset[slot], src, sigsrc);
     hwrtcomposeparams params;
     memset(&params, 0, sizeof(params));
     params.w = hwrtio.w;
@@ -1540,7 +1937,14 @@ static void recordcompose(VkCommandBuffer cmd, int mode, int slot, int src)
     if(hwrthdractive()) params.mode |= HWRT_MODE_HDR;
     if(hwrthdractive() && hwrthdrprobe) params.mode |= HWRT_MODE_HDRPROBE;
     hwrthdrpushmode = params.mode;
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, tr.composepipeline);
+    VkPipeline composepipe = tr.composepipeline;
+    if(sigsrc >= 0 && tr.composepipelinesigma)
+    {
+        composepipe = tr.composepipelinesigma;
+        // Bit 28: SIGMA did not run, the fractions are the noisy ones (not square root encoded).
+        if(sigsrc != 3) params.mode |= 0x10000000;
+    }
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, composepipe);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, tr.composepipelayout, 0, 1, &tr.composeset[slot], 0, NULL);
     vkCmdPushConstants(cmd, tr.composepipelayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(params), &params);
     vkCmdDispatch(cmd, (hwrtio.w + 7)/8, (hwrtio.h + 7)/8, 1);
@@ -1588,6 +1992,16 @@ bool hwrtdispatch(int mode)
         if(hwrtnrd) hwrtnrdensure(hwrtio.w, hwrtio.h);
         hwrtensurenrdguides();
         if(!skyhist[0].view || !skyhist[1].view || !skyage[0].view || !skyage[1].view) light = false;
+        // NRD SIGMA for the soft shadows this frame: asked for (lights.cpp), the REBLUR session and its guides at
+        // this size, SIGMA's images, its instance and the SOFT_SIGMA pipeline. Otherwise the soft shadows of before.
+        extern bool hwrtsoftsigmawanted();
+        extern bool hwrtsigmaensure(int w, int h);
+        sigmalightpipe = VK_NULL_HANDLE;
+        bool sigwant = light && hwrtsoftsigmawanted() && hwrtnrdsession() && tr.composepipelinesigma &&
+                       hwrtnrdguidesready() && nrdimgw == hwrtio.w && nrdimgh == hwrtio.h;
+        if(ensuresigimages(sigwant) && hwrtsigmaensure(hwrtio.w, hwrtio.h)) sigmalightpipe = softsigmapipeline();
+        extern int hwrtsigmaactive;
+        if(!sigmalightpipe) hwrtsigmaactive = 0;
     }
     if(light)
     {
@@ -1692,6 +2106,7 @@ bool hwrtdispatch(int mode)
             if(hwrtdepthlive) recorddepthbarrier(cmd);
             recordskyhistbarrier(cmd);
             recordnrdbarrier(cmd);
+            recordsigbarrier(cmd);
             recordlight(cmd, mode, slot);
             hwrtwritestamp(cmd, slot, HWRT_TS_LIGHT);
             if(hwrtnrdsession() && tr.composepipeline && nrdimgw == hwrtio.w && nrdimgh == hwrtio.h)
@@ -1710,7 +2125,19 @@ bool hwrtdispatch(int mode)
                          && hwrtnrddenoise(cmd, hwrtio.w, hwrtio.h, 0);
                 }
                 int src = (hwrtnrddbg == 1 || hwrtnrddbg == 6 || !nrdok) ? 0 : 8;
-                recordcompose(cmd, mode, slot, src);
+                // NRD SIGMA: denoise the soft sources' lit fractions hitlight wrote; if that fails, the noisy ones.
+                extern bool hwrtsigmasetimages(VkImage pen, VkImage frac, VkImage viewz, VkImage normal, VkImage mv, VkImage out, int w, int h);
+                extern bool hwrtsigmadenoise(VkCommandBuffer cmd, int w, int h, int frames);
+                extern int hwrtsoftsigmahistory, hwrtsigmaactive;
+                int sigsrc = -1;
+                if(sigmalightpipe)
+                {
+                    bool sok = hwrtsigmasetimages(sigimg[1].image, sigimg[2].image, nrdimg[1].image, nrdimg[2].image, nrdimg[3].image, sigimg[3].image, hwrtio.w, hwrtio.h)
+                            && hwrtsigmadenoise(cmd, hwrtio.w, hwrtio.h, hwrtsoftsigmahistory);
+                    sigsrc = sok ? 3 : 2;
+                }
+                hwrtsigmaactive = sigsrc == 3 ? 1 : 0;
+                recordcompose(cmd, mode, slot, src, sigsrc);
             }
             hwrtwritestamp(cmd, slot, HWRT_TS_NRD);
         }
@@ -1749,6 +2176,13 @@ bool hwrtdispatch(int mode)
     hwrtwritestamp(cmd, slot, HWRT_TS_DISPATCH);
     HWRTCHECK(vkEndCommandBuffer(cmd), "vkEndCommandBuffer");
 
+    // Everything above is CPU work: with hwrtperfpath bit 1 the GL queue is only
+    // handed over now, so the GPU does not wait for it between the two APIs.
+    if(hwrtdispatchsignals)
+    {
+        hwrtdispatchsignals = false;
+        hwrtsignalgl();
+    }
     VkPipelineStageFlags waitstage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT|VK_PIPELINE_STAGE_TRANSFER_BIT;
     VkSubmitInfo submit = { VK_STRUCTURE_TYPE_SUBMIT_INFO };
     submit.waitSemaphoreCount = 1;

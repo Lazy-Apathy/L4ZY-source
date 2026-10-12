@@ -8,3 +8,8 @@ EXPORTS
     sauer_nrd_stats
     sauer_nrd_probe_arm
     sauer_nrd_probe_read
+    sauer_nrd_sigma_create
+    sauer_nrd_sigma_set_images
+    sauer_nrd_sigma_denoise
+    sauer_nrd_sigma_destroy
+    sauer_nrd_sigma_stats

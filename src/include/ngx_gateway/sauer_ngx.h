@@ -121,7 +121,8 @@ typedef struct SauerNgxCreateFeature
     uint32_t in_w;              /* 0 = use GET_OPTIMAL_SETTINGS for mode */
     uint32_t in_h;
     uint32_t mode;              /* SAUER_NGX_MODE_* */
-    uint32_t preset_k;          /* 1 = documented SR preset: K for DLAA/Quality/Balanced, M for Performance */
+    uint32_t preset_k;          /* 1 = documented SR preset: K for DLAA/Quality/Balanced, M for Performance;
+                                   2 = CNN preset E (older gateways treat it as 1) */
     uint32_t auto_exposure;
     /* ABI 5. 1 = NVSDK_NGX_DLSS_Feature_Flags_IsHDR. Legal only when colour
      * in and out are VK_FORMAT_R16G16B16A16_SFLOAT. With preset K (DLAA,

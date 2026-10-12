@@ -12,6 +12,12 @@ layout(binding = 3, rgba16f) uniform readonly image2D nrdp1;
 layout(binding = 4, rgba16f) uniform readonly image2D nrdp2;
 layout(binding = 5, rgba16f) uniform readonly image2D nrdp3;
 layout(binding = 7, rgba16f) uniform readonly image2D nrdmv;
+// NRD SIGMA for the soft shadows (trace.cpp): 8 the extended lamps' light before their shadows (rgb) and the sun's
+// N.L (a), from hitlight; 9 their lit fractions (sun x, lamps yzw): SIGMA's output, square root encoded, or when
+// SIGMA could not run this frame (mode bit 28) hitlight's noisy ones. Read by the SIGMA_ON pipeline alone.
+layout(constant_id = 0) const bool SIGMA_ON = false;
+layout(binding = 8, rgba16f) uniform readonly image2D sigu;
+layout(binding = 9, rgba8) uniform readonly image2D sigshadow;
 struct LightEnv {
     vec3 sunDir;
     float sunOn;
@@ -35,6 +41,9 @@ struct LightEnv {
     mat4 nrdViewToClip;
     mat4 nrdViewToClipPrev;
     vec4 nrdHit;
+    vec4 soft;
+    vec4 soft2;
+    vec4 soft3;
 };
 struct Light { vec3 pos; float radius; vec3 color; float flags; };
 layout(std430, binding = 6) readonly buffer Lights {
@@ -115,6 +124,14 @@ void shadeCompose()
     vec4 p1 = imageLoad(nrdp1, p);
     vec3 direct = p1.rgb;
     float gain = p1.a;
+    if(SIGMA_ON)
+    {
+        // The soft sources back on the direct light, before the max(sun + lamps, sky) below.
+        vec4 su = imageLoad(sigu, p);
+        vec4 s = imageLoad(sigshadow, p);
+        if((pc.mode & 0x10000000) == 0) s *= s; // SIGMA_BackEnd_UnpackShadow
+        direct += lights.env.sunColor * (su.a * s.x) + su.rgb * s.yzw;
+    }
     vec4 p2 = imageLoad(nrdp2, p);
     vec3 specAcc = p2.rgb;
     vec4 p3 = imageLoad(nrdp3, p);

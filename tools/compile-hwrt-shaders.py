@@ -28,6 +28,9 @@ TARGETS = [
     # RT Reflections and RT Specular both off: the same lighting pass without
     # their code, so it costs what it did before they existed (trace.cpp).
     ("hitlight.comp", "hwrthitlightnoreflspv", ["HWRT_NO_REFL"], "hitlight_norefl_comp.h"),
+    # RT quality Medium / Low: sky rays on one pixel in two (trace.cpp, hwrtquality).
+    ("hitlight.comp", "hwrthitlighthalfspv", ["HWRT_SKY_HALF"], "hitlight_half_comp.h"),
+    ("hitlight.comp", "hwrthitlighthalfnoreflspv", ["HWRT_NO_REFL", "HWRT_SKY_HALF"], "hitlight_half_norefl_comp.h"),
     ("skycompose.comp", "hwrtskycomposespv"),
 ]
 

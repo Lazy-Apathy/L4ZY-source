@@ -28,7 +28,7 @@
   {
    "dest": "bin64/ngx-hdr/sauer_ngx.dll",
    "src": "bin64/ngx-hdr/sauer_ngx.dll",
-   "sha256": "f4dd701f2da748ddf86da30729d8ff6cc98e82b90b22cc2859bd697e37be9e07"
+   "sha256": "ed9ad2b37bb162e37550b18733b9c9270361f0e81923f5964c3d06d377f91b57"
   },
   {
    "dest": "bin64/ngx-hdr/nvngx_dlss.dll",
@@ -208,7 +208,7 @@
   {
    "dest": "bin64/nrd/sauer_nrd.dll",
    "src": "bin64/nrd/sauer_nrd.dll",
-   "sha256": "1d28faf1dd8daf4e8687092572105ea102ffaaa69be4310ab933e58d063fa873"
+   "sha256": "080a6485c96f33d8f1d5156eec4b4f1928d03ea696bd193dd4953c0591d32841"
   },
   {
    "dest": "bin64/nrd/LICENSE-NRD.txt",
