@@ -8,7 +8,7 @@
 #extension GL_KHR_shader_subgroup_arithmetic : require
 #extension GL_KHR_shader_subgroup_vote : require
 
-// Lot 2 (shots/rt-performance-lot2): the lighting pass with the same result for every
+// Performance pass 2: the lighting pass with the same result for every
 // pixel and less invariant work. What changed, and why it cannot change a pixel:
 //  - the light loops only visit the lamps that can pass their own range test
 //    somewhere in this 16x16 tile. Every hit of the tile is inside the tile's
@@ -16,7 +16,7 @@
 //    rounding) fails `mag < radius` / `x >= 1` for every pixel of the tile, and
 //    the survivors are visited in the same increasing index order, so the same
 //    lamps are elected, with the same ties, the same caps and the same sums.
-//  - the extra rest-pose BLAS slots of the lot 2 cache (customIndex 97..160).
+//  - the extra rest-pose BLAS slots of the stage 2 cache (customIndex 97..160).
 
 // Point lights + sun + skylight (hwrtdebug 7 / hwrtlight 1).
 //
@@ -161,7 +161,7 @@ struct LightEnv {
     vec4 soft3;  // optimised rays: smallest contribution, tan of the smallest half-angle, temporal weight, filter radius scale
 };
 struct Light { vec3 pos; float radius; vec3 color; float flags; };
-// Same buffer as hitlight.comp; lot 2 appends one word per lamp after the 256
+// Same buffer as hitlight.comp; stage 2 appends one word per lamp after the 256
 // lamp slots: bit 0 = the first loop evaluates it (radius 0 within the first
 // 16, or a glow within the first 96, counted in index order exactly as that
 // loop counts them), bit 1 = it is a finite lamp the nearest-N loop may elect.
@@ -302,7 +302,7 @@ const float MODEL_STUDIO = 1.00;
 const int MASK_MODELS = 0x100;
 const int SHADE_MODELS = 0x200;
 const int TEST_GLDEPTH = 0x400;
-// Lot 1 HDR. HDR keeps scene radiance in this rgba16f image. HDRPROBE
+// Stage 1 HDR. HDR keeps scene radiance in this rgba16f image. HDRPROBE
 // overwrites a fixed rectangle after shading so the values travel through
 // the same image the lighting pass writes.
 const int HDR = 0x800;
@@ -319,7 +319,7 @@ const int REFL_WATER = 0x2000;
 const int REFL_WORLD = 0x4000;
 const int SPEC = 0x8000;
 const int REFL_PLANESHIFT = 16;
-// rt-performance-lot4. Bits 24-29: reach of the sky rays in 32-unit steps
+// Performance options. Bits 24-29: reach of the sky rays in 32-unit steps
 // (hwrtskyrange, 0 = to the far plane); a ray that meets nothing that close
 // counts as open sky. RT_ADAPT (hwrtrtadapt): shorter sky rays where it shows
 // least (screen edges, far surfaces, dark textures), RT_FAST: the camera turns
@@ -370,10 +370,10 @@ shared vec3 sh_p[16][16];
 shared float sh_mdl[16][16];
 shared float sh_hit[16][16];
 
-// Geometry table size with the lot 2 cache (HWRT_MAX_GEOMS_CAP in hwrt.h).
+// Geometry table size with the stage 2 cache (HWRT_MAX_GEOMS_CAP in hwrt.h).
 const uint MAXGEOMS = 161u;
 
-// Lot 2 tile culling. The box of every hit the tile will light, then the two
+// Stage 2 tile culling. The box of every hit the tile will light, then the two
 // ordered lamp lists that can pass a range test somewhere inside it.
 const int MAXSUBGROUPS = 64;
 shared vec3 sh_lo[MAXSUBGROUPS];
@@ -937,7 +937,7 @@ vec2 softDisc(vec2 u, int k, int n)
 // pass runs the shader without their code, as a bigger shader is slower even
 // when its extra branches are never taken.
 layout(constant_id = 0) const bool SOFT_SOURCES = false;
-// Optimised extended sources (sources-etendues-opti, lights.cpp hwrtsoftopt), each compiled in only for the
+// Optimised extended sources (lights.cpp hwrtsoftopt), each compiled in only for the
 // pipeline that uses it (trace.cpp): every piece of code the pass carries slows it down, even unused.
 // SOFT_LEAN: one ray per source per pixel to a point of the source that changes with the pixel (blue noise) and
 // with every frame: the code of a point source with a moved target. The prototype's loop of rays stays the
@@ -1415,7 +1415,7 @@ vec3 dynCap(vec3 c)
     return m > DYN_MAX ? c * (DYN_MAX / m) : c;
 }
 
-// Integration HDR lot 1. Players (fullbright models) in HDR are shaded exactly
+// HDR stage 1. Players (fullbright models) in HDR are shaded exactly
 // as on an SDR screen (display-encoded colours, SDR caps), clipped at white,
 // then decoded once at the end: their overbright plate and studio fill must
 // not become HDR highlights. The world and the other models keep the HDR path.
@@ -1852,7 +1852,7 @@ void shadePixel()
     bool valid = false;
     vec4 outc = vec4(0.0);
     bool nrdOn = (int(lights.env.diffPad1 + 0.5) & 32) != 0;
-    // Lot 2: hoisted out of the first block, which now stops where the lamps
+    // Stage 2: hoisted out of the first block, which now stops where the lamps
     // start so the whole tile can cull them together (tileCull has barriers).
     bool reach = false;
     vec3 hit = vec3(0.0);
@@ -1861,7 +1861,7 @@ void shadePixel()
     uint omnimask = 0u, nearmask = 0u, sunmask = 0u, skymask = 0u, glowbody = 0u;
     uint skipInst = 0xFFFFFFFFu;
     int nuse = 1;
-    // Reflections lot: read again after tileCull (world spec, envmap mirror).
+    // Reflections: read again after tileCull (world spec, envmap mirror).
     uint envbits = 0u;
     vec3 bumpn = n;
     float specmask = 1.0;
@@ -2351,7 +2351,7 @@ void shadePixel()
     // hwrtshadowothers 2), and from
     // hwrtshadowself 2 the local body, so they throw their shadow like they do
     // for the other lamps. Mapmodel scenery stays out (its foliage any-hit).
-    // Lot 2: the always-evaluated lamps of this tile, in index order. The 16 /
+    // Stage 2: the always-evaluated lamps of this tile, in index order. The 16 /
     // 96 caps were applied by the CPU (kind bit 0) counting in that same order,
     // and a glow dropped by the tile box would have returned at x >= 1 below.
     int nA = int(sh_nA);
@@ -2751,7 +2751,7 @@ void shadePixel()
         barrier();
     }
 
-    // SOFT_FILTER (sources-etendues-opti): the sun's and the extended lamps' lit fractions are
+    // SOFT_FILTER (hwrtsoftopt): the sun's and the extended lamps' lit fractions are
     // filtered over the 5x5 pixels of the same surface (normal, plane, model / world as the sky filter), with a
     // Gaussian whose radius follows the widest penumbra estimated nearby, so a contact shadow stays sharp and a
     // wide penumbra takes the whole 5x5. Then multiplied back onto their unshadowed light. Uniform branch: every

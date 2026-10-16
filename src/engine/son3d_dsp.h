@@ -1,5 +1,5 @@
 // son3d_dsp.h: Steam Audio (phonon.dll) processing of one SDL_mixer channel.
-// No engine dependency, so that the offline bench (shots/son3d-lot1/outils/banc) runs the same code.
+// No engine dependency, so that an offline bench can run the same code.
 
 #ifndef SON3D_DSP_H
 #define SON3D_DSP_H

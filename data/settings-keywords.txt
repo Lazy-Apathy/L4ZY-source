@@ -143,6 +143,11 @@
 =modeste: profile performance fps
 =weak: profile performance fps
 
+=bot: bots botperception
+=robot: bot bots botperception
+=robots: bot bots botperception
+=forme: form botstyleform
+
 # --- extra words on settings ---
 soundvol: son general principal master volume
 musicvol: musique music
@@ -223,6 +228,9 @@ reacttime: temps de reaction ms chiffres nombres frags kill feed vue viseur seen
 reacttimeall: temps de reaction des autres joueurs frags autres ms
 reacttimemode: temps de reaction precis classique mesure juste exact seen aim vue viseur
 demohdvis: demo hd visibilite ennemis vus ecran enregistrer etude visibility record
+demoxraystyle: demo rayons x xray x-ray travers murs silhouette contour voile couleur joueurs wallhack style
+demoxraystart: demo rayons x xray x-ray debut ouverture demarrage allume automatique travers murs
+spectatorlist: spectateur spec liste joueurs noms droite suivre cliquer choisir qui regarder
 killfeedvs: compteur duel contre tue morte
 showvs: compteur duel contre tue morte
 showlang: langues langue
@@ -239,6 +247,8 @@ hwrt: ray tracing rt eclairage raytracing
 hdroutpref: hdr sdr sortie ecran
 hwrtngxmode: dlss dlaa fsr amd upscaling anticrenelage
 hwrtfsrsharpness: fsr nettete sharpening rcas
+hwrtdlsssharpness: dlss dlaa nettete net nette sharpening sharpen rcas cas flou floue pique accentuation
+hwrtupscalemipbias: dlss fsr textures nettete detail details mip biais flou floue net nette sharp
 hwrtreflections: reflets eau miroir reflexion rt
 hwrtquality: qualite rt prereglage preset performance fps rapide portable carte graphique moyenne basse haute
 hwrtspecular: brillance speculaire reflet lampe soleil rt
@@ -259,7 +269,7 @@ hwrtsoftsigma: debruiteur ombres douces sigma nrd debruitage grain bruit penombr
 hwrtsoftsigmahistory: stabilite debruiteur ombres douces sigma historique images temporel trainee soft shadow denoiser steadiness history rt
 hwrtsoftshadowrays: rayons ombres douces nombre de rayons grain bruit penombre lisse soft shadow rays noise grainy rt
 hwrtsoftshadows: ombres douces penombre soft shadows ombres nettes taille lumieres soleil lampes torches flammes teleporteur lave rt par defaut activer desactiver on off
-looktaa: anticrenelage temporel taa
+looktaa: -
 lookfxaa: fxaa anticrenelage crenelage flou net nettete lissage bords natif native
 gtao: occlusion ambiante ao gtao ssao coins recoins relief ombres contact
 lookao: ombres occlusion ssao
@@ -285,7 +295,7 @@ flagtimer: drapeau chrono compteur temps ctf porteur
 flagfeed: drapeau message annonce vol marque capture ctf gros lache lacher perdu tombe retour rendu ramene returned reset
 # juste apres la derniere ligne actuelle "flagfeed: ...". Les sous-titres "# --- ..." sont a garder (le jeu les ignore).
 # --- display ---
-fsaa: anticrenelage antialiasing multisampling msaa crenelage escaliers bords
+fsaa: anticrenelage antialiasing multisampling msaa crenelage escaliers bords classique origine original net nette
 depthbits: profondeur zbuffer precision
 aniso: anisotrope filtrage textures nettete loin
 bilinear: filtrage bilineaire textures lisse
@@ -390,6 +400,10 @@ showclientnum: tableau scores numero client
 showspectators: tableau scores spectateurs
 highlightscore: tableau scores surligner moi
 showconnecting: tableau scores connexion joueurs
+# --- bots ---
+botperception: bots classique tiny apa voient murs travers triche wallhack adversaires ia robots realiste style joueur pro visee serveur ligne nom apathy ajouter master
+botstylelevel: bots niveau pourcentage force difficulte joueur pro facile difficile
+botstyleform: bots forme jour variation partie regularite
 # --- HUD pieces (Adjust pages) ---
 ammobaralign: munitions alignement
 ammobarhorizontal: munitions horizontal

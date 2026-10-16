@@ -1584,6 +1584,8 @@ class Translator:
     def call_model(self, messages, temperature=None, max_tokens=None, think=False, budget=0, timeout=120, info=None):
         if model_manager.is_loading():
             return ""
+        if model_manager.no_ai():
+            return ""
         url, model, key = model_manager.endpoint()
         if not url:
             return ""
@@ -2230,7 +2232,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def do_update_get(self, parsed):
         params = parse_qs(parsed.query)
-        self.reply(200, updater.handle_get(params).encode("utf-8"))
+        body = updater.handle_get(params) + f"ai={model_manager.ai_state()}\n"
+        self.reply(200, body.encode("utf-8"))
 
     def do_update_post(self, parsed):
         params = parse_qs(parsed.query)
@@ -2267,6 +2270,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         if model_manager.is_loading():
             self.reply(503, "The AI model is still loading, try again in a moment.".encode("utf-8"))
+            return
+        if model_manager.no_ai():
+            self.reply(503, "No AI loaded: install a model in Chat Translation > Model, or add an API key.".encode("utf-8"))
             return
         url, _model, _key = model_manager.endpoint()
         if not url:

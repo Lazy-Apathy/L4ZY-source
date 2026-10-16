@@ -674,6 +674,8 @@ static void mrqfree() {}
 
 #endif
 
+GLuint msaawindowcolourread();   // rendergl.cpp
+
 namespace matchrec
 {
     void stop() { mrfinish(); }
@@ -791,7 +793,8 @@ namespace matchrec
                 glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, mrtex, 0);
                 glBindFramebuffer_(GL_FRAMEBUFFER, 0);
             }
-            glBindFramebuffer_(GL_READ_FRAMEBUFFER, 0);
+            // MSAA window: a stretching blit cannot read it, read a resolved copy.
+            glBindFramebuffer_(GL_READ_FRAMEBUFFER, ::msaawindowcolourread());
             glBindFramebuffer_(GL_DRAW_FRAMEBUFFER, mrfb);
             glBlitFramebuffer_(0, 0, screenw, screenh, 0, 0, mrw, mrh, GL_COLOR_BUFFER_BIT, GL_LINEAR);
             glBindFramebuffer_(GL_FRAMEBUFFER, mrfb);

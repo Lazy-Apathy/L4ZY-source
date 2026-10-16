@@ -1,6 +1,6 @@
 # L4ZY
 
-A Cube 2: Sauerbraten (2020) client with **hardware ray-traced lighting**, **NVIDIA DLAA/DLSS** and **AMD FSR**, **native HDR output**, **local AI chat translation** and a **settings assistant**, **3D sound**, a **drag-and-drop HUD editor**, and a lot of quality-of-life additions: friends list, kill feed, CTF flag timer, automatic match recording, HD-aim demos and more.
+A Cube 2: Sauerbraten (2020) client with **hardware ray-traced lighting**, **NVIDIA DLAA/DLSS** and **AMD FSR**, **native HDR output**, **local AI chat translation** and a **settings assistant**, **3D sound**, a **drag-and-drop HUD editor**, and a lot of quality-of-life additions: friends list, kill feed, CTF flag timer, automatic match recording, HD-aim demos with X-ray, Tiny Apa bots and more.
 
 It plays on normal Sauerbraten servers. The only extra thing it sends is one `__L4ZY <version>` line when you connect, which vanilla servers ignore (see [Online rules](#online-rules)).
 
@@ -160,8 +160,11 @@ Commands:
 |---|---|---|
 | `hwrtngxmode` | `0` Native, `1` DLAA, `2` DLSS Quality, `3` DLSS Balanced, `4` DLSS Performance, `5` FSR Native, `6` FSR Quality, `7` FSR Balanced, `8` FSR Performance | `0` |
 | `hwrtfsrsharpness` | FSR sharpening after upscaling (`0` off, `10` close to DLSS) | `10` |
+| `hwrtdlsssharpness` | Sharpening after DLAA/DLSS with AMD's open RCAS filter (`0` off to `100`) | `0` |
+| `hwrtupscalemipbias` | Sharper textures with DLSS/FSR Quality, Balanced and Performance (`1` on) | `0` |
+| `fsaa` | MSAA, Classic lighting with Native only: `-1` default (off), `2`, `4`, `8`; a change restarts the graphics | `-1` |
 
-- FXAA and Temporal AA are not stacked with DLAA/DLSS/FSR. They come back in Native.
+- FXAA is not stacked with DLAA/DLSS/FSR. It comes back in Native.
 - If DLAA/DLSS or FSR cannot start, the game falls back to Native and says so.
 - No frame generation.
 
@@ -183,15 +186,17 @@ Commands:
 
 | Setting | Values | Default |
 |---|---|---|
-| `hdroutpref` | `-1` Automatic, `0` SDR, `1` Native HDR | `0` |
+| `hdroutpref` | `0` SDR, `1` Native HDR | `0` |
 | `hwrthdrexp` | exposure, in EV (−8…8; menu steps ±0.1 / ±0.5) | `0` |
 | `hdroutref` | reference white, in nits (40–480) | `80` |
 | `hdroutmax` | peak, in nits; `0` = automatic, from the display | `0` |
 | `hdrouthud` | HUD brightness, in nits; `0` = follows reference white | `0` |
 
 - Native HDR needs Windows HDR to be on. The game never changes Windows or driver settings.
+- Native HDR starts once the game window is ready, and retries by itself if it fails.
+- If Windows switches HDR off for a moment while the game starts, the game waits up to a minute and turns native HDR on when it is back, with a message meanwhile.
 - If you turn Windows HDR on after starting the game, choose *Native HDR* again.
-- In native HDR, SSAO (Creases), Temporal AA and motion blur are not applied.
+- In native HDR, SSAO (Creases) and motion blur are not applied.
 
 ### 3D sound (Steam Audio)
 
@@ -231,7 +236,6 @@ The game reads your mouse once the GPU has caught up, instead of queueing frames
 
 | Setting | What it does | Default |
 |---|---|---|
-| `looktaa` | Temporal AA | `0` |
 | `lookfxaa` | FXAA in Native (Options → Graphics → *General* → *Anti-Aliasing*): smoother edges, softer textures. Off = as sharp as stock Sauerbraten | `0` |
 | `lookselfshadow` | classic lighting: your own body casts a sun shadow in first person (needs Classic shadows, Graphics → Classic). With ray tracing it is `hwrtshadowself` (Graphics → *Ray tracing* → *Shadows*) | `1` |
 | `waterwaves` | animated waves on classic water (Options → Graphics → *Classic* → *Detail*): reflection, refraction and shine ripple, the water stays flat for the game. Same strength / speed / detail settings as `hwrtwaterwaves` | `0` |
@@ -243,6 +247,7 @@ Incoming chat is shown as `name: translation (original)`: the translation in gre
 
 - It runs **on your PC** with llama.cpp and a Qwen3 model.
 - An internet API key is optional and must be entered explicitly.
+- With no model installed and no API key, chat is shown and sent at once, as typed. Translation starts by itself once you install a model or add a key (unless you muted it with **F7**).
 
 **Menu:** Chat Translation (main menu)
 
@@ -303,7 +308,7 @@ Supported codes: `bg ca cs da de en es et fi fr hr hu id it nl no pl pt ro ru sk
 
 **Keys and status**
 
-- **F7** `toggletranslate`: mute or unmute translation (chat is still shown).
+- **F7** `toggletranslate`: mute or unmute translation (chat is still shown). It stays muted after a restart.
 - `translatestatus`: shows the service and language state.
 
 ### Settings search
@@ -377,7 +382,7 @@ Tints your body, name, HUD gun and chat/kill-feed name. Click the player preview
 
 | Setting | Values | Default |
 |---|---|---|
-| `mycolor` | `-1` off, `0` green, `1` blue, `2` yellow, `3` red, `4` gray, `5` magenta, `6` orange, `7` white, `8` cyan, `9` rose | `9` |
+| `mycolor` | `-1` off, `0` green, `1` blue, `2` yellow, `3` red, `4` gray, `5` magenta, `6` orange, `7` white, `8` cyan, `9` rose | `-1` |
 | `cyclemycolor` | next colour | |
 
 **Team colours (optional):** Options → *Friends and colours* → *Player colours*. One colour for all teammates and one for all enemies (bots included), instead of blue and red. Off by default.
@@ -415,7 +420,7 @@ Idea from p1xbraten; written for L4ZY.
 
 - **Kill feed:** `killer [weapon] victim`, fading out, with an `xN` tag on your streaks.
 - **Kills-deaths against each player:** `[3-1]` next to a kill feed line is how many times you killed that player and they killed you this match.
-- **React times:** on your own kills and deaths, the time from the first frame the enemy was really visible on your screen to the killing shot, and how long he was under your crosshair (`view / crosshair ms`).
+- **React times:** on your own kills and deaths, the time from the first frame the enemy was really visible on your screen to the killing shot, and how long they were under your crosshair (`view / crosshair ms`).
   - On your deaths the value is approximate (`~`) unless the killer also runs this client on a compatible server.
 - **Others' react times** (`reacttimeall`, off by default): on a compatible server, frags between two other players also show the killer's own react times, when the killer runs this client with react times on. Spectators too.
 - **Kill streak popups:** display only, no gameplay effect.
@@ -467,11 +472,11 @@ Idea from p1xbraten; written for L4ZY.
 
 - Every match you play is saved as a normal `.dmo`, plus a `.dmohd` file with full-precision aim.
 - On playback, the HD aim replaces the 1° steps of vanilla demos and follows the recorder: their team is blue, the other red.
-- A playback bar has −10 s, play/pause, +10 s, a seek slider, 50%/100% speed, and hide.
+- Demo controls: the exact time, a timeline (click or drag to go anywhere), back / ahead 10 s (0.5 s with Alt held), play/pause, speed (0.25× to 2×), the players you can follow (click a name), and *Hide*.
+- **X-ray** (demos played on this computer only, never in a game): players are seen through walls in their colour. Switch it with the *X-RAY* button of the demo controls or a key; it keeps its state when you go back in the demo, and each new demo starts from *X-ray at demo start*.
 - While you watch a player whose exact aim is used (HD demo, or live on a compatible server), a small grey **HD** sits next to their name; nothing is shown otherwise.
 - Live on a compatible server, the exact aim is shown `hdlivedelay` ms late (200 by default, the same for every player) and drawn along smooth curves, so it plays fluid and complete. The rest of the game (other players, shots, sounds, deaths, kill feed, scores) is replayed with the same delay, so you see exactly what the watched player saw; chat and server messages sent on their own are not delayed. The delay applies as soon as you spectate on a server with the clan extras, the same whoever you watch (with or without exact aim, bots) and in free cam; joining the game puts you back on time. Long HD aim files (over 31 MB) come in parts from compatible servers and are joined automatically.
-- On a compatible server, while you record, the server's demo of the match (with the HD aim of every L4ZY player) is downloaded during the map vote and replaces your local one, only if it arrived complete and is the same match. Your own recording is kept for 7 days in `demo
-eplaced`. One try per match, never retried; if the server demo has no HD aim, your local one is kept.
+- On a compatible server, while you record, the server's demo of the match (with the HD aim of every L4ZY player) is downloaded during the map vote and replaces your local one, only if it arrived complete and is the same match. Your own recording is kept for 7 days in `demo\replaced`. One try per match, never retried; if the server demo has no HD aim, your local one is kept.
 
 **Menu:** Options → Recording
 
@@ -481,14 +486,34 @@ eplaced`. One try per match, never retried; if the server demo has no HD aim, yo
 | `demokeep` | demos kept (1–30) | `5` |
 | `hdlivedelay` | live spectating on a compatible server: the HD aim is shown this many ms late, the same for every player, so it plays smooth and complete (0–1000) | `200` |
 | `toggledemorecord`, `toggledemohd` | recording on/off, HD/vanilla aim while watching | |
+| `demoxraystart` | X-ray at demo start (Options → Recording → *Demos (HD aim)*): `0` Off, `1` On | `0` |
+| `demoxraystyle` | X-ray style: `0` outline, `1` outline + veil | `0` |
+| `toggledemoxray`, `toggledemobar` | X-ray on/off, hide/show the demo controls (no key by default; Options → Keys) | |
 | `demorewind [ms]`, `demoforward [ms]` | seek (default 10 s) | |
 | `playlocaldemo <i>`, `localdemoextract <i>` | play a demo, copy it with its `.dmohd` | |
 | `openfolder demo` | open the folder | |
+
+### Tiny Apa bots
+
+- **Classic:** the normal Sauerbraten bots.
+- **Tiny Apa (WIP):** bots modelled on Apathy's own play.
+
+Tiny Apa (WIP) is the first player profile: bots on a human-like base, tuned on Apathy's own play. Classic bots stay the default.
+
+**Menu:** main menu → *Bot Match* → *bots play*: *Classic* or *Tiny Apa*; with Tiny Apa, their level and *a different form each game*.
+
+| Setting | Values | Default |
+|---|---|---|
+| `botperception` | `0` Classic, `2` Tiny Apa | `0` |
+| `botstylelevel` | Tiny Apa level in %, `50` to `100`: `100` a strong player, `50` half the accuracy and slower | `100` |
+| `botstyleform` | `1` a different form each game, `0` always the same | `1` |
 
 ### Scoreboard, sound and mouse
 
 - **Scoreboard columns** (Options → HUD → *Scoreboard (Tab)…*): `showfrags` (`1`), `showkd`, `showflags`, `showaccuracy`, `showstatus` (`0`), `showlang` (`1`), `showvs` (`1`: your kills-deaths against each player), and `scoreboardalpha` for the background opacity (`40`).
   - Admin, auth and master are shown as a tag after the name; names are dimmed while a player is dead.
+- **Spectating:** a list of the players on the right (`spectatorlist`, `1`, Options → HUD → *Scoreboard (Tab)…*). Hold Tab and click a name to follow that player. A small eye marks the player you watch, in the list, the scoreboard and the Master menu.
+- **Master menu** (main menu → *Master*, in a game): each player's client number, and the actions as icons (hover one to see what it does).
 - **Crosshair** (Options → HUD → *Crosshair…*, also from Options → Mouse): resting colour in hex (`crosshaircolour`, or `crosshairhex FF8800`; default white), with white/green/cyan/yellow/pink presets. The hit crosshair takes the colour of the player you hit (friend colour, otherwise blue or red); `crosshairreloaddim` dims it while reloading (`0`).
 - **Sound mix** (Options → Sound → Mix): `mixweapons`, `mixhits`, `mixpain`, `mixitems`, `mixannounce`, `mixflags`, `mixmove`, `mixworld`.
   - All go from 0 to 200 (`100` = normal). `mixreset` puts them all back to 100.
@@ -518,7 +543,19 @@ eplaced`. One try per match, never retried; if the server demo has no HD aim, yo
 
 Each release is listed on the [Releases](https://github.com/Lazy-Apathy/L4ZY/releases) page, newest first.
 
-### 2026.10.12.1 (test)
+### 2026.10.16.1 (test)
+
+- Bots: new optional "Tiny Apa" (WIP) bots in Bot Match, modelled on Apathy's own play, with a level and a different form each game (main menu → *Bot Match* → *bots play*). Classic stays the default.
+- Anti-aliasing: Temporal AA leaves the menu; if it was on, it is turned off once. New, off by default: sharpening for DLAA/DLSS and *Sharper textures* with DLSS/FSR (Options → Graphics → *Anti-Aliasing*).
+- Spectating: a list of the players on the right; hold Tab and click a name to follow that player. A small eye marks the player you watch.
+- Master menu: each player's client number, and the actions as icons.
+- Your name and body no longer get a pink colour by default on first launch.
+- Demos: X-ray view (players seen through walls in their colour) while watching a demo played on this computer, never in a game.
+- Demos: new controls with the exact time, a timeline, 0.5 s steps with Alt, speed, and the players to follow.
+- Chat translation: with no AI installed, chat is shown and sent at once; translation starts by itself once a model is installed. F7 mute is kept after a restart.
+- Native HDR waits until the game window is ready and retries by itself, also when Windows switches HDR off for a moment at start. The *Automatic* choice is gone; if you had it, you are moved to SDR once.
+
+### 2026.10.12.1 (stable)
 
 - New graphics profiles *Ultra*, *High*, *Medium* and *Low* (Options → Graphics → *Performance*); each of their options can also be set on its own.
 - Ray tracing: soft shadows, on by default, with their own denoiser (NRD SIGMA).

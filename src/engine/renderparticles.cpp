@@ -928,7 +928,7 @@ typedef varenderer<PT_TAPE> taperenderer;
 typedef varenderer<PT_TRAIL> trailrenderer;
 
 #include "depthfx.h"
-// Lab-only: pin explosion UV rotation to particle age so Off/DLAA/Quality
+// Debug-only: pin explosion UV rotation to particle age so Off/DLAA/Quality
 // sequences start on the same shader phase. Production uses lastmillis.
 VAR(hwrtpartlabclock, 0, 0, 1);
 int hwrtpartbiaspass = 0;
@@ -1101,7 +1101,7 @@ void debugparticles()
     pophudmatrix();
 }
 
-// Lot 5, HDR scene only. Additive flames were authored for an 8-bit display:
+// Stage 5, HDR scene only. Additive flames were authored for an 8-bit display:
 // their encoded colours add up and each channel clips at white, so a dense core
 // turns orange, yellow, then white (red clips first with the default 0x903020).
 // In the linear scene each particle adds its decoded colour without that clip,
@@ -1168,7 +1168,7 @@ static void hdrflamecompose()
     if(!logged)
     {
         logged = 1;
-        conoutf("hdr lot5 flammes: somme encodee a part %dx%d, composee une fois (pente %.2f)", w, h, hdrflammepente / 100.0f);
+        conoutf("hdr flames: encoded sum apart %dx%d, composited once (slope %.2f)", w, h, hdrflammepente / 100.0f);
     }
 }
 
@@ -1291,7 +1291,7 @@ void renderparticles(bool mainpass)
         // and Shader::set does not run. setf only stores the CPU value;
         // flushparams is what uploads it to the program about to draw.
         float mul = (flags&PT_MOD) ? 1.0f : 0.0f;
-        // Lot 5 flame target: mask and tint both stay encoded, as on the 8-bit display.
+        // Stage 5 flame target: mask and tint both stay encoded, as on the 8-bit display.
         bool flameacc = i == PART_FLAME && flameok && hwrtflamebegin();
         float texdom = flameacc ? 1.0f : p->texdom, tintdom = flameacc ? 1.0f : p->tintdom;
         GLOBALPARAMF(particlemod, mul, texdom, tintdom, 0);
@@ -1368,7 +1368,7 @@ static void regularsplash(int type, int color, int radius, int num, int fade, co
 
 bool canaddparticles()
 {
-    // Unattended lot-2 shots keep drawing while the trial window is
+    // Unattended stage 2 shots keep drawing while the trial window is
     // minimized; smoke used to never spawn, so exclusion tests were empty.
     return !renderedgame && !shadowmapping && (!minimized || hwrtvelneeddraw());
 }
@@ -1881,7 +1881,7 @@ static void hwrtpartlabclear()
     labkind = 0;
     labdist = 0;
     hwrtdlaabiasreset();
-    conoutf("hwrt part lab: cleared CPU particles and bias persist (NGX history is unchanged)");
+    conoutf("hwrt part test: cleared CPU particles and bias persist (NGX history is unchanged)");
 }
 COMMAND(hwrtpartlabclear, "");
 
@@ -1894,7 +1894,7 @@ static void hwrtpartlabspawn(int *kind, int *dist)
     if(d > 1) d = 1;
     if(!camera1)
     {
-        conoutf("hwrt part lab: no camera");
+        conoutf("hwrt part test: no camera");
         return;
     }
     seedMT(20260918u);
@@ -1913,7 +1913,7 @@ static void hwrtpartlabspawn(int *kind, int *dist)
         int fade = d == 0 ? 1200 : 900;
         labsmokering(smokeo, 8, fade, d == 0 ? 6.0f : 4.5f, -12);
     }
-    conoutf("hwrt part lab: spawn kind %d dist %d exp %.2f %.2f %.2f lastmillis %d clock %d (seed 20260918, no veil)",
+    conoutf("hwrt part test: spawn kind %d dist %d exp %.2f %.2f %.2f lastmillis %d clock %d (seed 20260918, no veil)",
             k, d, laborigin.x, laborigin.y, laborigin.z, lastmillis, hwrtpartlabclock);
 }
 COMMAND(hwrtpartlabspawn, "ii");

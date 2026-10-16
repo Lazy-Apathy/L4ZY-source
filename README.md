@@ -46,7 +46,11 @@ Everything below runs from a normal user account and installs nothing system-wid
 ### 1. The game (`sauerbraten.exe`) — MinGW
 
 1. Install [w64devkit](https://github.com/skeeto/w64devkit) (L4ZY is built with w64devkit 2.9.1, GCC 16.2.0). The scripts look in `%LOCALAPPDATA%\w64devkit\w64devkit\bin`, or in the folder named by the `W64DEVKIT` variable.
-2. Create `bin64\` at the root of this repository and copy `SDL2.dll`, `SDL2_image.dll`, `SDL2_mixer.dll` and `zlib1.dll` from the `bin64\` folder of an official **Sauerbraten 2020** install (<http://sauerbraten.org/>). L4ZY uses these exact files; the game links against them.
+2. Create `bin64\` at the root of this repository and copy these DLLs from the `bin64\` folder of an official **Sauerbraten 2020** install (<http://sauerbraten.org/>) or of an L4ZY install (L4ZY ships the same files):
+   - linked by the game: `SDL2.dll`, `SDL2_image.dll`, `SDL2_mixer.dll`, `zlib1.dll`;
+   - images and textures (loaded by `SDL2_image`; without them, textures do not load): `libpng16-16.dll`, `libjpeg-9.dll`, `libtiff-5.dll`, `libwebp-7.dll`;
+   - sounds and music (loaded by `SDL2_mixer`): `libogg-0.dll`, `libvorbis-0.dll`, `libvorbisfile-3.dll`, `libFLAC-8.dll`, `libmikmod-2.dll`, `libmodplug-1.dll`, `libmpg123-0.dll`, `libopus-0.dll`, `libopusfile-0.dll`, `smpeg2.dll`;
+   - `libwinpthread-1.dll`.
 3. Build:
 
    ```
@@ -60,7 +64,7 @@ The build is reproducible: rebuilding this tree with w64devkit 2.9.1 gave the de
 
 ### 2. Running what you built
 
-The game needs the Sauerbraten 2020 data. Make a **copy** of a Sauerbraten 2020 folder (or of an L4ZY install), put your `bin64\sauerbraten.exe` and this repository's `data\` files and `traduction.cfg` over it, and start it with its own profile folder, for example `bin64\sauerbraten.exe -qC:\path\to\test-profile`. Without the DLLs below, the game still runs: ray tracing, DLSS, NRD and 3D sound then report themselves as unavailable and stay off.
+The game needs the Sauerbraten 2020 data. Make a **copy** of a Sauerbraten 2020 folder (or of an L4ZY install), put your `bin64\sauerbraten.exe` (with the DLLs of step 2) and this repository's `data\` files and `traduction.cfg` over it, and start it with its own profile folder, for example `bin64\sauerbraten.exe -qC:\path\to\test-profile`. Without the DLLs below, the game still runs: ray tracing, DLSS, NRD and 3D sound then report themselves as unavailable and stay off.
 
 ### 3. Optional DLLs
 

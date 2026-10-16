@@ -97,6 +97,8 @@ namespace game
     extern void skipkilllog(int n);
     extern bool demobarcursor();
     extern bool demobarkey(int code, bool isdown);
+    extern bool demoxrayactive();
+    extern void renderdemoxray();
     extern void g3d_gamemenus();
     extern const char *defaultcrosshair(int index);
     extern int selectcrosshair(vec &color);

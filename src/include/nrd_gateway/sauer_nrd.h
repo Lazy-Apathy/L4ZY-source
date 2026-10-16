@@ -16,7 +16,7 @@ extern "C" {
 #define SAUER_NRD_MSG 512u
 #define SAUER_NRD_OPT_ANTILAG_OFF 1u
 #define SAUER_NRD_OPT_FAST_OFF    2u
-/* Lighter REBLUR (rt-performance-lot4): LIGHT drops the temporal stabilisation
+/* Lighter REBLUR (performance option): LIGHT drops the temporal stabilisation
  * pass and the anti-firefly filter; LIGHTER also halves the blur radius. Older
  * gateways ignore these bits. */
 #define SAUER_NRD_OPT_LIGHT       4u

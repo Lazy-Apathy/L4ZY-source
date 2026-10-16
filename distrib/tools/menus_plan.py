@@ -395,6 +395,10 @@ class Walker:
             else:
                 lab, dyn = text(0)
                 act = a(1)
+                icon = clean(text(2)[0]) if a(2) is not None else ""
+                if not clean(lab).strip() and icon and icon != "0":
+                    # icon-only button: name it after its icon file ("master_kick.png" -> "master kick icon")
+                    lab = re.sub(r"\.\w+$", "", icon.replace("\\", "/").split("/")[-1]).replace("_", " ") + " icon"
             cmdtext = subst(act.text, env) if act is not None else ""
             target = self.showgui_target(cmdtext, depth)
             it = Item("button", label=clean(lab), cmd=" ".join(cmdtext.split()), target=target,

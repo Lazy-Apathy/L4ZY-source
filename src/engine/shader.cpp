@@ -1445,7 +1445,7 @@ void renderpostfx()
         if(postfxfilter != 1)
         {
             postfxfilter = 1;
-            conoutf("hdr lot2 postfx filtre hdrtonemap, passe conservee");
+            conoutf("hdr check postfx filters hdrtonemap, pass kept");
         }
     }
     else if(postfxfilter != 0)
@@ -1453,7 +1453,7 @@ void renderpostfx()
         postfxfilter = 0;
         bool any = false;
         loopv(postfxpasses) if(postfxisgrade(postfxpasses[i])) any = true;
-        if(any) conoutf("hdr lot2 postfx execute hdrtonemap");
+        if(any) conoutf("hdr check postfx runs hdrtonemap");
     }
 
     // Copy the image that will be shown. In HDR that image is still linear
@@ -1542,7 +1542,7 @@ void renderpostfx()
         loggedn = nexec;
         loggedm = postfxpasses.length();
         loggedlast = lastname;
-        conoutf("hdr lot2 postfx route exec %d/%d last %s cible %s",
+        conoutf("hdr check postfx route exec %d/%d last %s target %s",
                 nexec, postfxpasses.length(), lastname,
                 postfxout ? (nexec ? "present_fp16" : "present_conservee") : (nexec ? "fenetre" : "fenetre_conservee"));
     }
@@ -1579,22 +1579,22 @@ void clearpostfx()
 
 void hwrtstriphdrlook()
 {
-    // Lot 1b keeps every stored pass. The linear frame filters hdrtonemap at draw time.
+    // Every stored pass is kept. The linear frame filters hdrtonemap at draw time.
 }
 
 static void hwrthdrpostfxcmd()
 {
     if(postfxpasses.empty())
     {
-        conoutf("hdr lot2 postfx (vide)");
+        conoutf("hdr check postfx (empty)");
         return;
     }
     loopv(postfxpasses)
     {
         Shader *s = postfxpasses[i].shader;
-        conoutf("hdr lot2 postfx %d %s", i, s && s->name ? s->name : "?");
+        conoutf("hdr check postfx %d %s", i, s && s->name ? s->name : "?");
     }
-    conoutf("hdr lot2 postfx route exec %d/%d last %s cible %s",
+    conoutf("hdr check postfx route exec %d/%d last %s target %s",
             postfxrouteexec, postfxroutestored, postfxroutelast[0] ? postfxroutelast : "none",
             postfxrouteexec > 0 ? "fenetre" : (postfxrouteexec == 0 ? "fenetre_conservee" : "pas_encore"));
     int storedfxaa = 0, applied = hwrtngxmodeapplied();

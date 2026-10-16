@@ -408,7 +408,7 @@ namespace game
     }
 
     // Cubescript `attack` is type D: a scripted `attack 1` is rewritten to 0
-    // unless a key-release action can be queued. Lab sequences need a real
+    // unless a key-release action can be queued. Scripted test sequences need a real
     // projectile without that bind path.
     ICOMMAND(hwrtlabattack, "i", (int *on), { doattack(*on!=0); });
 
@@ -1682,6 +1682,7 @@ namespace game
         if(d->type==ENT_INANIMATE) return;
         if     (waterlevel>0) { if(material!=MAT_LAVA) playsound(S_SPLASH1, d==player1 ? NULL : &d->o); }
         else if(waterlevel<0) playsound(material==MAT_LAVA ? S_BURN : S_SPLASH2, d==player1 ? NULL : &d->o);
+        if(d->type==ENT_PLAYER && (waterlevel<0 || (waterlevel>0 && material!=MAT_LAVA))) ai::noise((fpsent *)d, waterlevel>0 ? S_SPLASH1 : S_SPLASH2, d->o);
         if     (floorlevel>0) { if(d==player1 || d->type!=ENT_PLAYER || ((fpsent *)d)->ai) msgsound(S_JUMP, d); }
         else if(floorlevel<0) { if(d==player1 || d->type!=ENT_PLAYER || ((fpsent *)d)->ai) msgsound(S_LAND, d); }
     }
@@ -1697,6 +1698,7 @@ namespace game
 
     void msgsound(int n, physent *d)
     {
+        if(!d || d->type==ENT_PLAYER) ai::noise(d ? (fpsent *)d : player1, n, d ? d->o : player1->o);
         if(!d || d==player1)
         {
             addmsg(N_SOUND, "ci", d, n);
@@ -1736,7 +1738,7 @@ namespace game
     const char *colorname(fpsent *d, const char *name, const char *prefix, const char *suffix, const char *alt)
     {
         if(!name) name = alt && d == player1 ? alt : d->name;
-        bool dup = !name[0] || duplicatename(d, name, alt) || d->aitype != AI_NONE;
+        bool dup = !name[0] || duplicatename(d, name, alt) || (d->aitype != AI_NONE && !ai::tinyapanamed(d, name));
         if(dup || prefix[0] || suffix[0])
         {
             cidx = (cidx+1)%3;
@@ -2495,6 +2497,7 @@ namespace game
         pophudmatrix();
 
         if(demoplayback) demohd::drawhud(w, h);
+        else demohd::drawspec(w, h);
 
         if(d->state!=CS_EDITING)
         {

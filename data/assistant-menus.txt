@@ -82,18 +82,19 @@
 6. {if "Ray tracing" chosen (hwrt 1) and not (RT lighting running)} status: Ray tracing chosen, but not running yet (no map, or it failed: see console).
 7. {if not ("Ray tracing" chosen (hwrt 1))} note: Classic lighting settings: Classic tab.
 == Anti-Aliasing {only if tab "General" open}
-1. checkbox "Temporal AA" looktaa | checkbox "FXAA in Native (softer)" lookfxaa
-2. {if DLSS/FSR built in and hwrtngxmodeapplied() != 0} note: Temporal AA / FXAA unused while DLAA, DLSS or FSR is on.
-3. {if Native HDR in use} note: Temporal AA is not applied in Native HDR.
-4. {if DLSS/FSR built in} note: FXAA off (default) keeps Native sharp. Quality = more internal pixels.
+1. checkbox "FXAA in Native (softer)" lookfxaa | "MSAA (Classic only)" choice fsaa: "Off"=<fsaa>, "2x"=2, "4x"=4, "8x"=8
+2. {if fsaa > 0 and not "Ray tracing" chosen (hwrt 1) and hwrtngxmodeapplied() = 0} note: MSAA: smooth edges, sharp textures. A change restarts the graphics.
+3. {if DLSS/FSR built in and hwrtngxmodeapplied() != 0} note: FXAA unused while DLAA, DLSS or FSR is on.
+4. {if DLSS/FSR built in and hwrtngxmodeapplied() = 0} note: FXAA off (default) keeps Native sharp. Quality = more internal pixels.
 5. {if DLSS/FSR built in} choice hwrtngxmode: "Native"=0, "DLAA"=1, "DLSS Quality"=2, "DLSS Balanced"=3, "DLSS Performance"=4
 6. {if DLSS/FSR built in and FSR built in} choice hwrtngxmode: "FSR Native"=5, "FSR Quality"=6, "FSR Balanced"=7, "FSR Performance"=8
 7. {if DLSS/FSR built in and FSR built in and hwrtdlssraison() != ""} status: <hwrtdlssraison>
 8. {if DLSS/FSR built in and FSR built in and hwrtfsrraison() != ""} status: <hwrtfsrraison>
 9. {if DLSS/FSR built in and FSR built in and hwrtngxmode >= 6 and hwrtfsrraison() = ""} note: FSR sharpening after upscaling (0 = off, 10 = like DLSS):
 10. {if DLSS/FSR built in and FSR built in and hwrtngxmode >= 6 and hwrtfsrraison() = ""} slider hwrtfsrsharpness
-11. {if DLSS/FSR built in and hwrtngxfallback() = 1} status: Using Native: <AA_modename $hwrtngxmode> did not start. Your choice is kept.
-12. {if DLSS/FSR built in and hwrtngxfallback() = 1 and hwrtngxreason() != ""} note: <hwrtngxreason>
+11. {if DLSS/FSR built in and hwrtngxmode >= 1 and hwrtngxmode <= 4 and hwrtdlssraison() = "" or hwrtngxmode >= 2 and hwrtngxmode <= 4 or hwrtngxmode >= 6 and hwrtngxmode >= 1 and hwrtngxmode <= 4 and hwrtdlssraison() = ""} "DLAA/DLSS sharpening" choice hwrtdlsssharpness: "Off"=0, "10"=10, "20"=20, "40"=40 | {if DLSS/FSR built in and hwrtngxmode >= 1 and hwrtngxmode <= 4 and hwrtdlssraison() = "" or hwrtngxmode >= 2 and hwrtngxmode <= 4 or hwrtngxmode >= 6 and hwrtngxmode >= 2 and hwrtngxmode <= 4 or hwrtngxmode >= 6} checkbox "Sharper textures (may shimmer)" hwrtupscalemipbias
+12. {if DLSS/FSR built in and hwrtngxfallback() = 1} status: Using Native: <AA_modename $hwrtngxmode> did not start. Your choice is kept.
+13. {if DLSS/FSR built in and hwrtngxfallback() = 1 and hwrtngxreason() != ""} note: <hwrtngxreason>
 == Players {only if tab "General" open}
 1. checkbox "Fullbright player models" fullbrightmodels on=60 | {if "Fullbright player models" ticked (fullbrightmodels)} choice fullbrightmodels: "Subtle"=60, "Bright"=100, "Overbright"=150, "Max"=200
 2. checkbox "Everyone uses my player model" forceplayermodels
@@ -172,12 +173,11 @@
 == Display output {only if tab "HDR screen" open}
 1. note: Native HDR sends a real HDR picture to an HDR screen.
 2. note: Windows HDR must already be on (it is never changed here).
-3. choice hdroutpref: "Automatic"=-1, "SDR"=0, "Native HDR"=1
-4. {if "Automatic" chosen (hdroutpref -1)} note: Automatic: Native HDR if Windows HDR is on and supported, else SDR.
-5. {if Native HDR in use} status: In use: Native HDR
-6. {if not (Native HDR in use) and HDR preview in use} status: In use: HDR preview shown in SDR (diagnostic, not native HDR)
-7. {if not (Native HDR in use) and not (HDR preview in use)} text "In use: SDR"
-8. {if hdroutpref != 0 and hdroutdispo() = 0} note: <hdroutraison>
+3. choice hdroutpref: "SDR"=0, "Native HDR"=1
+4. {if Native HDR in use} status: In use: Native HDR
+5. {if not (Native HDR in use) and HDR preview in use} status: In use: HDR preview shown in SDR (diagnostic, not native HDR)
+6. {if not (Native HDR in use) and not (HDR preview in use)} text "In use: SDR"
+7. {if hdroutpref != 0 and hdroutdispo() = 0} note: <hdroutraison>
 == HDR calibration {only if tab "HDR screen" open}
 1. note: Native HDR only. Kept across maps, outputs, anti-aliasing and lighting.
 2. text "Exposure: <hwrthdrexp> EV (default 0)" (computed)
@@ -274,7 +274,7 @@
 1. [ key "Scoreboard" -> showscores / key "Kills / deaths" -> togglekilllog / key "Main menu" -> togglemainmenu / key "Settings" -> showgui options / key "Move HUD parts" -> hudedit / key "Screenshot" -> screenshot ] | [ key "Spectate on / off" -> spectator (! (isspectator (getclientnum))) / key "Pause" -> set paused (= $paused 0) / key "Third person" -> if (allowthirdperson) [togglevar thirdperson] / key "Add bot" -> addbot / key "Delete bot" -> delbot ]
 2. note: Pause: local games and demos. Third person: offline and edit mode.
 == Recording and demos {only if tab "Game and demos" open}
-1. [ key "Match record" -> togglematchrecord / key "Demo record" -> toggledemorecord / key "Demo: back 10 s" -> demorewind ] | [ key "Demo: ahead 10 s" -> demoforward / key "Demo: HD aim" -> toggledemohd ]
+1. [ key "Match record" -> togglematchrecord / key "Demo record" -> toggledemorecord / key "Demo: back 10 s" -> demorewind / key "Demo: ahead 10 s" -> demoforward ] | [ key "Demo: HD aim" -> toggledemohd / key "Demo: X-ray" -> toggledemoxray / key "Demo: hide controls" -> toggledemobar ]
 2. note: The Demo keys work while you watch a demo.
 == Spectating (only while you spectate) {only if tab "Spectate and edit" open}
 1. [ key "Next player" -> nextfollow / key "Previous player" -> nextfollow -1 ] | key "Follow / free" -> follow
@@ -342,11 +342,13 @@ also: Chat Translation
 7. {if tab "Translation" open and not (tupdateavail = 3) and not (tupdateavail = 2) and tupdateavail on} button "<tupdatelabel>" : tupdateapply
 8. {if tab "Translation" open and not (tupdateavail = 3) and not (tupdateavail = 2) and tupdateavail on} text "<tupdatemsg>"
 == Translate {only if tab "Translation" open}
-1. checkbox "Translate incoming chat" translatechat
-2. checkbox "Translate team chat" translateteamchat
-3. checkbox "Preview while typing" translatepreview
-4. checkbox "I am a woman (feminine grammar)" translatefemme
-5. "Auto-translate" choice translateauto: "Off"=0, "Base language"=1, "Last spoken"=2
+1. {if translateai() = 0} status: No AI loaded: chat translation is off.
+2. {if translateai() = 0} note: It starts once you install a model (Model tab) or an API key.
+3. checkbox "Translate incoming chat" translatechat
+4. checkbox "Translate team chat" translateteamchat
+5. checkbox "Preview while typing" translatepreview
+6. checkbox "I am a woman (feminine grammar)" translatefemme
+7. "Auto-translate" choice translateauto: "Off"=0, "Base language"=1, "Last spoken"=2
 == I read in {only if tab "Translation" open}
 1. button "English" : concat translatelang en | button "French" : concat translatelang fr | button "German" : concat translatelang de | button "Spanish" : concat translatelang es | button "Russian" : concat translatelang ru
 2. button "Portuguese" : concat translatelang pt | button "Italian" : concat translatelang it | button "Polish" : concat translatelang pl | button "Dutch" : concat translatelang nl | button "Swedish" : concat translatelang sv
@@ -461,8 +463,11 @@ also: Chat Translation
 3. checkbox "Record enemy visibility in HD demos" demohdvis
 4. note: Which enemies were really on your screen, for studying demos. Never shown in game.
 5. note: Aim recorded on this machine, not server truth.
-6. slider "Demos to Keep (oldest deleted automatically)" demokeep
-7. slider "Live HD spectating delay in ms (same for every player)" hdlivedelay
+6. "X-ray at demo start" choice demoxraystart: "Off"=0, "On"=1
+7. "X-ray style" choice demoxraystyle: "Outline"=0, "Outline + veil"=1
+8. note: X-ray: players seen through walls in their colour. Demos only.
+9. slider "Demos to Keep (oldest deleted automatically)" demokeep
+10. slider "Live HD spectating delay in ms (same for every player)" hdlivedelay
 == Saved demos {only if tab "Demos (HD aim)" open}
 1. note: Put both files in this folder (same names, not a subfolder):
 2. button "<localdemofolder>" : openfolder demo
@@ -599,6 +604,8 @@ also: Chat Translation
 1. slider "Opacity" scoreboardalpha
 2. note: Lower = see the game through the board
 3. checkbox "Show it when I die" deathscore
+4. checkbox "Player list on the right while spectating" spectatorlist
+5. note: Hold Tab while spectating, then click a name to follow that player.
 == Columns
 1. note: Each box is one column.
 2. [ checkbox "Server name" showservinfo / checkbox "Frags" showfrags / checkbox "Frags in CTF / Collect" hidefrags on=0 off=1 / checkbox "Deaths" showdeaths / checkbox "K/D" showkd / checkbox "Flags / skulls" showflags / checkbox "Accuracy" showaccuracy / checkbox "Languages" showlang / checkbox "Vs you (kills-deaths)" showvs / checkbox "Status (dead / lag)" showstatus ] | [ checkbox "Ping" showping / checkbox "Packet jump" showpj / checkbox "Client number" showclientnum / checkbox "Spectators" showspectators / checkbox "Highlight me" highlightscore / checkbox "Connecting players" showconnecting ]
@@ -749,17 +756,26 @@ also: Chat Translation
 
 ## master | Master | Master
 == (top)
-1. {if ismaster(getclientnum())} button "relinquish master" : setmaster 0
-2. {if not (ismaster(getclientnum()))} button "claim master" : setmaster 1
-3. "mastermode" choice mm: "open (0)"=0, "veto (1)"=1, "locked (2)"=2, "private (3)"=3
-4. {if repeated for each cn (count known in game: <listclients 0 0>)} (text "<getclientname $cn>:" | button "kick" : kick <cn> | button "toggle spectator" : spectator @(= (isspectator <cn>) 0) <cn>) | {if repeated for each cn (count known in game: <listclients 0 0>) and m_teammode(getmode())} button "switch team" : setteam <cn> @(? (=s (getclientteam <cn>) "go... | {if repeated for each cn (count known in game: <listclients 0 0>) and ismaster(<cn>)} button "take master" : setmaster 0 <cn> | {if repeated for each cn (count known in game: <listclients 0 0>) and not (ismaster(<cn>))} button "give master" : setmaster 1 <cn>
+1. {if ismaster(getclientnum())} button "relinquish master" : setmaster 0 | {if not (ismaster(getclientnum()))} button "claim master" : setmaster 1 | text "<masterhinttext>"
+2. "mastermode" choice mm: "open (0)"=0, "veto (1)"=1, "locked (2)"=2, "private (3)"=3
+3. slider "add a bot, skill" masterbotskill (50..101)
+4. button "Add bot: Classic" : addbot $masterbotskill classic | button "Add bot: Tiny Apa" : addbot $masterbotskill tinyapa | button "remove a bot" : delbot
+5. {if tinyapaserver()} note: Tiny Apa bots stay Tiny Apa; other bots follow each player's bots play.
+6. {if not (tinyapaserver())} note: Tiny Apa on add: only on an L4ZY server. Here bots follow bots play.
+7. {if repeated for each cn (count known in game: <listclients 0 0>)} (text "<getclientname $cn> (<cn>):" | button "master kick icon" : kick <cn> | button "master spectator icon" : spectator @(= (isspectator <cn>) 0) <cn>) | {if repeated for each cn (count known in game: <listclients 0 0>) and m_teammode(getmode())} button "master team icon" : setteam <cn> @(? (=s (getclientteam <cn>) "go... | {if repeated for each cn (count known in game: <listclients 0 0>) and ismaster(<cn>)} button "master take icon" : setmaster 0 <cn> | {if repeated for each cn (count known in game: <listclients 0 0>) and not (ismaster(<cn>))} button "master give icon" : setmaster 1 <cn>
 
 ## botmatch | Bot Match | Bot Match
 == (top)
 1. slider "bot amount" botmatchcount (0..32)
 2. slider "bot minimum skill" botmatchminskill (50..101)
 3. slider "bot maximum skill" botmatchmaxskill (50..101)
-4. button "start match.." > page gamemode
+4. "bots play" choice botperception: "Classic"=0, "Tiny Apa"=2
+5. {if "Classic" chosen (botperception 0)} note: Classic: the normal Sauerbraten bots.
+6. {if "Tiny Apa" chosen (botperception 2)} note: Tiny Apa (WIP): bots modelled on Apathy's own play.
+7. {if "Tiny Apa" chosen (botperception 2)} slider "their level: <botstylelevel> %" botstylelevel (50..100)
+8. {if "Tiny Apa" chosen (botperception 2)} note: 100 = a strong player, 50 = half the accuracy, slower.
+9. {if "Tiny Apa" chosen (botperception 2)} checkbox "a different form each game" botstyleform
+10. button "start match.." > page gamemode
 
 ## campaign | Campaign | Campaign
 == (top)

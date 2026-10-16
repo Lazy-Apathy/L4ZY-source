@@ -356,7 +356,14 @@ namespace game
             loopscoregroup(o,
             {
                 int ncol = friendnamecolor(o, demohd::namecolor(o, statuscolor(o, 0xFFFFDD)));
-                g.textf("%s ", ncol, NULL, sbname(o));
+                if(o==followingplayer()) // spectator: small eye after the player being watched
+                {
+                    g.pushlist();
+                    g.textf("%s ", ncol, NULL, sbname(o));
+                    g.text("", 0, "../../data/following.png");
+                    g.poplist();
+                }
+                else g.textf("%s ", ncol, NULL, sbname(o));
             });
             g.poplist();
 

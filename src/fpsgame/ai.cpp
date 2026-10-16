@@ -13,7 +13,7 @@ namespace ai
     VAR(aidebug, 0, 0, 6);
     VAR(aiforcegun, -1, -1, NUMGUNS-1);
 
-    ICOMMAND(addbot, "s", (char *s), addmsg(N_ADDBOT, "ri", *s ? clamp(parseint(s), 1, 101) : -1));
+    ICOMMAND(addbot, "ss", (char *s, char *style), addbotstyled(*s ? clamp(parseint(s), 1, 101) : -1, style));
     ICOMMAND(delbot, "", (), addmsg(N_DELBOT, "r"));
     ICOMMAND(botlimit, "i", (int *n), addmsg(N_BOTLIMIT, "ri", *n));
     ICOMMAND(botbalance, "i", (int *n), addmsg(N_BOTBALANCE, "ri", *n));
@@ -127,6 +127,8 @@ namespace ai
         return o;
     }
 
+    #include "aihuman.h"
+
     void create(fpsent *d)
     {
         if(!d->ai) d->ai = new aiinfo;
@@ -144,6 +146,7 @@ namespace ai
         fpsent *o = newclient(ocn);
 
         d->aitype = at;
+        name = stylebotname(d, name, ocn);
 
         bool resetthisguy = false;
         if(!d->name[0])
@@ -185,6 +188,7 @@ namespace ai
 
     void update()
     {
+        if(botperception == 2 || stylenaming || styleanyforced || tinyapaserver()) stylenames();
         if(intermission) { loopv(players) if(players[i]->ai) players[i]->stopmoving(); }
         else // fixed rate logic done out-of-sequence at 1 frame per second for each ai
         {
@@ -271,6 +275,7 @@ namespace ai
 
     bool enemy(fpsent *d, aistate &b, const vec &pos, float guard = SIGHTMIN, int pursue = 0)
     {
+        if(humanbot(d)) return targethuman(d, b, pursue, 0);
         fpsent *t = NULL;
         vec dp = d->headpos();
         float mindist = guard*guard, bestdist = 1e16f;
@@ -334,6 +339,7 @@ namespace ai
     {
         if(e && targetable(d, e))
         {
+            if(humanbot(d)) return humanviolence(d, b, e, pursue);
             if(pursue)
             {
                 if((b.targtype != AI_T_AFFINITY || !(pursue%2)) && makeroute(d, b, e->lastnode))
@@ -352,6 +358,7 @@ namespace ai
 
     bool target(fpsent *d, aistate &b, int pursue = 0, bool force = false, float mindist = 0.f)
     {
+        if(humanbot(d)) return targethuman(d, b, pursue, mindist);
         static vector<fpsent *> hastried; hastried.setsize(0);
         vec dp = d->headpos();
         while(true)
@@ -542,6 +549,7 @@ namespace ai
 
     void damaged(fpsent *d, fpsent *e)
     {
+        if(botmode(d) && humandamaged(d, e)) return;
         if(d->ai && canmove(d) && targetable(d, e)) // see if this ai is interested in a grudge
         {
             aistate &b = d->ai->getstate();
@@ -590,6 +598,7 @@ namespace ai
 
     void killed(fpsent *d, fpsent *e)
     {
+        if(botperception > 1 || styleanyforced) humankilled(d, e);
         if(d->ai) d->ai->reset();
     }
 
@@ -643,6 +652,7 @@ namespace ai
         if(check(d, b) || find(d, b)) return 1;
         if(target(d, b, 4, false)) return 1;
         if(target(d, b, 4, true)) return 1;
+        if(botmode(d) > 1 && stylewait(d, b)) return 1;
         if(randomnode(d, b, SIGHTMIN, 1e16f))
         {
             d->ai->switchstate(b, AI_S_INTEREST, AI_T_NODE, d->ai->route[0]);
@@ -689,6 +699,7 @@ namespace ai
             case AI_T_NODE: // this is like a wait state without sitting still..
                 if(check(d, b) || find(d, b)) return 1;
                 if(target(d, b, 4, true)) return 1;
+                if(botmode(d) > 1) { int r = styleinterest(d, b); if(r >= 0) return r; }
                 if(iswaypoint(b.target) && vec(waypoints[b.target].o).sub(d->feetpos()).magnitude() > CLOSEDIST)
                     return makeroute(d, b, waypoints[b.target].o) ? 1 : 0;
                 break;
@@ -737,6 +748,7 @@ namespace ai
                     {
                     	float guard = SIGHTMIN, wander = guns[d->gunselect].range;
                     	if(d->gunselect == GUN_FIST) guard = 0.f;
+                        if(humanbot(d)) return humanpursue(d, b, e, guard, wander);
                     	return patrol(d, b, e->feetpos(), guard, wander) ? 1 : 0;
                     }
                     break;
@@ -892,6 +904,7 @@ namespace ai
 		vec off = vec(pos).sub(d->feetpos()), dir(off.x, off.y, 0);
         bool sequenced = d->ai->blockseq || d->ai->targseq, offground = d->timeinair && !d->inwater,
             jump = !offground && lastmillis >= d->ai->jumpseed && (sequenced || off.z >= JUMPMIN || lastmillis >= d->ai->jumprand);
+        if(jump && botmode(d) > 1) jump = stylejump(d, b, sequenced, off.z);
 		if(jump)
 		{
 			vec old = d->o;
@@ -990,6 +1003,9 @@ namespace ai
         return false;
     }
 
+    #include "aistyle.h"
+    #include "aihumanproc.h"
+
     int process(fpsent *d, aistate &b)
     {
         int result = 0, stupify = d->skill <= 10+rnd(15) ? rnd(d->skill*1000) : 0, skmod = 101-d->skill;
@@ -1017,6 +1033,9 @@ namespace ai
 
 		if(!d->ai->dontmove) jumpto(d, b, d->ai->spot);
 
+        if(humanbot(d)) result = processhuman(d, b, dp, idle, frame, skmod);
+        else
+        {
         fpsent *e = getclient(d->ai->enemy);
         bool enemyok = e && targetable(d, e);
         if(!enemyok || d->skill >= 50)
@@ -1088,6 +1107,7 @@ namespace ai
             enemyok = false;
             result = 0;
         }
+        }
 
         fixrange(d->ai->targyaw, d->ai->targpitch);
         if(!result) scaleyawpitch(d->yaw, d->pitch, d->ai->targyaw, d->ai->targpitch, frame*0.25f, 1.f);
@@ -1124,6 +1144,7 @@ namespace ai
             d->move = ad.move;
             d->strafe = ad.strafe;
         }
+        if(botmode(d) > 1) stylesteps(d);
         findorientation(dp, d->yaw, d->pitch, d->ai->target);
         return result;
     }
@@ -1134,6 +1155,7 @@ namespace ai
         if(targetable(d, e))
         {
             vec ep = getaimpos(d, e);
+            if(humanbot(d)) ep = humanrangepos(d, e, ep);
             float dist = ep.squaredist(d->headpos());
             if(weaprange(d, weap, dist)) return true;
         }
@@ -1279,6 +1301,8 @@ namespace ai
         // others spawn new commands to the stack the ai reads the top command from the stack and executes
         // it or pops the stack and goes back along the history until it finds a suitable command to execute
         bool cleannext = false;
+        if(humanbot(d)) perceive(d);
+        else if(aiperceiving && !styleanyforced) forgetall();
         if(d->ai->state.empty()) d->ai->addstate(AI_S_WAIT);
         loopvrev(d->ai->state)
         {

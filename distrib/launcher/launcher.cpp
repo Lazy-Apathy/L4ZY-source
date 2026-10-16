@@ -1329,7 +1329,7 @@ static int normalmain(const vector<wstring> &passthrough, DWORD waitpid)
         // Asked by the player first; then, if the profile is new, the automatic one.
         if(!g_importfrom.empty()) importexplicit(g_importfrom, L"folder", profile);
         importrequest(profile, games);
-        // Profile given on the command line (tools, lab): no automatic import.
+        // Profile given on the command line (tools, tests): no automatic import.
         if(!customprofile) importsettings(profile, games);
         writeimportlist(games, profile);
     }

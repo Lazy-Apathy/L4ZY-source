@@ -391,6 +391,7 @@ namespace server
         extern void changemap();
         extern void addclient(clientinfo *ci);
         extern void changeteam(clientinfo *ci);
+        extern bool l4zybotcmd(clientinfo *ci, int sender, const char *text);
     }
 
     #define MM_MODE 0xF
@@ -3992,6 +3993,7 @@ namespace server
 
             case N_SERVCMD:
                 getstring(text, p);
+                if(aiman::l4zybotcmd(ci, sender, text)) break;
                 if(ci && ci->connected && ci->state.aitype == AI_NONE && !strncmp(text, FRAGRT_CMD, sizeof(FRAGRT_CMD)-1))
                 {
                     int vcn = -1, fovms = 0, xhms = 0;

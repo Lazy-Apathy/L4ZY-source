@@ -1,4 +1,4 @@
-// temporal.cpp: lot 6 HUD-less native-res capture + trial jitter for a
+// temporal.cpp: stage 6 HUD-less native-res capture + trial jitter for a
 // future DLAA evaluate. Does not load NGX or apply DLSS.
 //
 // Capture point (hwrttemporalcapture): after renderavatar(), before the
@@ -420,7 +420,7 @@ void hwrttemporalcapture()
     temporal.avatar_depth = avatardepth;
     temporal.color_internalformat = int(tcolorfmt);
     temporal.color_domain = hwrthdractive()
-        ? "HDR lot2: RGBA16F copy of the linear scene FBO (gun in, HUD out), before exposure and tone mapping. Not an LDR history."
+        ? "HDR: RGBA16F copy of the linear scene FBO (gun in, HUD out), before exposure and tone mapping. Not an LDR history."
         : TEMPORAL_COLOR_DOMAIN;
     temporal.depth_convention = TEMPORAL_DEPTH_CONV;
     temporal.motion_convention = TEMPORAL_MOTION_CONV;

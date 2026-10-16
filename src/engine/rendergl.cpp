@@ -593,6 +593,113 @@ void gl_resize()
     glViewport(0, 0, screenw, screenh);
 }
 
+// MSAA window (fsaa > 0, or anti-aliasing forced by the driver). OpenGL
+// cannot copy the depth out of a multisampled window (GL_INVALID_OPERATION:
+// nothing is copied), and a stretching blit cannot read it. The passes that
+// read the window resolve it first into a single-sample copy of the same size.
+// windowmsaa is 0 without MSAA, and then none of this runs.
+int windowmsaa = 0;
+static GLuint msaadepthfb = 0, msaadepthrb = 0, msaacolourfb = 0, msaacolourtex = 0;
+static int msaadepthw = 0, msaadepthh = 0, msaacolourw = 0, msaacolourh = 0;
+
+static void cleanupmsaaread()
+{
+    if(msaadepthfb) { glDeleteFramebuffers_(1, &msaadepthfb); msaadepthfb = 0; }
+    if(msaadepthrb) { glDeleteRenderbuffers_(1, &msaadepthrb); msaadepthrb = 0; }
+    if(msaacolourfb) { glDeleteFramebuffers_(1, &msaacolourfb); msaacolourfb = 0; }
+    if(msaacolourtex) { glDeleteTextures(1, &msaacolourtex); msaacolourtex = 0; }
+    msaadepthw = msaadepthh = msaacolourw = msaacolourh = 0;
+}
+
+// Binds a resolved copy of the window depth as the read framebuffer, for a
+// glCopyTexSubImage2D of the depth; endmsaadepthread() puts the window back.
+// False (nothing changed) without MSAA or when a render target is bound.
+static bool beginmsaadepthread(int w, int h)
+{
+    if(!windowmsaa || !hasFBB || !glBlitFramebuffer_ || w < 1 || h < 1) return false;
+    GLint cur = 0;
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &cur);
+    if(cur) return false;
+    if(!msaadepthfb || msaadepthw != w || msaadepthh != h)
+    {
+        if(msaadepthfb) { glDeleteFramebuffers_(1, &msaadepthfb); msaadepthfb = 0; }
+        if(msaadepthrb) { glDeleteRenderbuffers_(1, &msaadepthrb); msaadepthrb = 0; }
+        glGenRenderbuffers_(1, &msaadepthrb);
+        glBindRenderbuffer_(GL_RENDERBUFFER, msaadepthrb);
+        glRenderbufferStorage_(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, w, h);
+        glBindRenderbuffer_(GL_RENDERBUFFER, 0);
+        glGenFramebuffers_(1, &msaadepthfb);
+        glBindFramebuffer_(GL_FRAMEBUFFER, msaadepthfb);
+        glFramebufferRenderbuffer_(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, msaadepthrb);
+        glDrawBuffer(GL_NONE);
+        glReadBuffer(GL_NONE);
+        bool ok = glCheckFramebufferStatus_(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+        glBindFramebuffer_(GL_FRAMEBUFFER, 0);
+        if(!ok)
+        {
+            glDeleteFramebuffers_(1, &msaadepthfb); msaadepthfb = 0;
+            glDeleteRenderbuffers_(1, &msaadepthrb); msaadepthrb = 0;
+            return false;
+        }
+        msaadepthw = w;
+        msaadepthh = h;
+    }
+    GLboolean scissor = glIsEnabled(GL_SCISSOR_TEST);
+    if(scissor) glDisable(GL_SCISSOR_TEST);
+    glBindFramebuffer_(GL_READ_FRAMEBUFFER, 0);
+    glBindFramebuffer_(GL_DRAW_FRAMEBUFFER, msaadepthfb);
+    glBlitFramebuffer_(0, 0, w, h, 0, 0, w, h, GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT, GL_NEAREST);
+    glBindFramebuffer_(GL_DRAW_FRAMEBUFFER, 0);
+    glBindFramebuffer_(GL_READ_FRAMEBUFFER, msaadepthfb);
+    if(scissor) glEnable(GL_SCISSOR_TEST);
+    return true;
+}
+
+static void endmsaadepthread(bool on)
+{
+    if(on) glBindFramebuffer_(GL_READ_FRAMEBUFFER, 0);
+}
+
+// Framebuffer holding a single-sample copy of the window colour, to read from
+// with a stretching blit (match videos). 0 without MSAA: read the window.
+GLuint msaawindowcolourread()
+{
+    if(!windowmsaa || !hasFBO || screenw < 1 || screenh < 1) return 0;
+    GLint prevfb = 0, prevactive = 0, prevtex = 0;
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prevfb);
+    if(prevfb) return 0;
+    glGetIntegerv(GL_ACTIVE_TEXTURE, &prevactive);
+    glActiveTexture_(GL_TEXTURE0);
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &prevtex);
+    if(!msaacolourfb || msaacolourw != screenw || msaacolourh != screenh)
+    {
+        if(msaacolourfb) { glDeleteFramebuffers_(1, &msaacolourfb); msaacolourfb = 0; }
+        if(!msaacolourtex) glGenTextures(1, &msaacolourtex);
+        createtexture(msaacolourtex, screenw, screenh, NULL, 3, 1, GL_RGB);
+        glGenFramebuffers_(1, &msaacolourfb);
+        glBindFramebuffer_(GL_FRAMEBUFFER, msaacolourfb);
+        glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, msaacolourtex, 0);
+        bool ok = glCheckFramebufferStatus_(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+        glBindFramebuffer_(GL_FRAMEBUFFER, 0);
+        if(!ok)
+        {
+            glDeleteFramebuffers_(1, &msaacolourfb); msaacolourfb = 0;
+            glBindTexture(GL_TEXTURE_2D, prevtex);
+            glActiveTexture_(GLenum(prevactive));
+            return 0;
+        }
+        msaacolourw = screenw;
+        msaacolourh = screenh;
+    }
+    // A colour copy from the window resolves the samples (the window, not a
+    // render target, so it is allowed); the blit then reads a plain texture.
+    glBindTexture(GL_TEXTURE_2D, msaacolourtex);
+    glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, screenw, screenh);
+    glBindTexture(GL_TEXTURE_2D, prevtex);
+    glActiveTexture_(GLenum(prevactive));
+    return msaacolourfb;
+}
+
 void gl_init()
 {
     glClearColor(0, 0, 0, 0);
@@ -614,6 +721,11 @@ void gl_init()
     setuptexcompress();
 
     gl_resize();
+
+    GLint samplebuffers = 0, samples = 0;
+    glGetIntegerv(GL_SAMPLE_BUFFERS, &samplebuffers);
+    if(samplebuffers > 0) glGetIntegerv(GL_SAMPLES, &samples);
+    windowmsaa = samplebuffers > 0 ? max(int(samples), 1) : 0;
 
     hwrtinit();
     hdrout_start();
@@ -2064,7 +2176,9 @@ void addlookao()
     glBindTexture(GL_TEXTURE_2D, lookaocolor);
     glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, pw, ph);
     glBindTexture(GL_TEXTURE_2D, lookaodepth);
+    bool msaaread = beginmsaadepthread(pw, ph);
     glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, pw, ph);
+    endmsaadepthread(msaaread);
 
     Shader *s = useshaderbyname("lookssao");
     if(!s || s->invalid()) return;
@@ -2225,7 +2339,9 @@ void rendergtao()
     // World + mapmodels depth, players not drawn yet.
     glActiveTexture_(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, gtaodepthtex);
+    bool msaaread = beginmsaadepthread(w, h);
     glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, w, h);
+    endmsaadepthread(msaaread);
 
     bool depthtest = glIsEnabled(GL_DEPTH_TEST) != 0, cull = glIsEnabled(GL_CULL_FACE) != 0,
          stencil = glIsEnabled(GL_STENCIL_TEST) != 0, blend = glIsEnabled(GL_BLEND) != 0;
@@ -2437,7 +2553,9 @@ void addlooktaa()
     glBindTexture(GL_TEXTURE_2D, looktaacolor);
     glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, screenw, screenh);
     glBindTexture(GL_TEXTURE_2D, looktaadepth);
+    bool msaaread = beginmsaadepthread(screenw, screenh);
     glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, screenw, screenh);
+    endmsaadepthread(msaaread);
 
     Shader *s = useshaderbyname("looktaa");
     if(!s || s->invalid()) return;
@@ -2602,6 +2720,7 @@ void gl_drawframe()
     renderparticles(true);
     hwrtdlaabiascapture();
     hwrtvelstencilsnap("after_particles");
+    demoxraysnapdepth();
 
     glDisable(GL_CULL_FACE);
     glDisable(GL_DEPTH_TEST);
@@ -2613,14 +2732,14 @@ void gl_drawframe()
         if(!noted)
         {
             noted = 1;
-            conoutf(CON_WARN, "hdr lot2: lookao, looktaa et motionblur exclus. glare non ajoute; la cible scene FP16 reste en memoire.");
+            conoutf(CON_WARN, "hdr check: lookao, looktaa and motionblur excluded, glare not added; the FP16 scene target stays in memory.");
         }
     }
     else
     {
         addmotionblur();
         // RT traces the sky occlusion itself; lookao on top of it darkened every flat floor and wall seen
-        // at a slant, most at 45-130 units, a ring that follows the player (rt-cercle-joueur).
+        // at a slant, most at 45-130 units, a ring that follows the player.
         if(!gtaoapplied && !hwrtnobake()) addlookao();
         addlooktaa();
     }
@@ -2646,6 +2765,7 @@ void gl_drawframe()
     if(isliquid(fogmat&MATF_VOLUME)) drawfogoverlay(fogmat, fogblend, abovemat);
     renderpostfx();
 
+    demoxraydraw();
     gl_drawhud();
     hwrtdlaaafterhud();
 
@@ -3131,8 +3251,10 @@ void cleanupgl()
 
     cleanupmotionblur();
     cleanuplooktaa();
+    cleanupmsaaread();
     cleanupvelocity();
     cleanuptemporal();
+    cleanupdemoxray();
 
     clearminimap();
 
@@ -3142,3 +3264,211 @@ void cleanupgl()
 }
 
 
+
+// Demo X-ray. Only in a demo played on this computer: game::demoxrayactive()
+// is tested every frame and is false anywhere else, and then nothing below
+// runs. Once the world is drawn its depth is copied (demoxraysnapdepth); after
+// the frame (and after DLAA/DLSS) every player still in the game is drawn into
+// a mask at screen size, in their colour (alpha 1 = hidden, 0.5 = seen); the
+// mask becomes an outline (and a light fill) of the hidden parts, put on the
+// screen with the HUD shader, so native HDR treats it like the HUD.
+bool demoxraypass = false;
+VARP(demoxraystyle, 0, 0, 1); // 0 outline only (default), 1 outline and a light fill
+
+static GLuint xraydepthtex = 0, xraymaskfb = 0, xraymasktex = 0, xraymaskdepth = 0, xrayedgefb = 0, xrayedgetex = 0;
+static int xraydepthw = 0, xraydepthh = 0, xraymaskw = 0, xraymaskh = 0;
+static bool xraysnapped = false;
+
+static void releasedemoxraytargets()
+{
+    if(xraymaskfb) { glDeleteFramebuffers_(1, &xraymaskfb); xraymaskfb = 0; }
+    if(xrayedgefb) { glDeleteFramebuffers_(1, &xrayedgefb); xrayedgefb = 0; }
+    if(xraymaskdepth) { glDeleteRenderbuffers_(1, &xraymaskdepth); xraymaskdepth = 0; }
+    if(xraymasktex) { glDeleteTextures(1, &xraymasktex); xraymasktex = 0; }
+    if(xrayedgetex) { glDeleteTextures(1, &xrayedgetex); xrayedgetex = 0; }
+    xraymaskw = xraymaskh = 0;
+}
+
+void cleanupdemoxray()
+{
+    releasedemoxraytargets();
+    if(xraydepthtex) { glDeleteTextures(1, &xraydepthtex); xraydepthtex = 0; }
+    xraydepthw = xraydepthh = 0;
+    xraysnapped = false;
+}
+
+void demoxraycolour(int rgb)
+{
+    GLOBALPARAMF(demoxraycolor, ((rgb>>16)&0xFF)/255.0f, ((rgb>>8)&0xFF)/255.0f, (rgb&0xFF)/255.0f, 1.0f);
+}
+
+static void demoxraytexparams()
+{
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+}
+
+void demoxraysnapdepth()
+{
+    xraysnapped = false;
+    if(!game::demoxrayactive() || !hasFBO) return;
+    GLint vp[4] = { 0, 0, 0, 0 };
+    glGetIntegerv(GL_VIEWPORT, vp);
+    int w = vp[2], h = vp[3];
+    if(w < 1 || h < 1) return;
+    GLint oldtex = 0;
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &oldtex);
+    if(!xraydepthtex) glGenTextures(1, &xraydepthtex);
+    glBindTexture(GL_TEXTURE_2D, xraydepthtex);
+    if(w != xraydepthw || h != xraydepthh)
+    {
+        xraydepthw = w;
+        xraydepthh = h;
+        demoxraytexparams();
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, w, h, 0, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, NULL);
+    }
+    bool msaaread = beginmsaadepthread(w, h);
+    glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, vp[0], vp[1], w, h);
+    endmsaadepthread(msaaread);
+    glBindTexture(GL_TEXTURE_2D, oldtex);
+    xraysnapped = true;
+}
+
+static bool demoxraytargets(int w, int h)
+{
+    if(xraymaskfb && xrayedgefb && xraymaskw == w && xraymaskh == h) return true;
+    releasedemoxraytargets();
+    GLuint *texs[2] = { &xraymasktex, &xrayedgetex };
+    loopi(2)
+    {
+        glGenTextures(1, texs[i]);
+        glBindTexture(GL_TEXTURE_2D, *texs[i]);
+        demoxraytexparams();
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+    }
+    glGenRenderbuffers_(1, &xraymaskdepth);
+    glBindRenderbuffer_(GL_RENDERBUFFER, xraymaskdepth);
+    glRenderbufferStorage_(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, w, h);
+    glBindRenderbuffer_(GL_RENDERBUFFER, 0);
+    glGenFramebuffers_(1, &xraymaskfb);
+    glBindFramebuffer_(GL_FRAMEBUFFER, xraymaskfb);
+    glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, xraymasktex, 0);
+    glFramebufferRenderbuffer_(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, xraymaskdepth);
+    bool ok = glCheckFramebufferStatus_(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+    glGenFramebuffers_(1, &xrayedgefb);
+    glBindFramebuffer_(GL_FRAMEBUFFER, xrayedgefb);
+    glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, xrayedgetex, 0);
+    ok = ok && glCheckFramebufferStatus_(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+    if(!ok)
+    {
+        releasedemoxraytargets();
+        return false;
+    }
+    xraymaskw = w;
+    xraymaskh = h;
+    return true;
+}
+
+void demoxraydraw()
+{
+    if(!xraysnapped) return;
+    xraysnapped = false;
+    int w = screenw, h = screenh;
+    if(!game::demoxrayactive() || w < 1 || h < 1) return;
+    Shader *edge = useshaderbyname("demoxrayedge"), *mdl = useshaderbyname("demoxraymodel");
+    if(!edge || edge->invalid() || !mdl || mdl->invalid()) return;
+
+    GLint oldfb = 0, oldvp[4] = { 0, 0, w, h }, oldactive = GL_TEXTURE0, oldtex0 = 0, oldtex7 = 0, olddepthfunc = GL_LESS, oldsrc = GL_SRC_ALPHA, olddst = GL_ONE_MINUS_SRC_ALPHA;
+    GLfloat oldclear[4] = { 0, 0, 0, 0 };
+    GLboolean olddepthmask = GL_TRUE;
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &oldfb);
+    glGetIntegerv(GL_VIEWPORT, oldvp);
+    glGetFloatv(GL_COLOR_CLEAR_VALUE, oldclear);
+    glGetIntegerv(GL_DEPTH_FUNC, &olddepthfunc);
+    glGetBooleanv(GL_DEPTH_WRITEMASK, &olddepthmask);
+    glGetIntegerv(GL_BLEND_SRC_RGB, &oldsrc);
+    glGetIntegerv(GL_BLEND_DST_RGB, &olddst);
+    glGetIntegerv(GL_ACTIVE_TEXTURE, &oldactive);
+    glActiveTexture_(GL_TEXTURE7);
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &oldtex7);
+    glActiveTexture_(GL_TEXTURE0);
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &oldtex0);
+    bool olddepth = glIsEnabled(GL_DEPTH_TEST) != 0, oldcull = glIsEnabled(GL_CULL_FACE) != 0, oldblend = glIsEnabled(GL_BLEND) != 0,
+         oldstencil = glIsEnabled(GL_STENCIL_TEST) != 0, oldscissor = glIsEnabled(GL_SCISSOR_TEST) != 0;
+
+    if(demoxraytargets(w, h))
+    {
+        glDisable(GL_BLEND);
+        glDisable(GL_STENCIL_TEST);
+        glDisable(GL_SCISSOR_TEST);
+
+        // 1. players into the mask, own depth for the order between players
+        glBindFramebuffer_(GL_FRAMEBUFFER, xraymaskfb);
+        glViewport(0, 0, w, h);
+        glClearColor(0, 0, 0, 0);
+        glDepthMask(GL_TRUE);
+        glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
+        glEnable(GL_DEPTH_TEST);
+        glDepthFunc(GL_LESS);
+        glEnable(GL_CULL_FACE);
+        glActiveTexture_(GL_TEXTURE7);
+        glBindTexture(GL_TEXTURE_2D, xraydepthtex);
+        glActiveTexture_(GL_TEXTURE0);
+        // the image is final here: same camera without the DLAA/TAA sub-pixel shift
+        matrix4 oldproj = projmatrix, oldcamproj = camprojmatrix;
+        projmatrix.perspective(fovy, aspect, nearplane, farplane);
+        setcamprojmatrix(false);
+        GLOBALPARAMF(demoxraydepth, 1.0f/w, 1.0f/h, nearplane, farplane);
+        demoxraypass = true;
+        game::renderdemoxray();
+        demoxraypass = false;
+        projmatrix = oldproj;
+        camprojmatrix = oldcamproj;
+        GLOBALPARAM(camprojmatrix, camprojmatrix);
+
+        // 2. mask -> outline (and fill)
+        glDisable(GL_DEPTH_TEST);
+        glDisable(GL_CULL_FACE);
+        glDepthMask(GL_FALSE);
+        glBindFramebuffer_(GL_FRAMEBUFFER, xrayedgefb);
+        glClear(GL_COLOR_BUFFER_BIT);
+        edge->set();
+        LOCALPARAMF(demoxrayedge, 1.0f/w, 1.0f/h, demoxraystyle ? 0.3f : 0.0f, float(clamp((h + 270)/540, 1, 3)));
+        glBindTexture(GL_TEXTURE_2D, xraymasktex);
+        screenquad(1, 1);
+
+        // 3. on the screen like the HUD
+        glBindFramebuffer_(GL_FRAMEBUFFER, oldfb);
+        glViewport(oldvp[0], oldvp[1], oldvp[2], oldvp[3]);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        hudmatrix.ortho(0, w, h, 0, -1, 1);
+        resethudmatrix();
+        hudshader->set();
+        gle::colorf(1, 1, 1, 1);
+        glBindTexture(GL_TEXTURE_2D, xrayedgetex);
+        hudquad(0, 0, w, h, 0, 1, 1, -1);
+    }
+    else
+    {
+        glBindFramebuffer_(GL_FRAMEBUFFER, oldfb);
+        glViewport(oldvp[0], oldvp[1], oldvp[2], oldvp[3]);
+    }
+
+    glClearColor(oldclear[0], oldclear[1], oldclear[2], oldclear[3]);
+    glDepthFunc(GLenum(olddepthfunc));
+    glDepthMask(olddepthmask);
+    glBlendFunc(GLenum(oldsrc), GLenum(olddst));
+    if(olddepth) glEnable(GL_DEPTH_TEST); else glDisable(GL_DEPTH_TEST);
+    if(oldcull) glEnable(GL_CULL_FACE); else glDisable(GL_CULL_FACE);
+    if(oldblend) glEnable(GL_BLEND); else glDisable(GL_BLEND);
+    if(oldstencil) glEnable(GL_STENCIL_TEST); else glDisable(GL_STENCIL_TEST);
+    if(oldscissor) glEnable(GL_SCISSOR_TEST); else glDisable(GL_SCISSOR_TEST);
+    glActiveTexture_(GL_TEXTURE7);
+    glBindTexture(GL_TEXTURE_2D, oldtex7);
+    glActiveTexture_(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, oldtex0);
+    glActiveTexture_(GLenum(oldactive));
+}

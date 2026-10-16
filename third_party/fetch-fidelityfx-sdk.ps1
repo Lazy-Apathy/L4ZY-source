@@ -5,7 +5,7 @@ $ErrorActionPreference = "Stop"
 # shipping the Vulkan backend. Only sdk/, ffx-api/, docs/ and LICENSE.txt are
 # checked out: no samples, no media, no prebuilt signed DLLs (they also contain
 # frame generation, which this project never uses).
-# Lot copy: shots\fsr-lot1\third_party. On integration this script moves to third_party\.
+# Lives in third_party\; by default the SDK is cloned next to it (third_party\FidelityFX-SDK).
 $tag = "v1.1.4"
 $commit = "c6efa6bf7f2027b3ec94f28578bb5965eabb9e55"
 $dest = if ($args.Count -gt 0) { $args[0] } else { Join-Path $PSScriptRoot "FidelityFX-SDK" }

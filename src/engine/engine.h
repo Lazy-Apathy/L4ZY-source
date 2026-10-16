@@ -179,6 +179,10 @@ extern void addlookao();
 extern void cleanuplookao();
 extern void addlooktaa();
 extern void cleanuplooktaa();
+extern bool demoxraypass;
+extern void demoxraysnapdepth();
+extern void demoxraydraw();
+extern void cleanupdemoxray();
 extern void hwrtapplyvelspin();
 extern void hwrtnotecamproj();
 extern void hwrttemporalbeginframe();
@@ -258,7 +262,7 @@ extern void hwrttemporalsetreset(bool reset);
 extern void hwrttemporalfprint(FILE *f);
 extern void hwrttemporalanalytic(float &dx_px, float &dy_px);
 
-// Lot 6 HUD-less 3D image for a future native-res DLAA evaluate.
+// Stage 6 HUD-less 3D image for a future native-res DLAA evaluate.
 // GPU textures; .valid is true only after hwrttemporalcapture() of a coherent
 // same-frame resource set (colour, depth, and velocity when hwrtvelocity is
 // on), until the next main gl_drawframe overwrites them (.valid_until).

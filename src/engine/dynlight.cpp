@@ -155,7 +155,7 @@ int finddynlights()
 // slight flicker; a burst rises in about 30 ms, decays smoothly and cools. 0:
 // GL's own radius, colour and fade (the first version). Not saved.
 VAR(hwrtdynshape, 0, 2, 2);
-// Lab tuning, not saved: muzzle peak over GL's colour, ms at full intensity and
+// Debug tuning, not saved: muzzle peak over GL's colour, ms at full intensity and
 // decay constant; projectile intensity, radius and flicker depth; burst
 // intensity and rise; scale of the light source radius (soft shadows, 0 = hard).
 FVAR(hwrtdynmuzzle, 0, 1.8f, 8);
@@ -167,7 +167,7 @@ FVAR(hwrtdynprojpulse, 0, 0.12f, 0.5f);
 FVAR(hwrtdynburst, 0, 1, 8);
 VAR(hwrtdynburstrise, 1, 30, 200);
 FVAR(hwrtdynsoft, 0, 1, 4);
-// Shape 2, lab, not saved: rifle flash variant (1) or the shape-1 flash (0), its
+// Shape 2, debug, not saved: rifle flash variant (1) or the shape-1 flash (0), its
 // peak over GL's colour, ms at full intensity, decay constant and radius scale;
 // grenade in flight intensity and radius over the projectile ones.
 VAR(hwrtdynrifle, 0, 1, 1);

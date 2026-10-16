@@ -32,7 +32,7 @@ VAR(hwrtnrddbg, 0, 0, 10);
 VAR(hwrtnrdantilag, 0, 1, 1);
 // Fast history on (6 frames). 0 = disabled (>= maxAccumulatedFrameNum).
 VAR(hwrtnrdfast, 0, 1, 1);
-// rt-performance-lot4: lighter sky denoiser, off by default (image changes).
+// Performance option: lighter sky denoiser, off by default (image changes).
 // 1 = no temporal stabilisation pass and no anti-firefly; 2 = also half the
 // blur radius. Needs the gateway built from this source (older ones ignore it).
 VARP(hwrtnrdlight, 0, 0, 2);

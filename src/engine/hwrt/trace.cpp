@@ -1704,7 +1704,7 @@ static void recordskyhistbarrier(VkCommandBuffer cmd)
     skyhistfresh = false;
 }
 
-// rt-performance-lot4, all off by default (the image changes).
+// Performance options, all off by default (the image changes).
 // hwrtskyrange: how far a sky ray looks for an occluder (world units, 0 = to the
 // far plane). Beyond that it counts as open sky: far less traversal outdoors,
 // big halls with a ceiling higher than this get some sky light.

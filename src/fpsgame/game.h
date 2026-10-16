@@ -266,6 +266,13 @@ enum
 // itself (N_GETDEMO num), once; the server never sends a demo unasked.
 #define AUTODEMO_CMD "l4zy/autodemo/v1"
 #define DEMOREADY_CMD "l4zy/demoready/v1"
+// Tiny Apa bots on clan servers (after the clanmod handshake only):
+// client -> server "l4zy/botstyle/v1 <bot cn> <0|2>": how this game plays a bot it runs (the server names it);
+// client -> server "l4zy/addbot/v1 <skill> <0|2>": /addbot with a style (same rights as /addbot);
+// server -> client "l4zy/botplay/v1 <bot cn> 2": play this bot as Tiny Apa, whatever botperception says.
+#define BOTSTYLE_CMD "l4zy/botstyle/v1"
+#define ADDBOT_CMD "l4zy/addbot/v1"
+#define BOTPLAY_CMD "l4zy/botplay/v1"
 
 static const int msgsizes[] =               // size inclusive message token, 0 for variable or not-checked sizes
 {
@@ -841,6 +848,8 @@ namespace game
     extern const char *translatelangsof(fpsent *d);
     extern int clanmod;
     extern bool clanmodactive();
+    extern bool tinyapaserver();
+    extern void addbotstyled(int skill, const char *style);
     extern void announceautodemo();
 
     // friends (nicks + one clan tag, never IPs)
@@ -864,6 +873,10 @@ namespace game
     extern int selfcolorindex();
     extern int selfrgb();
     extern char selfcolcode();
+    extern bool demoxrayallowed();
+    extern void demoxrayreset();
+    extern void toggledemoxray();
+    extern int showscoreboard;
     extern void loadfriends();
     extern void pollfriends();
 
@@ -980,6 +993,8 @@ namespace demohd
     int namecolor(fpsent *d, int fallback);
     void drawhud(int w, int h);
     bool barkey(int code, bool isdown);
+    void drawspec(int w, int h);
+    bool speccursor();
     void installsidecar(const char *dmoname, const uchar *data, int len);
     bool autodemolocal(const char *map, int mode, char *stem, int stemlen, int &elapsed);
     bool autodemoreplace(const char *stem, const char *map, int mode, int cn, int elapsed, const uchar *dmodata, int dmolen, const uchar *hddata, int hdlen);

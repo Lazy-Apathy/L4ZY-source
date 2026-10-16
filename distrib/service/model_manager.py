@@ -274,6 +274,32 @@ def endpoint():
     return llama_runtime.llm_url({}), "qwen3", ""
 
 
+def no_ai():
+    """Vrai quand aucune IA ne peut traduire : ni cle API, ni serveur choisi,
+    ni modele local utilisable. Sans requete reseau : appele a chaque message
+    (sinon chaque message attendait ~2 s le refus d'un port ferme)."""
+    with _lock:
+        if _api_key.strip() or (_cfg.get("llm_url") or "").strip():
+            return False
+        if _busy == "loading":
+            return False
+    if (_cfg.get("translation") or "on").strip().lower() in ("off", "0", "no"):
+        return True
+    if not _active_gguf():
+        return True
+    return not llama_runtime._running() and bool(llama_runtime.last_error())
+
+
+def ai_state():
+    """Pour le jeu (/update) : 0 aucune IA, 1 IA prete, 2 IA en chargement."""
+    if no_ai():
+        return 0
+    with _lock:
+        if _api_key.strip() or (_cfg.get("llm_url") or "").strip():
+            return 1
+    return 1 if llama_runtime.is_up(_cfg, timeout=0.4) else 2
+
+
 def _backend_label():
     m = llama_runtime.mode()
     if m == "gpu":

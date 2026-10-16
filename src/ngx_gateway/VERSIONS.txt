@@ -32,7 +32,7 @@ ABI
   SAUER_NGX_ABI_VERSION 2  (kept as bin64/ngx-sr/sauer_ngx-abi2-*.dll — previous Quality pair)
   SAUER_NGX_ABI_VERSION 1  (bin64/ngx/sauer_ngx.dll — frozen DLAA play client, do not overwrite)
 
-DLSS Programming Guide 310.6.0 conformance (checked 2026-10-04, shots/dlss-conformite)
+DLSS Programming Guide 310.6.0 conformance (checked 2026-10-04)
   Init        Init_with_ProjectID, CUSTOM engine, API 0x15; SuperSampling.Available, NeedsUpdatedDriver and
               FeatureInitResult checked (5.2.6); Shutdown1(device) (5.6/5.7).
   Logging     NGX level ON, not VERBOSE (3.19).

@@ -572,7 +572,7 @@ modelbatch &addbatchedmodel(model *m)
     return *b;
 }
 
-// Integration HDR lot 1. Players (MDL_FULLBRIGHT) and CTF flags are shaded as
+// HDR stage 1. Players (MDL_FULLBRIGHT) and CTF flags are shaded as
 // on an SDR screen in native HDR (modelshader hdrmdlsdr): their overbright plate
 // and lamp-lit base must not become HDR highlights. Mapmodels keep the HDR path.
 static void sethdrmodelsdr(model *m, int flags)
@@ -820,8 +820,31 @@ static inline int cullmodel(model *m, const vec &center, float radius, int flags
     return 0;
 }
 
+// Demo X-ray pass (rendergl.cpp, demoxraydraw): the body and its weapon only,
+// drawn at once with the X-ray shader. No culling, no occlusion query, no RT,
+// light or velocity bookkeeping: nothing of the normal frame changes.
+static void renderdemoxraymodel(const char *mdl, int anim, const vec &o, float yaw, float pitch, dynent *d, modelattach *a, int basetime, int basetime2)
+{
+    if(anim&ANIM_RAGDOLL) return;
+    model *m = loadmodel(mdl);
+    if(!m) return;
+    modelattach xa[2];
+    int n = 0;
+    if(a) for(int i = 0; a[i].tag; i++) if(a[i].name && !strcmp(a[i].tag, "tag_weapon"))
+    {
+        xa[0] = a[i];
+        xa[0].m = loadmodel(a[i].name);
+        if(xa[0].m) n = 1;
+        break;
+    }
+    m->startrender();
+    m->render(anim|ANIM_NOSKIN, basetime, basetime2, o, yaw, pitch, d, n ? xa : NULL, vec(1, 1, 1), vec(0, 0, 1), 1);
+    m->endrender();
+}
+
 void rendermodel(entitylight *light, const char *mdl, int anim, const vec &o, float yaw, float pitch, int flags, dynent *d, modelattach *a, int basetime, int basetime2, float trans)
 {
+    if(demoxraypass) { renderdemoxraymodel(mdl, anim, o, yaw, pitch, d, a, basetime, basetime2); return; }
     if(shadowmapping && !(flags&(MDL_SHADOW|MDL_DYNSHADOW))) return;
     if(!shadowmapping && !glaring && !reflecting && !refracting)
         hwrtnotescenemodel(mdl, o, yaw, pitch, flags, d);

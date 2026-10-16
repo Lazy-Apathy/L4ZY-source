@@ -44,7 +44,7 @@ bool hdrout_lightfix_wanted();
 int hdrout_skyfix_level();
 int hdrout_colorfix_level();
 int hdrout_dayfix_level();
-// Lot 8 proposal: dose of the lot 7 colour gain (percent) with the daylight response.
+// Stage 8 proposal: dose of the stage 7 colour gain (percent) with the daylight response.
 #define HDRJOUR_COULEUR 25
 static void lot5_params(float ref, float peak, float &la, float &sa, float &span);
 static void lot6_params(float ref, float peak, float &b, float &span);
@@ -206,24 +206,24 @@ static const char *mode_name()
     return "apercu_sdr_surface_hdr";
 }
 
-// RT lighting composes the world and opaque models. The lot 4 light colour
+// RT lighting composes the world and opaque models. The stage 4 light colour
 // correction is for the classic lightmap lighting only.
 static bool rt_lighting()
 {
     return hwrt && hwrtavailable && !hwrtfailed;
 }
 
-// 8 = lot 8 proposal (lot 7 chain + daylight response of lit materials, hdroutjour, with
-// the lot 7 colour at HDRJOUR_COULEUR percent), 82 / 83 = lot 8 diagnostics: daylight
-// response without the lot 7 colour / with another colour dose (hdroutjourcouleur),
-// 7 = lot 7 (lot 6 chain + daylight material colours, hdroutcouleur),
-// 6 = lot 6 proposal (curve 4 + sky colours and exposed sky, on the lot 5 scene),
-// 5 = lot 5 reference (curve 3 + lot 5 light response + flame target),
-// 4 = lot 4 (curve 2 + classic light colour), 3 = lot 3 (curve 2 alone),
-// 1 = restitution lot 1 correction, 0 = first native output. -1 = console-only mix.
-// Lot 6 diagnostics on the lot 5 chain: 61 = curve 4 alone, 62 = sky alone
+// 8 = stage 8 proposal (stage 7 chain + daylight response of lit materials, hdroutjour, with
+// the stage 7 colour at HDRJOUR_COULEUR percent), 82 / 83 = stage 8 diagnostics: daylight
+// response without the stage 7 colour / with another colour dose (hdroutjourcouleur),
+// 7 = stage 7 (stage 6 chain + daylight material colours, hdroutcouleur),
+// 6 = stage 6 proposal (curve 4 + sky colours and exposed sky, on the stage 5 scene),
+// 5 = stage 5 reference (curve 3 + stage 5 light response + flame target),
+// 4 = stage 4 (curve 2 + classic light colour), 3 = stage 3 (curve 2 alone),
+// 1 = restitution stage 1 correction, 0 = first native output. -1 = console-only mix.
+// Stage 6 diagnostics on the stage 5 chain: 61 = curve 4 alone, 62 = sky alone
 // (colours + exposed sky), 63 = sky colours alone, 64 = curve 4 + sky colours.
-// Lot 5 diagnostics on the lot 4 chain: 51 = flames alone, 52 = bright tones alone
+// Stage 5 diagnostics on the stage 4 chain: 51 = flames alone, 52 = bright tones alone
 // (light response + curve 3), 53 = curve 3 alone, 54 = light response alone.
 static int variant_lot()
 {
@@ -277,30 +277,30 @@ static const char *curve_name()
     return "combinaison_diagnostic";
 }
 
-static const char LABEL_LOT8[] = "HDR natif - Nouvelle proposition (lot8)";
-static const char LABEL_D82[] = "HDR natif - Diagnostic lot8 : r" CUBE_E_AIGU "ponse de jour sans couleur lot7";
-static const char LABEL_D83[] = "HDR natif - Diagnostic lot8 : r" CUBE_E_AIGU "ponse de jour, autre dosage de couleur";
-static const char LABEL_LOT7[] = "HDR natif - R" CUBE_E_AIGU "f" CUBE_E_AIGU "rence pr" CUBE_E_AIGU "c" CUBE_E_AIGU "dente (lot7)";
-static const char LABEL_LOT6[] = "HDR natif - Historique (lot6)";
-static const char LABEL_D61[] = "HDR natif - Diagnostic lot6 : courbe seule";
-static const char LABEL_D62[] = "HDR natif - Diagnostic lot6 : ciel seul";
-static const char LABEL_D63[] = "HDR natif - Diagnostic lot6 : teinte du ciel seule";
-static const char LABEL_D64[] = "HDR natif - Diagnostic lot6 : courbe et teinte du ciel";
-static const char LABEL_LOT5[] = "HDR natif - Historique (lot5)";
-static const char LABEL_LOT4[] = "HDR natif - Historique (lot4)";
-static const char LABEL_D51[] = "HDR natif - Diagnostic lot5 : flammes seules";
-static const char LABEL_D52[] = "HDR natif - Diagnostic lot5 : tons clairs seuls";
-static const char LABEL_D53[] = "HDR natif - Diagnostic lot5 : courbe seule";
-static const char LABEL_D54[] = "HDR natif - Diagnostic lot5 : lumi" "\x8A" "re seule";
-static const char LABEL_LOT3[] = "HDR natif - Historique (lot3)";
-static const char LABEL_LOT1[] = "HDR natif - Ancienne correction (lot1)";
-static const char LABEL_ORIG[] = "HDR natif - Origine (sortie lot1)";
-static const char LABEL_MIX[] = "HDR natif - Combinaison de diagnostic";
-static const char LABEL_APERCU5[] = "HDR interne pr" CUBE_E_AIGU "sent" CUBE_E_AIGU " en SDR (lot5)";
-static const char LABEL_APERCU4[] = "HDR interne pr" CUBE_E_AIGU "sent" CUBE_E_AIGU " en SDR (lot4)";
-static const char LABEL_APERCU3[] = "HDR interne pr" CUBE_E_AIGU "sent" CUBE_E_AIGU " en SDR (lot3)";
-static const char LABEL_SDR[] = "SDR de base";
-static const char LABEL_REPLI[] = "SDR - sortie HDR indisponible";
+static const char LABEL_LOT8[] = "Native HDR - Current tuning";
+static const char LABEL_D82[] = "Native HDR - Diagnostic: daylight response without the colour gain";
+static const char LABEL_D83[] = "Native HDR - Diagnostic: daylight response, other colour dose";
+static const char LABEL_LOT7[] = "Native HDR - Previous tuning (daylight colours)";
+static const char LABEL_LOT6[] = "Native HDR - Earlier tuning (sky colours)";
+static const char LABEL_D61[] = "Native HDR - Diagnostic: curve 4 alone";
+static const char LABEL_D62[] = "Native HDR - Diagnostic: sky alone";
+static const char LABEL_D63[] = "Native HDR - Diagnostic: sky tint alone";
+static const char LABEL_D64[] = "Native HDR - Diagnostic: curve 4 and sky tint";
+static const char LABEL_LOT5[] = "Native HDR - Earlier tuning (flames)";
+static const char LABEL_LOT4[] = "Native HDR - Earlier tuning (light colour)";
+static const char LABEL_D51[] = "Native HDR - Diagnostic: flames alone";
+static const char LABEL_D52[] = "Native HDR - Diagnostic: bright tones alone";
+static const char LABEL_D53[] = "Native HDR - Diagnostic: curve 3 alone";
+static const char LABEL_D54[] = "Native HDR - Diagnostic: light response alone";
+static const char LABEL_LOT3[] = "Native HDR - Earlier tuning (curve 2)";
+static const char LABEL_LOT1[] = "Native HDR - First correction (curve 1)";
+static const char LABEL_ORIG[] = "Native HDR - Original output";
+static const char LABEL_MIX[] = "Native HDR - Diagnostic combination";
+static const char LABEL_APERCU5[] = "Internal HDR shown in SDR (flames and light)";
+static const char LABEL_APERCU4[] = "Internal HDR shown in SDR (light colour)";
+static const char LABEL_APERCU3[] = "Internal HDR shown in SDR (curve 2)";
+static const char LABEL_SDR[] = "Base SDR";
+static const char LABEL_REPLI[] = "SDR - HDR output unavailable";
 
 static const char *native_label()
 {
@@ -328,8 +328,8 @@ static const char *native_label()
     return LABEL_MIX;
 }
 
-// The preview has its own per-channel curve: only the scene changes apply. The lot 6
-// sky changes are native-only (hdrout_skyfix_level), so the preview stays the lot 5 one.
+// The preview has its own per-channel curve: only the scene changes apply. The stage 6
+// sky changes are native-only (hdrout_skyfix_level), so the preview stays the stage 5 one.
 static const char *apercu_label()
 {
     if(hdroutflamme || hdroutlumiere >= 2) return LABEL_APERCU5;
@@ -376,8 +376,8 @@ static const char *label_key(const char *label)
 static const char *lighting_label()
 {
     if(rt_lighting())
-        return (hdroutlumiere || hdroutcouleur || hdroutjour) ? CUBE_E_MAJ "clairage : RT (corrections classiques de lumi" "\x8A" "re et de couleur inactives en RT)" : CUBE_E_MAJ "clairage : RT";
-    return CUBE_E_MAJ "clairage : classique, sans RT";
+        return (hdroutlumiere || hdroutcouleur || hdroutjour) ? "Lighting: RT (classic light and colour corrections inactive in RT)" : "Lighting: RT";
+    return "Lighting: classic, no RT";
 }
 
 // Effective image of this frame. Voluntary base SDR is not an error fallback.
@@ -540,27 +540,27 @@ VARP(hdroutmax, 0, 0, 10000);
 VARP(hdrouthud, 0, 0, 480);
 VAR(hdroutmire, 0, 0, 1);
 VAR(hdroutread, 0, 0, 1);
-// 0 = linear native path (first native output). 1 = restitution lot 1 curve.
-// 2 = lot 3 curve: same white and same shoulder, body opened below reference white.
-// 3 = lot 5 curve: curve 2 up to scene 0.12, then a local contrast that eases from
+// 0 = linear native path (first native output). 1 = restitution stage 1 curve.
+// 2 = stage 3 curve: same white and same shoulder, body opened below reference white.
+// 3 = stage 5 curve: curve 2 up to scene 0.12, then a local contrast that eases from
 // the curve 2 one down to 0.55 instead of dipping near 0.2, then a soft limit at the peak.
-// 4 = lot 6 curve: curve 3 up to scene LOT6_Y0; above, a bright-tone gain that grows
+// 4 = stage 6 curve: curve 3 up to scene LOT6_Y0; above, a bright-tone gain that grows
 // smoothly in log up to LOT6_GAIN at LOT6_Y1, then the soft limit at the peak.
 VARF(hdroutcurve, 0, 4, 4, hdrout_on_curve());
-// 1 = lot 4: lightmap / dynamic / model light colours take the chromaticity they had
-// on the historical display, at the lot 3 luminance (glsl.cfg hdrlightchroma).
-// 2 = lot 5: same colour, and overbright light (albedo multiplier above 1) takes back
-// its historical luminance response. Classic lighting only. 0 = the lot 3 scene. Not saved.
+// 1 = stage 4: lightmap / dynamic / model light colours take the chromaticity they had
+// on the historical display, at the stage 3 luminance (glsl.cfg hdrlightchroma).
+// 2 = stage 5: same colour, and overbright light (albedo multiplier above 1) takes back
+// its historical luminance response. Classic lighting only. 0 = the stage 3 scene. Not saved.
 VARF(hdroutlumiere, 0, 2, 2, hdrout_on_scene());
-// 1 = lot 5: additive flames summed apart, encoded, then composed with the hue of
+// 1 = stage 5: additive flames summed apart, encoded, then composed with the hue of
 // the 8-bit clipped sum (renderparticles.cpp). HDR scene, classic and RT. Not saved.
 VARF(hdroutflamme, 0, 1, 1, hdrout_on_scene());
-// 1 = lot 6: sky tint colours (skybox, cloud box, cloud layer, fog dome) decoded as the
+// 1 = stage 6: sky tint colours (skybox, cloud box, cloud layer, fog dome) decoded as the
 // 8-bit display colours they are. 2 = same, and the saturated blue sky, whose luminance
-// is that of a shadow, takes the lot 6 gain (glsl.cfg skybox). Native HDR only: the base
-// SDR and preview witnesses keep lot 5.
+// is that of a shadow, takes the stage 6 gain (glsl.cfg skybox). Native HDR only: the base
+// SDR and preview witnesses keep stage 5.
 VARF(hdroutciel, 0, 2, 2, hdrout_on_scene());
-// 1 = lot 7: daylight material colours. In the classic world, grass and model shaders
+// 1 = stage 7: daylight material colours. In the classic world, grass and model shaders
 // (glsl.cfg hdrmatcouleur), the decoded albedo of moderately coloured materials moves
 // away from its own luminance (luminance kept, +15 % at most) when the light on it is
 // not strongly coloured and as strong as direct daylight, and the lit surface is out of
@@ -568,14 +568,14 @@ VARF(hdroutciel, 0, 2, 2, hdrout_on_scene());
 // shade, sky, particles and flames are left alone.
 // Native HDR and classic lighting only. Not saved.
 VARF(hdroutcouleur, 0, 1, 1, hdrout_on_scene());
-// 1 = lot 8: daylight response of lit materials (glsl.cfg hdrjourmat). In the same
+// 1 = stage 8: daylight response of lit materials (glsl.cfg hdrjourmat). In the same
 // shaders, a surface lit by strong, weakly coloured light takes, through the common
 // curve, the output k.Y of the line tangent to that curve (log slope 1: the contrast of
-// the scene), instead of its steep foot and flat top. Never darker than lot 7. Shade,
-// moon, torch light, sky, particles and flames keep lot 7.
+// the scene), instead of its steep foot and flat top. Never darker than stage 7. Shade,
+// moon, torch light, sky, particles and flames keep stage 7.
 // Native HDR and classic lighting only. Not saved.
 VARF(hdroutjour, 0, 1, 1, hdrout_on_scene());
-// Lot 8 dose of the lot 7 colour gain, in percent, when hdroutjour is on. The lot 7 gain
+// Stage 8 dose of the stage 7 colour gain, in percent, when hdroutjour is on. The stage 7 gain
 // partly made up for sunlit walls drawn at ~0.7 of their base SDR luminance; the
 // daylight response gives them that luminance back. HDRJOUR_COULEUR = the proposal.
 VARF(hdroutjourcouleur, 0, HDRJOUR_COULEUR, 100, hdrout_on_scene());
@@ -590,14 +590,14 @@ int hdrout_skyfix_level()
     return (hwrthdr && hdrout) ? hdroutciel : 0;
 }
 
-// Native only, like the lot 6 sky: the base SDR and preview witnesses stay the lot 5 ones.
-// Classic only, like the lot 4/5 light: in RT these shaders do not light the albedo.
+// Native only, like the stage 6 sky: the base SDR and preview witnesses stay the stage 5 ones.
+// Classic only, like the stage 4/5 light: in RT these shaders do not light the albedo.
 int hdrout_colorfix_level()
 {
     return (hwrthdr && hdrout && hdroutcouleur && !rt_lighting()) ? 1 : 0;
 }
 
-// Value of the hdrmatcol uniform: 1 = the lot 7 gain; with the lot 8 daylight response,
+// Value of the hdrmatcol uniform: 1 = the stage 7 gain; with the stage 8 daylight response,
 // hdroutjourcouleur percent of it.
 float hdrout_colorfix_scale()
 {
@@ -609,7 +609,7 @@ int hdrout_dayfix_level()
 {
     return (hwrthdr && hdrout && hdroutjour && !rt_lighting()) ? 1 : 0;
 }
-// Lab only, not saved. World shaders: 1 = light alone, 2 = texture alone.
+// Debug only, not saved. World shaders: 1 = light alone, 2 = texture alone.
 VAR(hdrlightdbg, 0, 0, 2);
 
 bool hdrout_lightfix_wanted()
@@ -626,7 +626,7 @@ int hdrout_lightdbg()
 {
     return hdrlightdbg;
 }
-// Lab only, not saved. 1 = after one real Present, fail the next one in software.
+// Debug only, not saved. 1 = after one real Present, fail the next one in software.
 VAR(hdroutsim, 0, 0, 1);
 
 static bool load_wgl()
@@ -876,33 +876,40 @@ static bool query_output(IDXGIAdapter *adapter, HMONITOR mon)
     g_min_nits = g_max_nits = g_full_nits = 0;
     g_bits = 0;
     g_output[0] = 0;
+    // Only the output that shows the game's screen is read, never another
+    // screen in its place (hybrid laptops: the screen can hang off another
+    // adapter, which probe_output() then reads).
     IDXGIOutput *best = NULL;
     UINT i;
     for(i = 0; ; i++)
     {
         IDXGIOutput *out = NULL;
-        if(adapter->EnumOutputs(i, &out) == DXGI_ERROR_NOT_FOUND) break;
+        if(adapter->EnumOutputs(i, &out) == DXGI_ERROR_NOT_FOUND || !out) break;
         DXGI_OUTPUT_DESC od;
         memset(&od, 0, sizeof(od));
         out->GetDesc(&od);
-        if(!best) { best = out; }
-        else if(mon && od.Monitor == mon)
+        if(!mon || od.Monitor == mon)
         {
-            best->Release();
             best = out;
             break;
         }
-        else out->Release();
+        out->Release();
     }
+    char aname[160] = "?";
+    DXGI_ADAPTER_DESC ad;
+    memset(&ad, 0, sizeof(ad));
+    if(SUCCEEDED(adapter->GetDesc(&ad))) narrow(ad.Description, aname, sizeof(aname));
     if(!best)
     {
-        set_reason("DXGI output not found");
+        set_reason("game screen not among the DXGI outputs read");
+        logoutf("hdrout the game's screen is not among the %u output(s) of %s: no other screen read in its place", i, aname);
         return false;
     }
     DXGI_OUTPUT_DESC od;
     memset(&od, 0, sizeof(od));
     best->GetDesc(&od);
     narrow(od.DeviceName, g_output, sizeof(g_output));
+    logoutf("hdrout reading output %s of %s", g_output, aname);
     read_display_path(od.DeviceName);
     IDXGIOutput6 *o6 = NULL;
     HRESULT hr = best->QueryInterface(IID_IDXGIOutput6, (void **)&o6);
@@ -1347,7 +1354,7 @@ static bool lock_share()
     return true;
 }
 
-// Performance lot 1. hdroutsync 0 = lot 8 transport: glFinish before the
+// HDR transport. hdroutsync 0 = stage 8 transport: glFinish before the
 // unlock, swap chain buffer and view taken again every frame.
 // 1 = no glFinish. WGL_NV_DX_interop (rev. 1): "The Lock/Unlock calls serve
 // as synchronization points between OpenGL and DirectX. They ensure that any
@@ -1521,7 +1528,7 @@ static float enc_srgb(float y)
 static void write_diag_bmp(const D3D11_MAPPED_SUBRESOURCE &map)
 {
     if(g_w < 8 || g_h < 8 || g_w * g_h > 8000000) return;
-    // Written in the profile (home) folder, never in the game or lab folders.
+    // Written in the profile (home) folder, never in the game folder.
     defformatstring(rel, "captures/swap-%d-ecrete.bmp", g_readn);
     const char *path = findfile(::path(rel), "wb");
     FILE *f = fopen(path, "wb");
@@ -1768,7 +1775,7 @@ static bool present_dx()
     fresh_check();
     if(!hdroutsync) release_back();
     perf_add(5, perf_now() - t0);
-    // Lab only. After at least one real Present, skip the call and take the
+    // Debug only. After at least one real Present, skip the call and take the
     // same fallback as a failed Present. This is not a device-removal.
     if(hdroutsim == 1 && g_okpresents >= 1)
     {
@@ -1829,7 +1836,7 @@ void hdrout_applyshader(Shader *s)
 }
 
 // Output and lighting are two separate choices (F4/F5 and F3), so two lines.
-// Lab overlay only. Off in normal play; the Graphics menu shows the output state.
+// Debug overlay only. Off in normal play; the Graphics menu shows the output state.
 VAR(hdroutlabel, 0, 0, 1);
 void hdrout_drawlabel()
 {
@@ -1838,9 +1845,9 @@ void hdrout_drawlabel()
     if(!s || !s[0]) return;
     draw_text(s, 12, 28, 255, 255, 255, 255);
     draw_text(lighting_label(), 12, 28 + FONTH, 200, 200, 200, 255);
-    // Performance lot 1: third line, the HDR transport chosen by F5.
-    defformatstring(tr, "Transport HDR : %s%s", hdroutsync ? "Version optimis" CUBE_E_AIGU "e" : "R" CUBE_E_AIGU "f" CUBE_E_AIGU "rence lot8",
-                    g_locked || (g_ready && hwrthdr) ? "" : " (sans effet en SDR de base)");
+    // Third line: the HDR transport chosen by F5.
+    defformatstring(tr, "HDR transport: %s%s", hdroutsync ? "Optimised" : "Reference",
+                    g_locked || (g_ready && hwrthdr) ? "" : " (no effect in base SDR)");
     draw_text(tr, 12, 28 + 2 * FONTH, 200, 200, 200, 255);
 }
 
@@ -1862,7 +1869,7 @@ static float smooth01(float e0, float e1, float x)
     return t * t * (3.f - 2.f * t);
 }
 
-// Opens the input of the lot1 curve below reference white, then blends back
+// Opens the input of the stage 1 curve below reference white, then blends back
 // so Y = 1 and the shoulder stay on that curve. Not an exposure and not a saturation.
 static float proposal_f(float Y)
 {
@@ -1904,7 +1911,7 @@ static float shoulder_k(float ref, float peak)
     return k;
 }
 
-// Lot 5 curve, in units of the reference white. Up to scene LOT5_YA it is curve 2.
+// Stage 5 curve, in units of the reference white. Up to scene LOT5_YA it is curve 2.
 // Above, in log/log, the local contrast starts at the curve 2 one at LOT5_YA and
 // eases to LOT5_SM with scale LOT5_W; then la + span*t/sqrt(1+t^2) reaches the
 // peak softly. Value and slope are continuous at LOT5_YA; monotone.
@@ -1934,7 +1941,7 @@ static float lot5_f(float Y, float la, float sa, float span)
     return la + span * t / sqrtf(1.f + t * t);
 }
 
-// Lot 6 curve, in units of the reference white. Up to scene LOT6_Y0 it is curve 3
+// Stage 6 curve, in units of the reference white. Up to scene LOT6_Y0 it is curve 3
 // (curve 2 there). Above, the curve 3 growth before its soft limit is multiplied by a
 // gain whose log is LOT6_GAIN's times smoothstep(ln Y between LOT6_Y0 and LOT6_Y1),
 // then b + span*t/sqrt(1+t^2) reaches the peak softly from b = curve 3 at LOT6_Y0.
@@ -1964,10 +1971,10 @@ static float lot6_f(float Y, float ref, float peak)
     return b + span * t / sqrtf(1.f + t * t);
 }
 
-// Lot 8 daylight response (glsl.cfg hdrjourmat). Output target for a daylit material:
+// Stage 8 daylight response (glsl.cfg hdrjourmat). Output target for a daylit material:
 // T(Y) = P u / sqrt(1 + u^2), u = k Y (Y / (Y + JOUR_YT))^JOUR_TOE / P, P = peak, where
 // k = max C(Y) / Y is the slope of the line from the origin tangent to the common curve C
-// (lot 6, in nits). T is kept >= C. ln G(Y) = ln(C^-1(T(Y)) / Y) on JOUR_N points of ln Y
+// (stage 6, in nits). T is kept >= C. ln G(Y) = ln(C^-1(T(Y)) / Y) on JOUR_N points of ln Y
 // in [JOUR_Y0, JOUR_Y1], constant outside. Same arithmetic as diag/courbe8.py.
 static const int JOUR_N = 24;
 static const float JOUR_Y0 = 0.001f, JOUR_Y1 = 16.f, JOUR_YT = 0.01f, JOUR_TOE = 0.5f;
@@ -2019,14 +2026,14 @@ static void jour_update(float ref, float peak)
         if(T < c) T = c;
         g_jour_tab[i] = logf(jour_cinv(T, ref, peak) / Y);
     }
-    logoutf("hdrout day lot8 table ref=%.1f peak=%.1f k=%.2f nits/scene lnG %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f",
+    logoutf("hdrout day table ref=%.1f peak=%.1f k=%.2f nits/scene lnG %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f",
             ref, peak, k, g_jour_tab[0], g_jour_tab[1], g_jour_tab[2], g_jour_tab[3], g_jour_tab[4], g_jour_tab[5], g_jour_tab[6], g_jour_tab[7],
             g_jour_tab[8], g_jour_tab[9], g_jour_tab[10], g_jour_tab[11], g_jour_tab[12], g_jour_tab[13], g_jour_tab[14], g_jour_tab[15],
             g_jour_tab[16], g_jour_tab[17], g_jour_tab[18], g_jour_tab[19], g_jour_tab[20], g_jour_tab[21], g_jour_tab[22], g_jour_tab[23]);
 }
 
 // p = hdrjour uniform (on, exposure multiplier, table index per ln Y, ln of the first
-// point), tab = hdrjourt. Off (p[0] = 0) outside the native classic lot 8 chain.
+// point), tab = hdrjourt. Off (p[0] = 0) outside the native classic stage 8 chain.
 void hdrout_jour_params(float p[4], float tab[24])
 {
     int incomplete = 0;
@@ -2040,8 +2047,8 @@ void hdrout_jour_params(float p[4], float tab[24])
 }
 
 // Same arithmetic as the presentation shader. preview = per-channel Narkowicz.
-// corrected 0 = linear native. 1 = lot1 luminance curve. 2 = lot3 proposal.
-// Above scene 1, 1 and 2 share the same shoulder. 3 = lot 5 curve.
+// corrected 0 = linear native. 1 = stage 1 luminance curve. 2 = stage 3 proposal.
+// Above scene 1, 1 and 2 share the same shoulder. 3 = stage 5 curve.
 static void expected_sc(float r, float g, float b, float expmul, float ref, float peak, int preview, int corrected, float shoulder, float out[3])
 {
     float x[3] = { r > 0.f ? r * expmul : 0.f, g > 0.f ? g * expmul : 0.f, b > 0.f ? b * expmul : 0.f };
@@ -2162,7 +2169,7 @@ static void log_curve_checks(float ref, float peak, float shoulder)
     int cur = hdroutcurve >= 4 ? 4 : hdroutcurve >= 3 ? 3 : 2;
     int prevcur = cur >= 4 ? 3 : 2;
     float prev = -1.f;
-    float prop[10][3], lot1[3], lotp[3];
+    float prop[10][3], ref1[3], lotp[3];
     for(i = 0; i < 10; i++)
     {
         expected_sc(ys[i], ys[i], ys[i], 1.f, ref, peak, 0, cur, shoulder, prop[i]);
@@ -2174,18 +2181,18 @@ static void log_curve_checks(float ref, float peak, float shoulder)
         prev = nits;
         logoutf("hdrout check grey curve %d Y %.2f nits %.2f (curve %d %.2f)", cur, ys[i], nits, prevcur, luma3(lotp[0], lotp[1], lotp[2]) * 80.f);
     }
-    // Curve 2 shares the lot 1 shoulder; curve 3 shares curve 2 up to scene 0.12;
+    // Curve 2 shares the stage 1 shoulder; curve 3 shares curve 2 up to scene 0.12;
     // curve 4 shares curve 3 up to scene LOT6_Y0.
     int shoulder_same = 1;
     int first = cur >= 3 ? 0 : 6, last = cur >= 4 ? 3 : cur >= 3 ? 4 : 10;
     for(i = first; i < last; i++)
     {
-        expected_sc(ys[i], ys[i], ys[i], 1.f, ref, peak, 0, cur >= 3 ? prevcur : 1, shoulder, lot1);
-        float d = fabsf(prop[i][0] - lot1[0]) + fabsf(prop[i][1] - lot1[1]) + fabsf(prop[i][2] - lot1[2]);
+        expected_sc(ys[i], ys[i], ys[i], 1.f, ref, peak, 0, cur >= 3 ? prevcur : 1, shoulder, ref1);
+        float d = fabsf(prop[i][0] - ref1[0]) + fabsf(prop[i][1] - ref1[1]) + fabsf(prop[i][2] - ref1[2]);
         if(d > 0.002f) shoulder_same = 0;
     }
-    if(cur >= 4) logoutf("hdrout check curve 4: same as the lot5 curve up to scene 0.05: %d", shoulder_same);
-    else if(cur >= 3) logoutf("hdrout check curve 3: same as the lot4 curve up to scene 0.10: %d", shoulder_same);
+    if(cur >= 4) logoutf("hdrout check curve 4: same as curve 3 up to scene 0.05: %d", shoulder_same);
+    else if(cur >= 3) logoutf("hdrout check curve 3: same as curve 2 up to scene 0.10: %d", shoulder_same);
     float n1 = luma3(prop[6][0], prop[6][1], prop[6][2]) * 80.f;
     float n2 = luma3(prop[7][0], prop[7][1], prop[7][2]) * 80.f;
     float n4 = luma3(prop[8][0], prop[8][1], prop[8][2]) * 80.f;
@@ -2403,7 +2410,7 @@ static void read_regions_after()
     hflush();
 }
 
-// Lab only. The next frame is written under <profile>/captures: in HDR, the linear
+// Debug only. The next frame is written under <profile>/captures: in HDR, the linear
 // scene before exposure/curve and the scRGB output before the HUD (PFM float,
 // rows bottom to top); in base SDR, the 8-bit window before the swap (PPM).
 // Values before the panel, not a measurement of the screen.
@@ -2473,7 +2480,7 @@ static void capture_hdr(GLuint tex, bool yflip)
         if(write_pfm(rel, buf, g_w, g_h)) capture_log("sortie_scrgb_avant_hud", rel, g_w, g_h);
         delete[] buf;
     }
-    // Lot 5 flame target of this frame: the encoded sum of the flames alone.
+    // Stage 5 flame target of this frame: the encoded sum of the flames alone.
     int fw = 0, fh = 0;
     GLuint ftex = hwrtflametex(fw, fh);
     if(ftex && fw >= 8 && fh >= 8 && fw <= 8192 && fh <= 8192)
@@ -2580,12 +2587,12 @@ bool hdrout_compose(GLuint tex, bool yflip)
         logoutf("hdrout origin: scene * reference white, luminance capped at the peak, divided by 80. Nothing added to black.");
         logoutf("hdrout corrected: Narkowicz on luminance up to scene 1 (scene 1 = %.3f * white), then a shoulder to the peak. Hue kept, no per-channel clipping.", nark_f(1.f));
         logoutf("hdrout proposal: same value at scene 1 white and same shoulder. Below it, the curve input is opened (factor 1.80) then caught up between 0.40 and 0.92. No change of exposure, white, peak or HUD, and no saturation.");
-        logoutf("hdrout lot4: lot3 curve 2 unchanged. With classic lighting, the light colour (lightmap, dynamic lights, models) takes the chromaticity of pow(light, 2.2) at equal luminance. Neutral light and textures unchanged. Lot3 = same chain without this fix.");
-        logoutf("hdrout lot5 curve 3: curve 2 up to scene %.2f. Above, local contrast (output stops per scene stop) goes from that of curve 2 to %.2f instead of falling towards 0.2 between scene 0.5 and 1, then a soft limit at the peak. Continuous, continuous slope, monotonic.", LOT5_YA, LOT5_SM);
-        logoutf("hdrout lot5 light (hdroutlumiere 2): classic lighting, lot4 colour, and luminance of overexposed light (albedo multiplier 2 x light): above 1.25, pow(L, 2.2) as on the historical screen; below 0.8 unchanged; C1 ramp in between. Not with RT.");
-        logoutf("hdrout lot5 flames: additive flames summed apart, encoded as on the 8-bit screen, then composited once: hue of the clipped sum (SDR picture of the flame), luminance above white from the density. Classic and RT, internal HDR only.");
-        logoutf("hdrout lot6 curve 4: curve 3 up to scene %.2f (lot5 shadows and dark tones). Above, a log-smooth brightness gain up to %.2f at scene %.2f, then a soft limit at the peak. No exposure change: blacks and shadows do not move.", LOT6_Y0, LOT6_GAIN, LOT6_Y1);
-        logoutf("hdrout lot6 sky (hdroutciel): 1 = sky, cloud and fog dome hues decoded (8-bit display colours); 2 = also, the saturated blue sky (shadow luminance) takes the lot6 brightness gain; clouds and neutral tops follow the curve; dark sky pixels unchanged. Native HDR only: base SDR and preview stay as in lot5.");
+        logoutf("hdrout stage 4: curve 2 unchanged. With classic lighting, the light colour (lightmap, dynamic lights, models) takes the chromaticity of pow(light, 2.2) at equal luminance. Neutral light and textures unchanged. Stage 3 = same chain without this fix.");
+        logoutf("hdrout stage 5 curve 3: curve 2 up to scene %.2f. Above, local contrast (output stops per scene stop) goes from that of curve 2 to %.2f instead of falling towards 0.2 between scene 0.5 and 1, then a soft limit at the peak. Continuous, continuous slope, monotonic.", LOT5_YA, LOT5_SM);
+        logoutf("hdrout stage 5 light (hdroutlumiere 2): classic lighting, stage 4 colour, and luminance of overexposed light (albedo multiplier 2 x light): above 1.25, pow(L, 2.2) as on the historical screen; below 0.8 unchanged; C1 ramp in between. Not with RT.");
+        logoutf("hdrout stage 5 flames: additive flames summed apart, encoded as on the 8-bit screen, then composited once: hue of the clipped sum (SDR picture of the flame), luminance above white from the density. Classic and RT, internal HDR only.");
+        logoutf("hdrout stage 6 curve 4: curve 3 up to scene %.2f (stage 5 shadows and dark tones). Above, a log-smooth brightness gain up to %.2f at scene %.2f, then a soft limit at the peak. No exposure change: blacks and shadows do not move.", LOT6_Y0, LOT6_GAIN, LOT6_Y1);
+        logoutf("hdrout stage 6 sky (hdroutciel): 1 = sky, cloud and fog dome hues decoded (8-bit display colours); 2 = also, the saturated blue sky (shadow luminance) takes the stage 6 brightness gain; clouds and neutral tops follow the curve; dark sky pixels unchanged. Native HDR only: base SDR and preview stay as in stage 5.");
         {
             static const float ys[9] = { 0.03f, 0.10f, 0.25f, 0.50f, 1.f, 2.f, 4.f, 8.f, 16.f };
             string line = "";
@@ -2597,7 +2604,7 @@ bool hdrout_compose(GLuint tex, bool yflip)
                 defformatstring(part, " %.2f:%.1f/%.1f", ys[i], a[1] * 80.f, b[1] * 80.f);
                 concatstring(line, part);
             }
-            logoutf("hdrout nits scene:lot5/lot6 at ref %.0f peak %.0f%s", ref, mx, line);
+            logoutf("hdrout nits scene:stage5/stage6 at ref %.0f peak %.0f%s", ref, mx, line);
         }
         logoutf("hdrout preview: per-channel Narkowicz, placed at reference white, no sRGB OETF. Highlights are flattened there.");
         hflush();
@@ -2631,6 +2638,11 @@ bool hdrout_fp16post()
     return g_locked && g_ready && hwrthdr;
 }
 
+// SDL (8-bit) frames presented since the window was created, counted only
+// while native HDR is asked for (see window_settled).
+extern int hdroutpref;
+static int g_sdl_frames = 0;
+
 bool hdrout_present()
 {
     if(hdroutread && !g_locked)
@@ -2648,6 +2660,7 @@ bool hdrout_present()
     }
     if(!g_locked)
     {
+        if(hdroutpref != 0 && g_sdl_frames < 1000) g_sdl_frames++;
         sync_drop_fences();
         hide_child();
         glBindFramebuffer_(GL_FRAMEBUFFER, 0);
@@ -2717,18 +2730,18 @@ static void hdrout_labwin(int *mode)
 {
     if(!g_parent)
     {
-        logoutf("hdrout lab no window");
+        logoutf("hdrout test: no window");
         return;
     }
     if(mode && *mode)
     {
         ShowWindow(g_parent, SW_MINIMIZE);
-        logoutf("hdrout lab minimised");
+        logoutf("hdrout test: minimised");
     }
     else
     {
         ShowWindow(g_parent, SW_RESTORE);
-        logoutf("hdrout lab restored");
+        logoutf("hdrout test: restored");
     }
     hflush();
 }
@@ -2776,9 +2789,9 @@ static void hdrout_mesures()
     hflush();
 }
 
-// Whole chains: 7 = lot 7 proposal, 6 = lot 6 reference, 5 = lot 5, 61..64 = lot 6
-// diagnostics on the lot 5 chain, 4 = lot 4, 51..54 = lot 5 diagnostics on the
-// lot 4 chain, 3 = lot 3, 1 = restitution lot 1 correction, 0 = first native output.
+// Whole chains: 7 = stage 7 proposal, 6 = stage 6 reference, 5 = stage 5, 61..64 = stage 6
+// diagnostics on the stage 5 chain, 4 = stage 4, 51..54 = stage 5 diagnostics on the
+// stage 4 chain, 3 = stage 3, 1 = restitution stage 1 correction, 0 = first native output.
 static void set_chain(int n)
 {
     int oldlum = hdroutlumiere, oldflame = hdroutflamme, oldsky = hdroutciel, oldcol = hdroutcouleur;
@@ -2886,7 +2899,7 @@ static bool preview_shader()
     return g_pvshader && !g_pvshader->invalid() && g_pvshader->program;
 }
 
-// Lab comparison only: 0 = old direct drawing of the model in the scRGB target.
+// Debug comparison only: 0 = old direct drawing of the model in the scRGB target.
 VAR(hdroutpreviewsdr, 0, 1, 1);
 bool hdrout_preview_begin(int x, int y, int w, int h, bool background)
 {
@@ -2981,9 +2994,9 @@ void hdrout_preview_end()
 // 0 = SDR, kept even when Windows HDR is on. 1 = native HDR when available,
 // otherwise SDR with the reason shown in Options > Graphics.
 // Windows HDR, VRR, gamma and the driver are only read, never changed.
-// Default SDR (was Automatic): a frozen/black screen at startup is suspected
-// with Automatic, under investigation. Automatic stays in the menu; saved -1
-// values are moved to 0 once by the l4zymigration step in main.cpp.
+// Default SDR (was Automatic). Automatic left the menu (console only now):
+// saved -1 values are moved to 0 by l4zymigration steps 1 and 4 in main.cpp
+// (step 4 also prints one console line telling how to choose Native HDR).
 static void hdrout_pref_changed();
 VARFP(hdroutpref, -1, 0, 1, hdrout_pref_changed());
 // Diagnostic only, not saved: the internal HDR image tone mapped for an SDR
@@ -3004,6 +3017,162 @@ static bool presenter_open();
 static void presenter_release(const char *why);
 static void probe_output();
 
+// Native HDR asked for (Native HDR, or Automatic) but not running: at start-up
+// the screen can still be settling (new window, display mode or link change,
+// window not yet on its screen), so the first reading or opening can fail
+// where a later one works. The screen is read again and the presenter
+// reopened after 0.5, 1, 2 and 4 s, without restarting the renderer, and
+// again at once when the window moves to another screen. SDR never retries.
+static const int RETRY_DELAYS[] = { 500, 1000, 2000, 4000 };
+static const int RETRY_MAX = int(sizeof(RETRY_DELAYS) / sizeof(RETRY_DELAYS[0]));
+static int g_retry_n = 0;
+static bool g_retry_due = false, g_retry_gaveup = false;
+static unsigned g_retry_at = 0, g_ready_since = 0;
+static HMONITOR g_probe_mon = NULL;
+
+// Windows itself can switch HDR off on the game's screen for a few seconds
+// while the game starts (display mode or link change, hybrid laptops). When
+// the retries end on "Windows HDR off" although the screen was HDR at the
+// start reading, the screen is watched until 60 s after the start (launch or
+// renderer restart): its display configuration is read every 2 s and at each
+// WM_DISPLAYCHANGE, without DXGI or D3D. When HDR is back, the retries start
+// again, so native HDR opens once. Nothing in SDR, nothing while native HDR
+// runs, nothing after 60 s.
+static const unsigned WATCH_MS = 60000, WATCH_STEP_MS = 2000;
+static bool g_start_hdr = false, g_watch_told = false;
+static bool g_watch_change = false;
+static int g_watch = 0; // 0 none, 1 watching, 2 over
+static unsigned g_watch_next = 0;
+static HWND g_watchwin = NULL;
+
+static LRESULT CALLBACK watch_proc(HWND hwnd, UINT msg, WPARAM w, LPARAM l)
+{
+    if(msg == WM_DISPLAYCHANGE) g_watch_change = true;
+    return DefWindowProcW(hwnd, msg, w, l);
+}
+
+// Hidden top-level window, never shown: only top-level windows receive
+// WM_DISPLAYCHANGE (a message-only window does not).
+static void watch_window(bool on)
+{
+    if(!on)
+    {
+        if(g_watchwin) { DestroyWindow(g_watchwin); g_watchwin = NULL; }
+        return;
+    }
+    if(g_watchwin) return;
+    HINSTANCE inst = GetModuleHandle(NULL);
+    WNDCLASSW wc;
+    memset(&wc, 0, sizeof(wc));
+    wc.lpfnWndProc = watch_proc;
+    wc.hInstance = inst;
+    wc.lpszClassName = L"SauerHDRWatch";
+    RegisterClassW(&wc);
+    g_watchwin = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, L"SauerHDRWatch", L"", WS_POPUP,
+                                 0, 0, 0, 0, NULL, NULL, inst, NULL);
+}
+
+static void watch_stop()
+{
+    g_watch = 0;
+    g_watch_change = false;
+    watch_window(false);
+}
+
+static void retry_reset()
+{
+    g_retry_n = 0;
+    g_retry_due = false;
+    g_retry_gaveup = false;
+    watch_stop();
+}
+
+// The first opening after the window is created (start-up or resetgl)
+// waits until the window has settled: shown, on the same screen, place and
+// size for 0.5 s, a few SDR frames presented, and 1 s after its creation.
+// Just after creation the display mode, link and HDR state of the screen can
+// still be changing. SDR is shown meanwhile, then it switches once.
+static const unsigned SETTLE_MIN_MS = 1000, SETTLE_STABLE_MS = 500;
+static const int SETTLE_FRAMES = 3;
+static unsigned g_start_ticks = 0, g_win_since = 0;
+static bool g_settled = false;
+static HMONITOR g_win_mon = NULL;
+static RECT g_win_rect;
+
+static bool window_settled()
+{
+    if(g_settled) return true;
+    if(!g_parent || !screen) return false;
+    unsigned now = SDL_GetTicks();
+    Uint32 fl = SDL_GetWindowFlags(screen);
+    bool shown = (fl & SDL_WINDOW_SHOWN) && !(fl & (SDL_WINDOW_HIDDEN | SDL_WINDOW_MINIMIZED)) && !minimized;
+    RECT rc;
+    memset(&rc, 0, sizeof(rc));
+    GetWindowRect(g_parent, &rc);
+    HMONITOR mon = MonitorFromWindow(g_parent, MONITOR_DEFAULTTONEAREST);
+    if(!shown || !g_win_since || mon != g_win_mon || memcmp(&rc, &g_win_rect, sizeof(rc)))
+    {
+        g_win_mon = mon;
+        g_win_rect = rc;
+        g_win_since = now ? now : 1;
+        return false;
+    }
+    if(now - g_start_ticks < SETTLE_MIN_MS || now - g_win_since < SETTLE_STABLE_MS || g_sdl_frames < SETTLE_FRAMES) return false;
+    g_settled = true;
+    logoutf("hdrout window settled t=%u ms (created at %u ms, same screen and place for %u ms, %d SDR frames): native HDR may open now",
+            now, g_start_ticks, now - g_win_since, g_sdl_frames);
+    return true;
+}
+
+static void watch_begin(unsigned now)
+{
+    if(!g_start_hdr || !strstr(g_reason, "Windows HDR off") || int(now - (g_start_ticks + WATCH_MS)) >= 0) return;
+    g_watch = 1;
+    g_watch_change = false;
+    g_watch_next = now + WATCH_STEP_MS;
+    watch_window(true);
+    logoutf("hdrout Windows HDR was on for this screen at the start and is off now: watching it until t=%u ms (every %u ms and on display changes, display configuration only)",
+            g_start_ticks + WATCH_MS, WATCH_STEP_MS);
+    if(!g_watch_told)
+    {
+        g_watch_told = true;
+        conoutf("Windows switched HDR off on this screen for a moment. Native HDR will start when it is back.");
+    }
+}
+
+static void watch_step(unsigned now)
+{
+    if(g_watch != 1) return;
+    bool late = int(now - (g_start_ticks + WATCH_MS)) >= 0, change = g_watch_change;
+    if(!change && !late && int(now - g_watch_next) < 0) return;
+    g_watch_change = false;
+    g_watch_next = now + WATCH_STEP_MS;
+    MONITORINFOEXW mi;
+    memset(&mi, 0, sizeof(mi));
+    mi.cbSize = sizeof(mi);
+    if(g_parent && GetMonitorInfoW(MonitorFromWindow(g_parent, MONITOR_DEFAULTTONEAREST), &mi)) read_display_path(mi.szDevice);
+    if(g_ac_on == 1)
+    {
+        logoutf("hdrout Windows HDR is back on this screen t=%u ms (%s): native HDR opens again", now, change ? "display change" : "periodic reading");
+        retry_reset();
+        g_retry_due = true;
+        g_retry_at = now;
+        hflush();
+        return;
+    }
+    if(!late) return;
+    g_watch = 2;
+    watch_window(false);
+    logoutf("hdrout Windows HDR still off on this screen t=%u ms, %u ms after the start: SDR until Native HDR is chosen again or the renderer restarts",
+            now, WATCH_MS);
+    hflush();
+}
+
+static bool retry_pending()
+{
+    return hdroutpref != 0 && !g_disabled && !g_retry_gaveup && !g_ready;
+}
+
 static bool presenter_allocated()
 {
     return g_dev || g_ctx || g_dx || g_factory || g_child || g_swap;
@@ -3018,6 +3187,57 @@ static int wanted_output()
     return (g_ready || (!g_disabled && g_hdr && !g_open_failed)) ? 1 : 0;
 }
 
+// Every frame while the saved choice is not SDR. A presenter that fails
+// again right after opening does not restart the series: it must have held
+// for 10 s first.
+static void retry_step()
+{
+    unsigned now = SDL_GetTicks();
+    if(g_ready)
+    {
+        if(!g_ready_since) g_ready_since = now ? now : 1;
+        else if((g_retry_n || g_retry_gaveup) && now - g_ready_since >= 10000) retry_reset();
+        return;
+    }
+    g_ready_since = 0;
+    HMONITOR mon = g_parent ? MonitorFromWindow(g_parent, MONITOR_DEFAULTTONEAREST) : NULL;
+    if(mon && mon != g_probe_mon)
+    {
+        logoutf("hdrout the game window is on another screen t=%u ms: reading it again", now);
+        retry_reset();
+        g_retry_due = true;
+        g_retry_at = now;
+    }
+    if(g_retry_gaveup)
+    {
+        watch_step(now);
+        return;
+    }
+    if(!g_retry_due)
+    {
+        if(g_retry_n >= RETRY_MAX)
+        {
+            g_retry_gaveup = true;
+            logoutf("hdrout retries over (%d): SDR until Native HDR is chosen again or the renderer restarts. reason=%s", RETRY_MAX, g_reason[0] ? g_reason : "?");
+            watch_begin(now);
+            hflush();
+            return;
+        }
+        g_retry_due = true;
+        g_retry_at = now + RETRY_DELAYS[g_retry_n];
+        return;
+    }
+    if(int(now - g_retry_at) < 0) return;
+    g_retry_due = false;
+    g_retry_n++;
+    logoutf("hdrout retry %d/%d t=%u ms (preference=%d, last reason=%s)", g_retry_n, RETRY_MAX, now, hdroutpref, g_reason[0] ? g_reason : "?");
+    presenter_release("retry");
+    probe_output();
+    g_open_failed = false;
+    if(wanted_output()) presenter_open();
+    else hflush();
+}
+
 static void hdrout_resolve()
 {
     // A minimised window keeps its state; the presenter is simply not drawn.
@@ -3025,18 +3245,32 @@ static void hdrout_resolve()
     int want = g_prefs_loaded ? wanted_output() : 0;
     if(g_tried && !g_locked)
     {
+        // Native HDR asked for: wait until the window has settled, then read
+        // the screen again (the reading made at its creation may be stale).
+        if(g_prefs_loaded && hdroutpref != 0 && !g_disabled && !g_settled && window_settled())
+        {
+            probe_output();
+            want = wanted_output();
+        }
         // Native HDR wanted: open the presenter now (first time after the
         // config, or a switch from the menu). Not before config.cfg/autoexec.
-        if(want && !g_ready && !g_open_failed && !g_disabled) presenter_open();
+        if(want && !g_ready && !g_open_failed && !g_disabled && g_settled) presenter_open();
         // SDR (or a failed presenter): release it, once the child is hidden,
         // i.e. after an SDR frame has been presented over it.
         else if((!want || !g_ready) && !g_child_on && presenter_allocated())
             presenter_release(want ? "failed" : "sdr output");
+        if(g_prefs_loaded && hdroutpref != 0 && !g_disabled && g_settled)
+        {
+            retry_step();
+            want = wanted_output();
+        }
     }
     int eff = (want && g_ready) ? 1 : 0;
-    // Native HDR asked for (saved choice) but not running: say it once in the console.
+    // Native HDR asked for (Native HDR, or Automatic once the presenter has
+    // failed) but not running: said once in the console, after the retries.
     static bool warned = false;
-    if(g_prefs_loaded && hdroutpref == 1 && !g_ready && !warned)
+    bool failed = hdroutpref == 1 || (hdroutpref == -1 && g_open_failed);
+    if(g_prefs_loaded && failed && !g_ready && !warned && (g_disabled || (g_retry_gaveup && g_watch != 1)))
     {
         warned = true;
         conoutf(CON_WARN, "Native HDR unavailable, using SDR: %s", reason_ui());
@@ -3064,6 +3298,8 @@ static void hdrout_resolve()
 static void hdrout_pref_changed()
 {
     if(!g_tried || !g_prefs_loaded) return;
+    retry_reset();
+    if(!g_settled && hdroutpref != 0 && screen && SDL_GetTicks() - g_start_ticks >= SETTLE_MIN_MS) g_settled = true;
     // Explicit HDR request while the presenter is down (Windows HDR turned on
     // after launch, or an earlier presentation error): try once more.
     if(hdroutpref == 1 && !g_ready && !g_locked && screen && !g_disabled)
@@ -3079,9 +3315,16 @@ static void hdrout_pref_changed()
 static const char *reason_ui()
 {
     if(g_ready) return "";
+    if(retry_pending()) return g_settled ? "Native HDR is not ready yet: trying again in a moment." : "Native HDR starts in a moment.";
     const char *r = g_reason;
     if(!r[0]) return "Native HDR output not started.";
-    if(strstr(r, "Windows HDR off")) return "Windows HDR is off for this screen (Windows: Display settings > Use HDR).";
+    if(strstr(r, "Windows HDR off"))
+    {
+        // On at the start reading, then switched off by Windows: not a setting to change.
+        if(g_watch == 1) return "Windows switched HDR off on this screen for a moment. Native HDR will start when it is back.";
+        if(g_watch == 2) return "Windows switched HDR off on this screen while the game was starting. Choose Native HDR again once it is back.";
+        return "Windows HDR is off for this screen (Windows: Display settings > Use HDR).";
+    }
     if(strstr(r, "simulation")) return "Simulated failure (test): native HDR unavailable.";
     if(strstr(r, "WGL_NV_DX_interop") || strstr(r, "no GPU shared") || strstr(r, "interop"))
         return "Native HDR needs the NVIDIA OpenGL/Direct3D bridge, not available on this GPU/driver.";
@@ -3119,6 +3362,7 @@ static void probe_output()
     g_output[0] = 0;
     if(!g_parent) return;
     HMONITOR mon = MonitorFromWindow(g_parent, MONITOR_DEFAULTTONEAREST);
+    g_probe_mon = mon;
     IDXGIFactory1 *fac1 = NULL;
     HRESULT hr = CreateDXGIFactory1(IID_IDXGIFactory1, (void **)&fac1);
     if(FAILED(hr) || !fac1)
@@ -3165,6 +3409,20 @@ static void probe_output()
     }
     else set_reason("DXGI output not found");
     fac1->Release();
+    if(!g_output[0] && mon)
+    {
+        // No adapter lists the game's screen: its HDR state is read from the
+        // display configuration only, never from another screen.
+        MONITORINFOEXW mi;
+        memset(&mi, 0, sizeof(mi));
+        mi.cbSize = sizeof(mi);
+        if(GetMonitorInfoW(mon, &mi))
+        {
+            narrow(mi.szDevice, g_output, sizeof(g_output));
+            read_display_path(mi.szDevice);
+            logoutf("hdrout %s read from the display configuration only: ac_on=%d", g_output, g_ac_on);
+        }
+    }
     logoutf("hdrout screen probe (no D3D11 device, interop, window or swap chain) %s hdr_dxgi=%d peak=%.0f nits",
             g_output[0] ? g_output : "?", g_hdr, g_max_nits);
 }
@@ -3187,6 +3445,7 @@ void hdrout_start()
     g_tried = true;
     g_disabled = false;
     g_open_failed = false;
+    g_start_ticks = SDL_GetTicks();
     g_hdr = 0;
     g_ac_sup = g_ac_on = -1;
     g_adapter[0] = g_output[0] = g_gl[0] = g_luid[0] = g_reason[0] = 0;
@@ -3229,6 +3488,8 @@ void hdrout_start()
         return;
     }
     probe_output();
+    g_start_hdr = g_hdr != 0 || g_ac_on == 1;
+    g_watch_told = false;
     logoutf("hdrout presenter deferred t=%u ms: no D3D11 device, interop, window or swap chain before the config is read, then only if the output must be native HDR", SDL_GetTicks());
     log_state("startup");
 }
@@ -3281,9 +3542,11 @@ static bool presenter_open_inner()
         set_reason("SDL HWND unavailable");
         return false;
     }
+    // Read again now: the reading made when the window was created may be stale.
+    probe_output();
     if(!g_hdr)
     {
-        // Read at startup (or again when Native HDR is chosen): nothing to open.
+        // Windows HDR off on the game's screen: nothing to open.
         if(!g_reason[0] || !strcmp(g_reason, "ok")) set_reason("Windows HDR off on this screen");
         return false;
     }
@@ -3347,6 +3610,13 @@ static bool presenter_open_inner()
         formatstring(g_luid, "%08lX:%08lX", (unsigned long)desc.AdapterLuid.HighPart, (unsigned long)desc.AdapterLuid.LowPart);
         logoutf("hdrout interop open, level 0x%x", int(fl));
         query_output(ad, mon);
+        // The game's screen may hang off another adapter (hybrid laptops):
+        // its HDR state is then read where it is, not on this adapter's first output.
+        if(!g_hdr)
+        {
+            probe_output();
+            if(g_hdr) logoutf("hdrout the game's screen is not an output of the opened adapter: HDR state read on the adapter that drives it");
+        }
         ad->Release();
         opened = true;
         break;
@@ -3401,9 +3671,16 @@ void hdrout_shutdown()
     g_tried = false;
     g_open_failed = false;
     g_disabled = false;
+    retry_reset();
+    g_ready_since = 0;
+    g_probe_mon = NULL;
+    g_settled = false;
+    g_win_since = 0;
+    g_win_mon = NULL;
+    g_sdl_frames = 0;
 }
 
-// Performance lot 1: frame time decomposition, off unless hdroutperfwin runs.
+// HDR performance: frame time decomposition, off unless hdroutperfwin runs.
 // CPU times are QueryPerformanceCounter around the calls. GPU times are GL
 // timestamp queries (and D3D11 timestamps for the presentation pass) read
 // back without waiting, several frames later. Nothing is logged or written
@@ -3765,15 +4042,15 @@ static void hdrout_on_sync()
     g_sync_timeouts = 0;
     logoutf("hdrout transport %s (hdroutsync %d). Picture, calibration and variant unchanged.",
             hdroutsync ? "optimised: no glFinish, one-frame GL fence, D3D buffer kept"
-                       : "lot8 reference: glFinish before unlock, D3D buffer fetched every frame",
+                       : "reference: glFinish before unlock, D3D buffer fetched every frame",
             hdroutsync);
     hflush();
 }
-ICOMMAND(hdrouttransport, "", (), result(hdroutsync ? "Version optimis" CUBE_E_AIGU "e" : "R" CUBE_E_AIGU "f" CUBE_E_AIGU "rence lot8"));
+ICOMMAND(hdrouttransport, "", (), result(hdroutsync ? "Optimised" : "Reference"));
 
 double hdrout_perf_clock() { return perf_now(); }
 
-// Lab check, off by default: "hdroutfraicheur N" marks N frames. GL clears a
+// Debug check, off by default: "hdroutfraicheur N" marks N frames. GL clears a
 // 4x4 corner of the composed scRGB image to a value that changes every frame,
 // just before the unlock. D3D reads its copy back before Present (Map waits for
 // the D3D copy only). An image drawn from the previous GL frame would show the

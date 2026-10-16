@@ -80,7 +80,55 @@ namespace aiman
         return least;
 	}
 
-	bool addai(int skill, int limit)
+    // Tiny Apa bots (L4ZY games, after the clanmod handshake; messages in game.h). A bot added as Tiny Apa
+    // (l4zy/addbot/v1 <skill> 2) keeps that style and its name "Tiny Apa", "Tiny Apa 2"...; it only goes to an L4ZY game
+    // (the one with the fewest bots), which is told to play it so (l4zy/botplay/v1), and it is removed when no L4ZY game
+    // is left to play it. Any other bot is named by the game that plays it (l4zy/botstyle/v1), "bot" again when it changes
+    // hands. Without these messages (other clients, plain /addbot) nothing changes.
+    static int botstyles[MAXBOTS]; // 2 = added as Tiny Apa
+
+    static inline bool tinyapabot(clientinfo *ci)
+    {
+        int i = ci->clientnum - MAXCLIENTS;
+        return i >= 0 && i < MAXBOTS && botstyles[i] == 2;
+    }
+
+    static clientinfo *findl4zyaiclient(clientinfo *exclude = NULL)
+    {
+        clientinfo *least = NULL;
+        loopv(clients)
+        {
+            clientinfo *ci = clients[i];
+            if(!validaiclient(ci) || ci==exclude || !ci->clanmodok) continue;
+            if(!least || ci->bots.length() < least->bots.length()) least = ci;
+        }
+        return least;
+    }
+
+    static bool tinyapaname(const char *name) { return !strncmp(name, "Tiny Apa", 8) && (!name[8] || name[8] == ' '); }
+
+    static void namebot(clientinfo *ci, int style) // "bot", or the smallest free "Tiny Apa" number
+    {
+        if(style != 2) { copystring(ci->name, "bot", MAXNAMELEN+1); return; }
+        for(int n = 1;; n++)
+        {
+            string name;
+            if(n > 1) formatstring(name, "Tiny Apa %d", n); else copystring(name, "Tiny Apa");
+            bool used = false;
+            loopv(bots) if(bots[i] && bots[i] != ci && !strcmp(bots[i]->name, name)) { used = true; break; }
+            if(!used) { copystring(ci->name, name, MAXNAMELEN+1); return; }
+        }
+    }
+
+    static void setbotstyle(clientinfo *ci, int style)
+    {
+        int i = ci->clientnum - MAXCLIENTS;
+        if(i < 0 || i >= MAXBOTS) return;
+        botstyles[i] = style == 2 ? 2 : 0;
+        namebot(ci, botstyles[i]);
+    }
+
+	bool addai(int skill, int limit, int style = 0)
 	{
 		int numai = 0, cn = -1, maxai = limit >= 0 ? min(limit, MAXBOTS) : MAXBOTS;
 		loopv(bots)
@@ -96,9 +144,10 @@ namespace aiman
             if(ci)
             { // reuse a slot that was going to removed
 
-                clientinfo *owner = findaiclient();
+                clientinfo *owner = style == 2 ? findl4zyaiclient() : findaiclient();
                 ci->ownernum = owner ? owner->clientnum : -1;
                 if(owner) owner->bots.add(ci);
+                setbotstyle(ci, style);
                 ci->aireinit = 2;
                 dorefresh = true;
                 return true;
@@ -110,13 +159,13 @@ namespace aiman
         clientinfo *ci = bots[cn];
 		ci->clientnum = MAXCLIENTS + cn;
 		ci->state.aitype = AI_BOT;
-        clientinfo *owner = findaiclient();
+        clientinfo *owner = style == 2 ? findl4zyaiclient() : findaiclient();
 		ci->ownernum = owner ? owner->clientnum : -1;
         if(owner) owner->bots.add(ci);
         ci->state.skill = skill <= 0 ? rnd(50) + 51 : clamp(skill, 1, 101);
 	    clients.add(ci);
 		ci->state.lasttimeplayed = lastmillis;
-		copystring(ci->name, "bot", MAXNAMELEN+1);
+		setbotstyle(ci, style);
 		ci->state.state = CS_DEAD;
         copystring(ci->team, team, MAXTEAMLEN+1);
         ci->playermodel = rnd(128);
@@ -130,6 +179,7 @@ namespace aiman
 	{
         int cn = ci->clientnum - MAXCLIENTS;
         if(!bots.inrange(cn)) return;
+        if(cn < MAXBOTS) botstyles[cn] = 0;
         if(ci->ownernum >= 0 && !ci->aireinit && smode) smode->leavegame(ci, true);
         sendf(-1, 1, "ri2", N_CDIS, ci->clientnum);
         clientinfo *owner = (clientinfo *)getclientinfo(ci->ownernum);
@@ -154,7 +204,13 @@ namespace aiman
 		if(ci->ownernum < 0) deleteai(ci);
 		else if(ci->aireinit >= 1)
 		{
+			if(ci->aireinit == 2 && !tinyapabot(ci)) copystring(ci->name, "bot", MAXNAMELEN+1);
 			sendf(-1, 1, "ri6ss", N_INITAI, ci->clientnum, ci->ownernum, ci->state.aitype, ci->state.skill, ci->playermodel, ci->name, ci->team);
+			if(tinyapabot(ci))
+			{
+				defformatstring(msg, "%s %d 2", BOTPLAY_CMD, ci->clientnum);
+				sendf(ci->ownernum, 1, "ris", N_SERVCMD, msg);
+			}
 			if(ci->aireinit == 2)
             {
                 ci->reassign();
@@ -178,24 +234,28 @@ namespace aiman
 	void removeai(clientinfo *ci)
 	{ // either schedules a removal, or someone else to assign to
 
-		loopvrev(ci->bots) shiftai(ci->bots[i], findaiclient(ci));
+		loopvrev(ci->bots) shiftai(ci->bots[i], tinyapabot(ci->bots[i]) ? findl4zyaiclient(ci) : findaiclient(ci));
 	}
 
 	bool reassignai()
 	{
-        clientinfo *hi = NULL, *lo = NULL;
+        clientinfo *hi = NULL, *lo = NULL, *l4zylo = NULL;
 		loopv(clients)
 		{
 			clientinfo *ci = clients[i];
 			if(!validaiclient(ci)) continue;
             if(!lo || ci->bots.length() < lo->bots.length()) lo = ci;
             if(!hi || ci->bots.length() > hi->bots.length()) hi = ci;
+            if(ci->clanmodok && (!l4zylo || ci->bots.length() < l4zylo->bots.length())) l4zylo = ci;
 		}
 		if(hi && lo && hi->bots.length() - lo->bots.length() > 1)
 		{
 			loopvrev(hi->bots)
 			{
-				shiftai(hi->bots[i], lo);
+				clientinfo *to = lo;
+				if(tinyapabot(hi->bots[i]) && !to->clanmodok) to = l4zylo && hi->bots.length() - l4zylo->bots.length() > 1 ? l4zylo : NULL;
+				if(!to) continue;
+				shiftai(hi->bots[i], to);
 				return true;
 			}
 		}
@@ -237,6 +297,31 @@ namespace aiman
         if(!ci->local && !ci->privilege) return;
         if(!deleteai()) sendf(ci->clientnum, 1, "ris", N_SERVMSG, "failed to remove any bots");
 	}
+
+    // l4zy/botstyle/v1 <bot cn> <0|2> and l4zy/addbot/v1 <skill> <0|2> from an L4ZY game; false = not one of them
+    bool l4zybotcmd(clientinfo *ci, int sender, const char *text)
+    {
+        bool style = !strncmp(text, BOTSTYLE_CMD " ", sizeof(BOTSTYLE_CMD)), add = !strncmp(text, ADDBOT_CMD " ", sizeof(ADDBOT_CMD));
+        if(!style && !add) return false;
+        int a = 0, b = 0;
+        if(!ci || !ci->connected || ci->state.aitype != AI_NONE || !ci->clanmodok ||
+           sscanf(text + (style ? sizeof(BOTSTYLE_CMD) : sizeof(ADDBOT_CMD)), "%d %d", &a, &b) != 2) return true;
+        if(style)
+        { // the game that plays this bot names it for everyone (a bot added as Tiny Apa keeps its name)
+            clientinfo *bot = getinfo(a);
+            if(!bot || bot->state.aitype == AI_NONE || bot->ownernum != sender || tinyapabot(bot)) return true;
+            if(b == 2 ? tinyapaname(bot->name) : !strcmp(bot->name, "bot")) return true;
+            namebot(bot, b);
+            bot->aireinit = max(bot->aireinit, 1);
+            dorefresh = true;
+            return true;
+        }
+        // /addbot with a style: same rights and limit as /addbot
+        if(!ci->local && !ci->privilege) return true;
+        if(b == 2 && !findl4zyaiclient()) sendf(sender, 1, "ris", N_SERVMSG, "failed to create a Tiny Apa bot (it needs a player on L4ZY to run it)");
+        else if(!addai(a, !ci->local && ci->privilege < PRIV_ADMIN ? botlimit : -1, b == 2 ? 2 : 0)) sendf(sender, 1, "ris", N_SERVMSG, "failed to create or assign bot");
+        return true;
+    }
 
     void setbotlimit(clientinfo *ci, int limit)
     {

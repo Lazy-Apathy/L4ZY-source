@@ -1,9 +1,9 @@
 // velocity.cpp: motion vectors for static scenery, rigid mapmodels,
-// skinned mrfixit (lot 3), mrfixit attached armour / vwep (lot 4),
-// the first-person hudgun (lot 5), and lot 6 unjittered motion + HUD-less
+// skinned mrfixit (stage 3), mrfixit attached armour / vwep (stage 4),
+// the first-person hudgun (stage 5), and stage 6 unjittered motion + HUD-less
 // capture for a future DLAA evaluate.
 //
-// This lot does not turn on DLAA / DLSS / FSR / HDR.
+// This file does not turn on DLAA / DLSS / FSR / HDR.
 //
 // Image (hwrtvelocitytex, RGBA16F):
 //   RG  motion in pixels, previous_unjittered - current_unjittered
@@ -34,11 +34,11 @@
 //      mapmodels, and vertex-frame interpolation stay unsupported),
 //      colour-visible pickups / teleports / carrots via hwrtentxform
 //      (same lastmillis yaw and z-bob as fpsgame renderentities),
-//      colour-visible ENT_PLAYER skeletal meshes (lot 3: mrfixit body),
-//      mrfixit attachments that share that colour path (lot 4:
+//      colour-visible ENT_PLAYER skeletal meshes (stage 3: mrfixit body),
+//      mrfixit attachments that share that colour path (stage 4:
 //      LINK_REUSE armour/horns skinned with the live pose; LINK_TAG vwep
 //      with the full world matrix including the tag bone), and the
-//      first-person hudgun (lot 5: mrfixit/hudguns/*, own avatar FOV
+//      first-person hudgun (stage 5: mrfixit/hudguns/*, own avatar FOV
 //      and avatardepth, own history slots)
 //   0  ragdolls, monsters, flags, deforming
 //      mapmodels, attachments on other playermodels, water, grass,
@@ -90,7 +90,7 @@
 // Generating the image does not change the presented frame; only
 // hwrtveldebug > 0 replaces the scene with the overlay.
 //
-// Colour-HUD coverage diagnostic (lot 5 close-out): while a proof or
+// Colour-HUD coverage diagnostic (stage 5 close-out): while a proof or
 // A/B store is pending, the real colour hudgun draw writes stencil 4
 // with the same depth test and alphatest as the presented gun. That
 // mask is compared to velocity A=1. It is not reconstructed from the
@@ -152,20 +152,20 @@ VAR(hwrtvelfreezepose, 0, 0, 1);
 // Proof / isolated-profile only: keep drawing while the window is minimized
 // so a validation run does not steal focus from a live client.
 VAR(hwrtvelforce, 0, 0, 1);
-// Lot 4: write vectors for mrfixit attached armour / vwep / horns. Off
-// leaves those pixels excluded (lot 3 behaviour) for an A/B cost check.
+// Stage 4: write vectors for mrfixit attached armour / vwep / horns. Off
+// leaves those pixels excluded (stage 3 behaviour) for an A/B cost check.
 VAR(hwrtvelequip, 0, 1, 1);
-// Lot 5: write vectors for the first-person hudgun. Off leaves those
-// pixels as scenery (lot 4 behaviour) for an A/B cost check.
+// Stage 5: write vectors for the first-person hudgun. Off leaves those
+// pixels as scenery (stage 4 behaviour) for an A/B cost check.
 VAR(hwrtvelhud, 0, 1, 1);
 // 0 = diagnostic only: skip pickup / teleport object MVs (colour still
-// spins). Play and the ammo lab leave this at 1.
+// spins). Play and the ammo test leave this at 1.
 VAR(hwrtvelents, 0, 1, 1);
 // Diagnostic only: mark the colour-pass hudgun silhouette (mains + weapon)
 // into the window stencil while the real colour draw runs. Proof shots
 // turn this on by themselves. Play leaves it at 0.
 VAR(hwrtvelhudcolour, 0, 0, 1);
-// Test-only: 1 restores the lot-4 bug (recycle any not-yet-noted slot before
+// Test-only: 1 restores the stage 4 bug (recycle any not-yet-noted slot before
 // growing). Default 0 is the corrected policy. Used for before/after traces.
 VAR(hwrtvelslotsteal, 0, 0, 1);
 // Test-only: draw body slots high-to-low so attachment allocation order flips.
@@ -1358,7 +1358,7 @@ static int velfindslot(dynent *d, int attachkey, bool create, int *decision = NU
     }
     if(hwrtvelslotsteal)
     {
-        // Original lot-4 policy: treat any not-yet-noted occupant as aged and
+        // Original stage 4 policy: treat any not-yet-noted occupant as aged and
         // evict it before growing. Kept only to photograph the bug.
         if(aged >= 0)
         {
@@ -2431,7 +2431,7 @@ extern bool mapmodeldrawnthisframe(int i);
 // (triforts: about 1100 drawn twice a frame, -1.1 ms of CPU), and a model the
 // main view left out (occluded) no longer writes its motion over the wall that
 // hides it. That last part can change a few pixels of the upscaled picture,
-// hence off by default (shots/rt-performance-lot3).
+// hence off by default.
 VARP(hwrtvelvisible, 0, 0, 1);
 // 1: rigid mapmodels that neither spin nor animate, and that the main view drew
 // this frame, are not drawn again here. Their depth is in the depth buffer, and
@@ -2441,7 +2441,7 @@ VARP(hwrtvelvisible, 0, 0, 1);
 // again this frame), are still drawn as before. The motion of the skipped ones
 // is rebuilt from 24-bit depth instead of their vertices (sub-pixel
 // differences). Much less CPU on maps with many mapmodels. Off by default: the
-// upscaled image changes slightly (shots/rt-performance-lot4).
+// upscaled image changes slightly.
 VARP(hwrtvelstatic, 0, 0, 1);
 
 static void veldrawrigid()
@@ -3163,10 +3163,10 @@ void hwrtgenvelocity()
 static void velshotdir()
 {
     string d1, d2;
-    copystring(d1, "shots");
+    copystring(d1, "bench");
     path(d1);
     createdir(d1);
-    copystring(d2, "shots/velocity-lot6");
+    copystring(d2, "bench/velocity-test");
     path(d2);
     createdir(d2);
 }
@@ -3810,7 +3810,7 @@ static void velrigidrun(ImageData &cur, ImageData &prev, ImageData &follow, int 
         {
             ImageData crop(cw, ch, 3);
             velcopyrect(cur, crop, x0, y0);
-            defformatstring(fnblades, "shots/velocity-lot6/%s_blades.png", clean);
+            defformatstring(fnblades, "bench/velocity-test/%s_blades.png", clean);
             path(fnblades);
             velsavepng(fnblades, crop);
         }
@@ -3904,19 +3904,19 @@ static void velwriteproof(const char *name, GLuint prevhist)
     glBindFramebuffer_(GL_FRAMEBUFFER, prevfb);
     glBindTexture(GL_TEXTURE_2D, prevtex);
 
-    defformatstring(fncur, "shots/velocity-lot6/%s_cur.png", clean);
-    defformatstring(fnprev, "shots/velocity-lot6/%s_prev.png", clean);
-    defformatstring(fnvec, "shots/velocity-lot6/%s_vec.png", clean);
-    defformatstring(fnwarp, "shots/velocity-lot6/%s_warp.png", clean);
-    defformatstring(fnfollow, "shots/velocity-lot6/%s_follow.png", clean);
-    defformatstring(fnsil, "shots/velocity-lot6/%s_sil.png", clean);
-    defformatstring(fnhudsil, "shots/velocity-lot6/%s_hudsil.png", clean);
-    defformatstring(fnunlit, "shots/velocity-lot6/%s_unlit.png", clean);
-    defformatstring(fnunlitw, "shots/velocity-lot6/%s_unlit_warp.png", clean);
-    defformatstring(fnunlitc, "shots/velocity-lot6/%s_unlit_vs_colour.png", clean);
-    defformatstring(fnid, "shots/velocity-lot6/%s_id.png", clean);
-    defformatstring(fnzoom, "shots/velocity-lot6/%s_zoom.png", clean);
-    defformatstring(fninfo, "shots/velocity-lot6/%s_info.txt", clean);
+    defformatstring(fncur, "bench/velocity-test/%s_cur.png", clean);
+    defformatstring(fnprev, "bench/velocity-test/%s_prev.png", clean);
+    defformatstring(fnvec, "bench/velocity-test/%s_vec.png", clean);
+    defformatstring(fnwarp, "bench/velocity-test/%s_warp.png", clean);
+    defformatstring(fnfollow, "bench/velocity-test/%s_follow.png", clean);
+    defformatstring(fnsil, "bench/velocity-test/%s_sil.png", clean);
+    defformatstring(fnhudsil, "bench/velocity-test/%s_hudsil.png", clean);
+    defformatstring(fnunlit, "bench/velocity-test/%s_unlit.png", clean);
+    defformatstring(fnunlitw, "bench/velocity-test/%s_unlit_warp.png", clean);
+    defformatstring(fnunlitc, "bench/velocity-test/%s_unlit_vs_colour.png", clean);
+    defformatstring(fnid, "bench/velocity-test/%s_id.png", clean);
+    defformatstring(fnzoom, "bench/velocity-test/%s_zoom.png", clean);
+    defformatstring(fninfo, "bench/velocity-test/%s_info.txt", clean);
     path(fncur); path(fnprev); path(fnvec); path(fnwarp); path(fnfollow); path(fnsil); path(fnhudsil); path(fnunlit); path(fnunlitw); path(fninfo);
 
     float scale = 1.0f / hwrtvelscale;
@@ -4341,9 +4341,9 @@ static void velwriteproof(const char *name, GLuint prevhist)
                 velputrgb(cropf, j, i, l[0], l[1], l[2]);
                 velputrgb(cropf, j + cw, i, r[0], r[1], r[2]);
             }
-            defformatstring(fncrop, "shots/velocity-lot6/%s_crop.png", clean);
-            defformatstring(fnsilc, "shots/velocity-lot6/%s_sil_crop.png", clean);
-            defformatstring(fnfc, "shots/velocity-lot6/%s_follow_crop.png", clean);
+            defformatstring(fncrop, "bench/velocity-test/%s_crop.png", clean);
+            defformatstring(fnsilc, "bench/velocity-test/%s_sil_crop.png", clean);
+            defformatstring(fnfc, "bench/velocity-test/%s_follow_crop.png", clean);
             path(fncrop); path(fnsilc); path(fnfc);
             velsavepng(fncrop, crop);
             velsavepng(fnsilc, crops);
@@ -4419,7 +4419,7 @@ static void velwriteproof(const char *name, GLuint prevhist)
             }
             velputrgb(occbox, j + 2 * cw, i, sr, sg, sb);
         }
-        defformatstring(fnocc, "shots/velocity-lot6/%s_occbox.png", clean);
+        defformatstring(fnocc, "bench/velocity-test/%s_occbox.png", clean);
         path(fnocc);
         velsavepng(fnocc, occbox);
     }
@@ -4444,7 +4444,7 @@ static void velwriteproof(const char *name, GLuint prevhist)
     {
         fprintf(tf, "name %s\n", clean);
         fprintf(tf, "lastmillis %d prev_frame_millis %d totalmillis %d curtime %d\n", lastmillis, velprevmillis, totalmillis, curtime);
-        fprintf(tf, "frame_pair current_colour=%s previous_colour=%s vectors=%s warp=%s sil=%s blades=shots/velocity-lot6/%s_blades.png\n", fncur, fnprev, fnvec, fnwarp, fnsil, clean);
+        fprintf(tf, "frame_pair current_colour=%s previous_colour=%s vectors=%s warp=%s sil=%s blades=bench/velocity-test/%s_blades.png\n", fncur, fnprev, fnvec, fnwarp, fnsil, clean);
         fprintf(tf, "debug %d overlaymode %d histusable %s histhas %s histfresh %s cut %s ready %s\n",
                 int(hwrtveldebug), veldbgmode ? veldbgmode : int(hwrtveldebug),
                 velhistusable() ? "yes" : "no", velhisthas ? "yes" : "no", velhistfresh ? "yes" : "no",
@@ -4483,7 +4483,7 @@ static void velwriteproof(const char *name, GLuint prevhist)
                 ncover, ncover ? sumabsv / ncover : 0, maxabsv, nbelow005, nbelow025);
         fprintf(tf, "jitter_only_warp_mean_abs_rgb %.4f  samples %d  (prev colour shifted by programmed jitter only — independent of the velocity shader)\n",
                 njitonly ? ejitonly / njitonly : 0, njitonly);
-        fprintf(tf, "supported_model mrfixit (playermodel 0) third-person / bot ENT_PLAYER plus attached armour (LINK_REUSE) and vwep (LINK_TAG). Horns share the armour path. First-person hudgun (lot 5) uses distinct slots and the avatar FOV / avatardepth projection.\n");
+        fprintf(tf, "supported_model mrfixit (playermodel 0) third-person / bot ENT_PLAYER plus attached armour (LINK_REUSE) and vwep (LINK_TAG). Horns share the armour path. First-person hudgun uses distinct slots and the avatar FOV / avatardepth projection.\n");
         fprintf(tf, "excluded ragdolls, first-person body-as-occluder, other playermodel attachments, monsters, deforming mapmodels, water, particles\n");
         fprintf(tf, "camproj_hud current avatar FOV %.3f prev_avatar_FOV %s%.3f zoomprogress %.3f avatardepth (colour gun uses the same projection; previous clip uses stored avatar camproj, not world camproj)\n",
                 curavatarfov, velprevavatarfovok ? "" : "none ", velprevavatarfovok ? velprevavatarfov : 0, getzoomprogress());
@@ -5012,13 +5012,13 @@ static void velbenchwrite()
     copystring(savedhome, homedir);
     homedir[0] = '\0';
     string d1, d2;
-    copystring(d1, "shots"); path(d1); createdir(d1);
-    copystring(d2, "shots/velocity-lot6"); path(d2); createdir(d2);
+    copystring(d1, "bench"); path(d1); createdir(d1);
+    copystring(d2, "bench/velocity-test"); path(d2); createdir(d2);
     string fnnamed;
-    if(velbenchname[0]) formatstring(fnnamed, "shots/velocity-lot6/%s.txt", velbenchname);
-    else formatstring(fnnamed, "shots/velocity-lot6/bench-equip%d.txt", velbenchequip);
+    if(velbenchname[0]) formatstring(fnnamed, "bench/velocity-test/%s.txt", velbenchname);
+    else formatstring(fnnamed, "bench/velocity-test/bench-equip%d.txt", velbenchequip);
     path(fnnamed);
-    FILE *bf = fopen("shots/velocity-lot6/bench-last.txt", "w");
+    FILE *bf = fopen("bench/velocity-test/bench-last.txt", "w");
     FILE *bf2 = fopen(fnnamed, "w");
     FILE *outs[2] = { bf, bf2 };
     loopk(2)
@@ -5045,7 +5045,7 @@ static void velbenchwrite()
         fprintf(out, "overlay not measured (debug 0, diagnostic path off)\n");
         fclose(out);
     }
-    conoutf("hwrt velocity: wrote shots/velocity-lot6/bench-last.txt and %s", fnnamed);
+    conoutf("hwrt velocity: wrote bench/velocity-test/bench-last.txt and %s", fnnamed);
     copystring(homedir, savedhome);
 
     velbenchphase = VELBENCH_IDLE;
@@ -5705,7 +5705,7 @@ static void hwrtvelslottrace(char *name)
     copystring(savedhome, homedir);
     homedir[0] = '\0';
     velshotdir();
-    formatstring(velslotlogpath, "shots/velocity-lot6/%s.txt", name);
+    formatstring(velslotlogpath, "bench/velocity-test/%s.txt", name);
     path(velslotlogpath);
     velslotlogf = fopen(velslotlogpath, "w");
     copystring(homedir, savedhome);
@@ -5776,7 +5776,7 @@ static void hwrtvelgameparticles()
         conoutf("hwrt velocity: no camera");
         return;
     }
-    // Real game sprites only. The grey test veil (hwrtvelsmoke) is a lot-2
+    // Real game sprites only. The grey test veil (hwrtvelsmoke) is a stage 2
     // stand-in and must not be mistaken for this trial.
     hwrtvelsmoke = 0;
     vec p = camera1->o;
@@ -6017,7 +6017,7 @@ static void hwrtvelswitchmodel()
 {
     int next = getvar("playermodel") ? 0 : 1;
     setvar("playermodel", next);
-    conoutf("hwrt velocity: playermodel %d (0=mrfixit supported this lot, 1=snoutx10k shares the path but is not claimed)", next);
+    conoutf("hwrt velocity: playermodel %d (0=mrfixit supported, 1=snoutx10k shares the path but is not claimed)", next);
 }
 COMMAND(hwrtvelswitchmodel, "");
 
@@ -6256,7 +6256,7 @@ static void velabstore(const char *name)
     velabok = true;
     ImageData image(w, h, 3);
     memcpy(image.data, velabref, w * h * 3);
-    defformatstring(fn, "shots/velocity-lot6/%s.png", name);
+    defformatstring(fn, "bench/velocity-test/%s.png", name);
     path(fn);
     velsavepng(fn, image);
     copystring(homedir, savedhome);
@@ -6280,9 +6280,9 @@ static void velabdiff(const char *name)
     glPixelStorei(GL_PACK_ALIGNMENT, 1);
     glReadPixels(0, 0, w, h, GL_RGB, GL_UNSIGNED_BYTE, cur.data);
     glBindFramebuffer_(GL_FRAMEBUFFER, prevfb);
-    defformatstring(fncur, "shots/velocity-lot6/%s.png", name);
-    defformatstring(fndiff, "shots/velocity-lot6/%s_diff.png", name);
-    defformatstring(fninfo, "shots/velocity-lot6/%s_info.txt", name);
+    defformatstring(fncur, "bench/velocity-test/%s.png", name);
+    defformatstring(fndiff, "bench/velocity-test/%s_diff.png", name);
+    defformatstring(fninfo, "bench/velocity-test/%s_info.txt", name);
     path(fncur); path(fndiff); path(fninfo);
     velsavepng(fncur, cur);
     int nany = 0, nstrong = 0, nhud = 0, nhudany = 0, nhudstrong = 0;
@@ -6386,7 +6386,7 @@ void hwrtflushvelshot()
     homedir[0] = '\0';
     velshotdir();
 
-    defformatstring(fn, velshotkindproof(kind) ? "shots/velocity-lot6/%s_overlay.png" : "shots/velocity-lot6/%s.png", name);
+    defformatstring(fn, velshotkindproof(kind) ? "bench/velocity-test/%s_overlay.png" : "bench/velocity-test/%s.png", name);
     path(fn);
 
     ImageData image(screenw, screenh, 3);

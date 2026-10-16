@@ -105,7 +105,7 @@ void fatal(const char *s, ...)    // failure exit
 }
 
 int curtime = 0, lastmillis = 1, elapsedtime = 0, totalmillis = 1;
-// 0 = wall-clock dt (play). Lab particle comparisons set this in once.cfg only.
+// 0 = wall-clock dt (play). Particle comparison runs set this in once.cfg only.
 VAR(hwrtdlaafixedcurtime, 0, 0, 200);
 
 dynent *player = NULL;
@@ -1832,7 +1832,7 @@ VAR(numcpus, 1, 1, 16);
 // step applied; each step runs once, right after config.cfg is read and
 // before autoexec.cfg, and never again, so a choice made later is kept.
 // A fresh profile only records the latest step.
-enum { L4ZY_MIGRATION_LATEST = 2 };
+enum { L4ZY_MIGRATION_LATEST = 4 };
 VARP(l4zymigration, 0, 0, 1000);
 
 static void applyl4zymigrations()
@@ -1865,6 +1865,33 @@ static void applyl4zymigrations()
         {
             hwrtdlssmipbias = 0;
             logoutf("l4zymigration 2: hwrtdlssmipbias 1 -> 0");
+        }
+    }
+    if(l4zymigration < 3)
+    {
+        // 3: Temporal AA left the menu: it moved the picture by a fraction of a
+        // pixel every frame, even in pause, and FXAA was not drawn while it
+        // was on. Players who had it on go back to the default once; looktaa
+        // stays a console setting.
+        extern int looktaa;
+        if(looktaa)
+        {
+            looktaa = 0;
+            logoutf("l4zymigration 3: looktaa 1 -> 0");
+        }
+    }
+    if(l4zymigration < 4)
+    {
+        // 4: display output Automatic left the menu (it followed the Windows
+        // HDR state read at start-up, which could differ from one start to
+        // the next). Players who chose it again after step 1 go to SDR once
+        // and are told how to get native HDR back. 0 and 1 untouched.
+        extern int hdroutpref;
+        if(hdroutpref == -1)
+        {
+            hdroutpref = 0;
+            logoutf("l4zymigration 4: hdroutpref -1 (Automatic) -> 0 (SDR)");
+            conoutf("Display output: Automatic was removed, the game now uses SDR. For HDR, choose Native HDR in Options > Graphics.");
         }
     }
     if(l4zymigration < L4ZY_MIGRATION_LATEST) l4zymigration = L4ZY_MIGRATION_LATEST;
@@ -2183,7 +2210,7 @@ int main(int argc, char **argv)
         timeerr = scaledtime%100;
         if(!multiplayer(false) && curtime>200) curtime = 200;
         if(game::ispaused()) curtime = 0;
-        // Lab-only: force a constant simulated millisecond step so particle
+        // Debug-only: force a constant simulated millisecond step so particle
         // age is comparable across Off/DLAA/Quality even when capture stalls.
         // Not VARP; never seed this from a play profile.
         else if(hwrtdlaafixedcurtime > 0 && !multiplayer(false)) curtime = hwrtdlaafixedcurtime;

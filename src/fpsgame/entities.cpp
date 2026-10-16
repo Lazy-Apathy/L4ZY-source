@@ -191,6 +191,7 @@ namespace entities
             particle_icon(d->abovehead(), is.icon%4, is.icon/4, PART_HUD_ICON_GREY, 2000, 0xFFFFFF, 2.0f, -8);
         }
         playsound(itemstats[type-I_SHELLS].sound, d!=h ? &d->o : NULL, NULL, 0, 0, 0, -1, 0, 1500);
+        ai::noise(d, itemstats[type-I_SHELLS].sound, d->o);
         d->pickup(type);
         if(d==h) switch(type)
         {
@@ -220,6 +221,8 @@ namespace entities
                 fpsent *h = followingplayer(player1);
                 playsound(snd, d==h ? NULL : &e.o, NULL, flags);
                 if(d!=h && ents.inrange(td) && ents[td]->type == TELEDEST) playsound(snd, &ents[td]->o, NULL, flags);
+                ai::noise(d, S_TELEPORT, e.o);
+                if(ents.inrange(td) && ents[td]->type == TELEDEST) ai::noise(d, S_TELEPORT, ents[td]->o);
             }
         }
         if(local && d->clientnum >= 0)
@@ -245,6 +248,7 @@ namespace entities
                 int snd = S_JUMPPAD, flags = 0;
                 if(e.attr4 > 0) { snd = e.attr4; flags = SND_MAP; }
                 playsound(snd, d == followingplayer(player1) ? NULL : &e.o, NULL, flags);
+                ai::noise(d, S_JUMPPAD, e.o);
             }
         }
         if(local && d->clientnum >= 0)
@@ -361,6 +365,7 @@ namespace entities
             d->quadmillis = 0;
             fpsent *h = followingplayer(player1);
             playsound(S_PUPOUT, d==h ? NULL : &d->o);
+            ai::noise(d, S_PUPOUT, d->o);
             if(d==h) conoutf(CON_GAMEINFO, "\f2quad damage is over");
         }
     }

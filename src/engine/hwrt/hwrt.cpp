@@ -23,7 +23,7 @@ VARP(hwrttimes, 0, 0, 1);
 // exactly as it was before either existed.
 VARP(hwrtreflections, 0, 1, 1);
 VARP(hwrtspecular, 0, 1, 1);
-// Frame-path optimisations that leave the image unchanged (shots/rt-performance-lot4).
+// Frame-path optimisations that leave the image unchanged.
 // Bit 1: CPU work of the RT dispatch before the GL -> Vulkan signal. Bit 2: the
 // same for the DLAA/DLSS/FSR evaluate. Bit 4: the three upscaler input packs in
 // one multiple-target pass. 0 = the previous path, for comparisons.
@@ -167,7 +167,7 @@ VARFP(hwrt, 0, 0, 1,
 VARP(hwrtdebug, 0, 7, 7);
 VARP(hwrtdlights, 1, 1, 4);
 // Cosine-weighted sky rays per pixel (1..4). Default 1 since 2026-10-04: with
-// NRD + blue noise, 1 ray showed no grain on the canon maps (shots/rayons-ciel
+// NRD + blue noise, 1 ray showed no grain on the canon maps (a side-by-side
 // study, then a tester's own test) and gives back 0.07-0.48 ms per ray dropped.
 // That only holds where NRD denoises: the Sauer filter (skyage, pcg hash; NRD
 // off, unavailable or failed) is the path where one ray was a coin flip the
@@ -395,7 +395,7 @@ void hwrtonlineguard()
         looked = true;
     }
     // Say it for every new refusal. Only something that sets a view again
-    // on every frame (a queued lab capture) is held to one line a second.
+    // on every frame (a queued debug capture) is held to one line a second.
     static int lastmsg = -1000000;
     static bool lastframe = false;
     bool say = !lastframe || totalmillis - lastmsg >= 1000, reset = false;

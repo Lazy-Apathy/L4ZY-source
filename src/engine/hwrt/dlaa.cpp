@@ -134,7 +134,7 @@ static const VkExternalSemaphoreHandleTypeFlagBits DLAA_SEM_HANDLE = VK_EXTERNAL
 
 static const char *NGX_PROJECT_ID = "c3a7e9d1-4b52-4f08-9e6a-7d1c2b8f4a90";
 static const char *NGX_ENGINE_VER = "cube2-hwrt-ngx-sr";
-#define DLAA_SHOTDIR "shots/dlss-q"
+#define DLAA_SHOTDIR "bench/dlaa-q"
 
 enum { DLAA_FIF = 3, DLAA_MAX_EXT = 24, DLAA_GPUSAMPLES = 32, DLAA_SEQMAX = 90, DLAA_BENCHMAX = 24000, DLAA_BENCHWARMSEC = 4 };
 
@@ -275,6 +275,10 @@ static GLuint scenefbo = 0, scenecolor = 0, sceneds = 0;
 static int scenew = 0, sceneh = 0;
 static GLenum scenecolorfmt = 0;
 static bool scenebound = false, scenehdr = false;
+// MSAA window: the scene of this frame went through the internal target
+// (scenemsaa) and has to be put on the window if DLAA/DLSS/FSR did not.
+static bool scenemsaa = false, scenepresented = false;
+extern int windowmsaa;
 static bool hdrframe = false, hdrpresented = false;
 static bool scenefail = false;
 static int lastscenew = 0, lastsceneh = 0;
@@ -301,7 +305,7 @@ VAR(hwrthdr, 0, 0, 1);
 FVARP(hwrthdrexp, -8, 0, 8);
 VAR(hwrthdrprobe, 0, 0, 1);
 VAR(hwrthdrfam, 0, 0, 1);
-// Lab only: pretend the FP16 scene target failed. Preference hwrthdr stays set.
+// Debug only: pretend the FP16 scene target failed. Preference hwrthdr stays set.
 VAR(hwrthdrfaillab, 0, 0, 1);
 static int hdrreadpending = 0;
 VAR(hwrtdlaacapturefallback, 0, 0, 1);
@@ -312,11 +316,11 @@ VAR(hwrtdlaacapturepresent, 0, 0, 1);
 // deprecated preset F supported it), and we use presets K and M. With DLAA/DLSS
 // the mask is neither drawn nor packed. 0 = no mask. 1 = coverage that follows the
 // visible texture and fade, plus a short persist only while the camera is still.
-// 2 = all-ones lab test.
+// 2 = all-ones test.
 static void hwrtdlaabiaschanged();
 VARF(hwrtdlaabias, 0, 1, 2, hwrtdlaabiaschanged());
 VAR(hwrtdlaabiaspersist, 0, 50, 100);
-// Lab: dump packed NGX colour in/out (or temporal colour when Off) every N sequence frames. 0 = off.
+// Debug: dump packed NGX colour in/out (or temporal colour when Off) every N sequence frames. 0 = off.
 VAR(hwrtdlaaiostep, 0, 8, 64);
 static bool presentpending = false;
 static char presentname[128] = "fallback_hud";
@@ -368,7 +372,7 @@ static bool resolvedir(char *out, int outlen)
     const char *env = getenv("SAUER_NGX_DIR");
     if(env && env[0])
     {
-        // Lab override is exclusive: do not silently pick bin64/ngx-sr.
+        // Debug override is exclusive: do not silently pick bin64/ngx-sr.
         copystring(out, env, outlen);
         string probe;
         nformatstring(probe, sizeof(probe), "%s\\nvngx_dlss.dll", out);
@@ -1058,7 +1062,7 @@ static int enginefromgwmode(uint32_t m)
     return 1;
 }
 
-// rt-performance-lot4: DLSS/DLAA with the older CNN model (preset E, deprecated
+// Performance option: DLSS/DLAA with the older CNN model (preset E, deprecated
 // in SDK 310.6 but still shipped) instead of the transformer presets K/M. Cheaper
 // on the tensor cores, softer image. Off by default (the image changes).
 // configure() recreates the feature when this changes.
@@ -1145,7 +1149,7 @@ static void bindnativewindow()
     if(screenw >= 1 && screenh >= 1) glViewport(0, 0, screenw, screenh);
 }
 
-// Lot 5. Additive flames accumulate alone in an RGBA16F target that shares the
+// Stage 5. Additive flames accumulate alone in an RGBA16F target that shares the
 // scene depth-stencil, so depth test and stencil marks are those of the scene.
 // renderparticles composes the target into the linear scene right after.
 static GLuint flamefbo = 0, flamecolor = 0, flameds = 0;
@@ -1189,13 +1193,13 @@ bool hwrtflamebegin()
         {
             destroyflamefb();
             static int warned = 0;
-            if(!warned) { warned = 1; conoutf(CON_ERROR, "hdr lot5: cible flammes incomplete (0x%x), flammes du lot4", unsigned(st)); }
+            if(!warned) { warned = 1; conoutf(CON_ERROR, "hdr flames: flame target incomplete (0x%x), previous flames kept", unsigned(st)); }
             return false;
         }
         flamew = scenew;
         flameh = sceneh;
         flameds = sceneds;
-        conoutf(CON_INIT, "hdr lot5: cible flammes RGBA16F %dx%d, profondeur de la scene", flamew, flameh);
+        conoutf(CON_INIT, "hdr flames: RGBA16F flame target %dx%d, scene depth", flamew, flameh);
     }
     glBindFramebuffer_(GL_FRAMEBUFFER, flamefbo);
     GLfloat cc[4];
@@ -1215,7 +1219,7 @@ void hwrtflameend()
     glBindFramebuffer_(GL_FRAMEBUFFER, scenefbo);
 }
 
-// Valid until the next hwrtflamebegin: the lab capture reads it after the compose.
+// Valid until the next hwrtflamebegin: the debug capture reads it after the compose.
 GLuint hwrtflametex(int &w, int &h)
 {
     w = flamevalid ? flamew : 0;
@@ -1363,7 +1367,7 @@ bool hwrthdractive()
 
 static void hwrthdrstatuscmd()
 {
-    conoutf("hdr lot2 status req %d frame %d presented %d faillab %d fam %d probe %d ngx_demande %d ngx_effectif %d IsHDR %d push 0x%x scenehdr %d scenecolorfmt 0x%x scene %dx%d",
+    conoutf("hdr check status req %d frame %d presented %d failtest %d fam %d probe %d ngx_requested %d ngx_effective %d IsHDR %d push 0x%x scenehdr %d scenecolorfmt 0x%x scene %dx%d",
             hwrthdr, hdrframe ? 1 : 0, hdrpresented ? 1 : 0, hwrthdrfaillab, hwrthdrfam, hwrthdrprobe,
             hwrtngxmode, ngxmodeapp, ngxcfghdr, hwrthdrpushmode, scenehdr ? 1 : 0, int(scenecolorfmt), scenew, sceneh);
 }
@@ -1379,7 +1383,7 @@ GLuint hwrthdrscenecolor()
 static void hwrthdrreadcmd()
 {
     hdrreadpending = 1;
-    conoutf("hdr lot2: lecture GPU demandee");
+    conoutf("hdr check: GPU read requested");
 }
 ICOMMAND(hwrthdrread, "", (), hwrthdrreadcmd());
 
@@ -1399,7 +1403,7 @@ static void hwrthdrstampgl()
     Shader *s = useshaderbyname("hdrstamp");
     if(!s || s->invalid())
     {
-        conoutf(CON_WARN, "hdr lot2: shader hdrstamp absent, sondes GL non ecrites");
+        conoutf(CON_WARN, "hdr check: hdrstamp shader missing, GL probes not written");
         return;
     }
     int x0, y0, yc;
@@ -1429,7 +1433,7 @@ void hwrthdrstampifprobe()
 
 static void hwrthdrlogpixel(const char *where, int i, int x, int y, const float *rgba, int err, bool ok)
 {
-    conoutf("hdr lot2 %s %s (x %d y %d) %s %.6f %.6f %.6f %.6f err 0x%x",
+    conoutf("hdr check %s %s (x %d y %d) %s %.6f %.6f %.6f %.6f err 0x%x",
             where, HDR_STAMP_NAME[i], x, y,
             ok ? "ok" : "FAIL", rgba[0], rgba[1], rgba[2], rgba[3], err);
 }
@@ -1443,7 +1447,7 @@ static void hwrthdrsample(bool aftertonemap)
         glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, &scenefmt);
         glBindTexture(GL_TEXTURE_2D, 0);
         int rtfmt = hwrtresultglformat();
-        conoutf("hdr lot2 formats scene_gl 0x%x (RGBA16F=0x881A) rt_gl 0x%x vk R16G16B16A16_SFLOAT exp_stops %.3f mul %.5f hwrt %d ngx %d probe %d push 0x%x",
+        conoutf("hdr check formats scene_gl 0x%x (RGBA16F=0x881A) rt_gl 0x%x vk R16G16B16A16_SFLOAT exp_stops %.3f mul %.5f hwrt %d ngx %d probe %d push 0x%x",
                 int(scenefmt), rtfmt, hwrthdrexp, powf(2.0f, hwrthdrexp), hwrt, hwrtngxmode, hwrthdrprobe, hwrthdrpushmode);
         int x0, y0, yc;
         hdrstamporigin(x0, y0, yc);
@@ -1477,7 +1481,7 @@ static void hwrthdrsample(bool aftertonemap)
                     float d = fabsf(p[0] - 16.f) + fabsf(p[1] - 16.f) + fabsf(p[2] - 16.f);
                     if(d < best) { best = d; fx = x; fy = y; br = p[0]; bg = p[1]; bb = p[2]; }
                 }
-                conoutf("hdr lot2 rt_scan closest_to_16 at %d %d value %.4f %.4f %.4f dist %.4f", fx, fy, br, bg, bb, best);
+                conoutf("hdr check rt_scan closest_to_16 at %d %d value %.4f %.4f %.4f dist %.4f", fx, fy, br, bg, bb, best);
             }
             delete[] rt;
         }
@@ -1517,7 +1521,7 @@ static void hwrthdrsample(bool aftertonemap)
                 }
             }
             delete[] buf;
-            conoutf("hdr lot2 scene_max %s %.6f %.6f %.6f luma %.6f at %d %d (hors rectangle sondes) err 0x%x",
+            conoutf("hdr check scene_max %s %.6f %.6f %.6f luma %.6f at %d %d (outside the probe rectangle) err 0x%x",
                     err == 0 ? "ok" : "FAIL", maxr, maxg, maxb, maxl, maxx, maxy, err);
         }
     }
@@ -1535,7 +1539,7 @@ static void hwrthdrsample(bool aftertonemap)
             hwrthdrlogpixel("window", i, x0 + HDR_STAMP_DX[i], yc, rgba, err, err == 0);
         }
         if(getlogfile()) fflush(getlogfile());
-        conoutf("hdr lot2 read_done");
+        conoutf("hdr check read_done");
     }
 }
 
@@ -1548,7 +1552,7 @@ static void hwrthdrfamsrc(const char *name)
 {
     Shader *s = useshaderbyname(name);
     bool ok = s && !s->invalid() && s->psstr && strstr(s->psstr, "hwrthdrlin") && strstr(s->psstr, "1.055");
-    conoutf("hdr lot2 inspection %s %s", name, ok ? "texte contient hwrthdrlin et 1.055" : "ABSENT");
+    conoutf("hdr check inspection %s %s", name, ok ? "text contains hwrthdrlin and 1.055" : "MISSING");
 }
 
 static void hwrthdrfamdraw(int x, int y, float op, float ambient, float scale, float sr, float sg, float sb, float sa, float lm, float ndotl)
@@ -1567,7 +1571,7 @@ static void hwrthdrfamread(const char *tag, int x, int y, float expect)
     int err = int(glGetError());
     float e = fabsf(rgba[0] - expect);
     bool ok = err == 0 && e <= 0.002f && fabsf(rgba[1] - expect) <= 0.002f && fabsf(rgba[2] - expect) <= 0.002f;
-    conoutf("hdr lot2 probe %s (helper hdrfamprobe, pas stdworld) (x %d y %d) %s got %.6f %.6f %.6f expect %.6f errabs %.6f gl 0x%x",
+    conoutf("hdr check probe %s (helper hdrfamprobe, not stdworld) (x %d y %d) %s got %.6f %.6f %.6f expect %.6f errabs %.6f gl 0x%x",
             tag, x, y, ok ? "ok" : "FAIL", rgba[0], rgba[1], rgba[2], expect, e, err);
 }
 
@@ -1584,7 +1588,7 @@ static void hwrthdrfamrun()
     Shader *s = useshaderbyname("hdrfamprobe");
     if(!s || s->invalid())
     {
-        conoutf(CON_WARN, "hdr lot2 fam_src hdrfamprobe MISSING");
+        conoutf(CON_WARN, "hdr check fam_src hdrfamprobe MISSING");
         return;
     }
     GLboolean depth = glIsEnabled(GL_DEPTH_TEST);
@@ -1759,7 +1763,7 @@ static void hwrthdrreallog(const char *tag, Shader *s, int x, int y, float expec
     int err = int(glGetError());
     float e = fabsf(rgba[0] - expect);
     bool ok = err == 0 && e <= 0.002f && fabsf(rgba[1] - expect) <= 0.002f && fabsf(rgba[2] - expect) <= 0.002f;
-    conoutf("hdr lot2 real %s programme %u detail %u courant %d shader %s hwrthdrlin loc %d val %.3f tex %d %d %d %d fmt0 0x%x (x %d y %d) %s got %.6f %.6f %.6f expect %.6f errabs %.6f gl 0x%x",
+    conoutf("hdr check real %s program %u detail %u current %d shader %s hwrthdrlin loc %d val %.3f tex %d %d %d %d fmt0 0x%x (x %d y %d) %s got %.6f %.6f %.6f expect %.6f errabs %.6f gl 0x%x",
             tag,
             s ? (unsigned)s->program : 0u,
             detail ? (unsigned)detail->program : 0u,
@@ -1770,7 +1774,7 @@ static void hwrthdrreallog(const char *tag, Shader *s, int x, int y, float expec
             x, y, ok ? "ok" : "FAIL",
             rgba[0], rgba[1], rgba[2], expect, e, err);
     if(tag[0] == 'p')
-        conoutf("hdr lot2 real particle pointeur_jeu %s", (particleshader && s == particleshader) ? "identique" : "different");
+        conoutf("hdr check real particle game_pointer %s", (particleshader && s == particleshader) ? "same" : "different");
 }
 
 static void hwrthdrrealrun()
@@ -1813,7 +1817,7 @@ static void hwrthdrrealrun()
         hwrthdrrealquad();
         hwrthdrreallog("stdworld", stds, 8, 32, stdexpect);
     }
-    else conoutf(CON_WARN, "hdr lot2 real stdworld absent");
+    else conoutf(CON_WARN, "hdr check real stdworld missing");
     if(bumps && !bumps->invalid())
     {
         bumps->set();
@@ -1829,7 +1833,7 @@ static void hwrthdrrealrun()
         hwrthdrrealquad();
         hwrthdrreallog("bumpspecmapworld", bumps, 16, 32, stdexpect);
     }
-    else conoutf(CON_WARN, "hdr lot2 real bumpspecmapworld absent");
+    else conoutf(CON_WARN, "hdr check real bumpspecmapworld missing");
     float a = 128.0f / 255.0f;
     float src = l128 * l128;
     float partexpect = 0.25f * (1.0f - a) + src * a;
@@ -1849,7 +1853,7 @@ static void hwrthdrrealrun()
         hwrthdrrealquad();
         hwrthdrreallog("particle", parts, 24, 32, partexpect);
     }
-    else conoutf(CON_WARN, "hdr lot2 real particle absent");
+    else conoutf(CON_WARN, "hdr check real particle missing");
     glActiveTexture_(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, 0);
     glActiveTexture_(GL_TEXTURE1); glBindTexture(GL_TEXTURE_2D, 0);
     glActiveTexture_(GL_TEXTURE2); glBindTexture(GL_TEXTURE_2D, 0);
@@ -1892,7 +1896,7 @@ static bool hwrthdrtonemap(GLuint tex, bool yflip)
     Shader *s = useshaderbyname("hdrpresent");
     if(!s || s->invalid() || !tex)
     {
-        conoutf(CON_ERROR, "hdr lot2: shader hdrpresent absent, scene non affichee");
+        conoutf(CON_ERROR, "hdr check: hdrpresent shader missing, scene not shown");
         glClearColor(0.4f, 0.0f, 0.2f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
         return false;
@@ -1940,6 +1944,12 @@ static void hwrthdrpresent()
 // 0 leaves every texture at bias 0 (no GL call), as before the guide pass.
 // Not saved; 1 stays available to compare.
 VAR(hwrtdlssmipbias, 0, 0, 1);
+// Sharper textures with DLSS/FSR (Graphics > Anti-Aliasing, off by default):
+// while DLSS or FSR renders fewer pixels than the screen, the scene textures
+// get the mip bias log2(render width / display width), without the guide's
+// extra -1 (Quality -0.58, Balanced -0.79, Performance -1). DLAA and FSR
+// Native render every pixel and keep 0. Saved.
+VARP(hwrtupscalemipbias, 0, 0, 1);
 static void updatescenelodbias()
 {
     float bias = 0;
@@ -1949,6 +1959,11 @@ static void updatescenelodbias()
         int inw = screenw, inh = screenh;
         if(ngxissrmode(m) && !querysrsize(m, screenw, screenh, inw, inh)) inw = 0;
         if(inw > 0) bias = log2f(float(inw) / float(screenw)) - 1.0f;
+    }
+    else if(hwrtupscalemipbias && ngxissrmode(m) && !ngxblocked && modeready(m) && screenw >= 8 && screenh >= 8)
+    {
+        int inw = 0, inh = 0;
+        if(querysrsize(m, screenw, screenh, inw, inh) && inw > 0) bias = log2f(float(inw) / float(screenw));
     }
     setscenelodbias(bias);
 }
@@ -1961,6 +1976,8 @@ void hwrtscenebegin()
     scenebound = false;
     scenehdr = false;
     scenefail = false;
+    scenemsaa = false;
+    scenepresented = false;
     hwrthdrsetlin(false);
     if(!initing && !inchanged && !ngxblocked && ngxmodehave != hwrtngxmode)
     {
@@ -1994,7 +2011,7 @@ void hwrtscenebegin()
             {
                 loggedcause = cause;
                 const char *why = cause == 1 ? "injection laboratoire" : cause == 2 ? "shader hdrpresent absent" : "FBO scene RGBA16F incomplet";
-                conoutf(CON_ERROR, "hdr lot2: repli LDR coherent (%s). hwrthdr %d conserve.", why, hwrthdr);
+                conoutf(CON_ERROR, "hdr check: consistent LDR fallback (%s). hwrthdr %d kept.", why, hwrthdr);
             }
         }
         else
@@ -2035,6 +2052,25 @@ void hwrtscenebegin()
             return;
         }
     }
+    // MSAA window (an option of Classic lighting): ray tracing and DLAA, DLSS
+    // or FSR copy the depth and colour of the scene, which OpenGL refuses from
+    // a multisampled window (error 0x502, wrong model mask). The scene then
+    // goes through the single-sample internal target at full size, as with
+    // DLSS, and is put on the window at the end. MSAA smooths Classic + Native.
+    if(windowmsaa && screenw >= 8 && screenh >= 8 &&
+       (hwrt || (hwrtngxmode >= 1 && !ngxblocked && modeready(hwrtngxmode))) &&
+       ensurescenefb(screenw, screenh, GL_RGBA8))
+    {
+        glBindFramebuffer_(GL_FRAMEBUFFER, scenefbo);
+        glViewport(0, 0, screenw, screenh);
+        scenebound = true;
+        scenemsaa = true;
+        lastscenew = screenw;
+        lastsceneh = screenh;
+        lastfbw = screenw;
+        lastfbh = screenh;
+        return;
+    }
     destroyscenefb();
     scenew = wantw;
     sceneh = wanth;
@@ -2051,6 +2087,7 @@ void hwrtsceneend()
     if(scenehdr && !hdrpresented) hwrthdrpresent();
     else if(scenebound)
     {
+        if(scenemsaa && !scenepresented) hwrtsceneblitwindow();
         glBindFramebuffer_(GL_FRAMEBUFFER, 0);
         scenebound = false;
     }
@@ -2072,7 +2109,7 @@ static bool biascamerastill()
     while(dy < -180) dy += 360;
     float dp = camera1->pitch - biasprevpitch;
     // Screen-space persist is only valid if this frame's view matches the
-    // previous mask. 0.45 deg/frame lab spin is already above this gate.
+    // previous mask. 0.45 deg/frame test spin is already above this gate.
     return fabsf(dy) < 0.2f && fabsf(dp) < 0.2f && camera1->o.dist(biasprevpos) < 0.15f;
 }
 
@@ -2403,9 +2440,46 @@ static bool biaswanted()
     return fsrmode(ngxmodeapp) && hwrtdlaabias > 0 && lastbiasbound && lastbiasgl && texbias.gltex;
 }
 
+// A blit cannot write into a multisampled window: draw the scene instead.
+static bool drawscenewindow()
+{
+    GLboolean blend = glIsEnabled(GL_BLEND), depth = glIsEnabled(GL_DEPTH_TEST), cull = glIsEnabled(GL_CULL_FACE),
+              scissor = glIsEnabled(GL_SCISSOR_TEST);
+    GLint prevfb = 0, prevvp[4], prevactive = 0, prevtex = 0;
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prevfb);
+    glGetIntegerv(GL_VIEWPORT, prevvp);
+    glGetIntegerv(GL_ACTIVE_TEXTURE, &prevactive);
+    glActiveTexture_(GL_TEXTURE0);
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &prevtex);
+    glBindFramebuffer_(GL_FRAMEBUFFER, 0);
+    glViewport(0, 0, screenw, screenh);
+    glDisable(GL_BLEND);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);
+    glDisable(GL_SCISSOR_TEST);
+    glBindTexture(GL_TEXTURE_2D, scenecolor);
+    bool stretch = scenew != screenw || sceneh != screenh;
+    if(stretch) glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    SETSHADER(screenrect);
+    gle::colorf(1, 1, 1, 1);
+    screenquad(1, 1);
+    if(stretch) glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glBindTexture(GL_TEXTURE_2D, prevtex);
+    glActiveTexture_(GLenum(prevactive));
+    glBindFramebuffer_(GL_FRAMEBUFFER, prevfb);
+    glViewport(prevvp[0], prevvp[1], prevvp[2], prevvp[3]);
+    if(blend) glEnable(GL_BLEND);
+    if(depth) glEnable(GL_DEPTH_TEST);
+    if(cull) glEnable(GL_CULL_FACE);
+    if(scissor) glEnable(GL_SCISSOR_TEST);
+    scenepresented = true;
+    return true;
+}
+
 bool hwrtsceneblitwindow()
 {
     if(!scenefbo || scenew < 8 || sceneh < 8 || screenw < 8 || screenh < 8) return false;
+    if(windowmsaa) return drawscenewindow();
     if(!glBlitFramebuffer_) return false;
     GLint prevread = 0, prevdraw = 0;
     glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &prevread);
@@ -2594,7 +2668,7 @@ static bool configure(int inw, int inh, int outw, int outh, int mode)
     }
     vkWaitForFences(hwrtdev.device, 1, &fences[0], VK_TRUE, UINT64_MAX);
     gwcopyerr();
-    conoutf(CON_INIT, "hdr lot2 ngx create dll: %s", ngxreason);
+    conoutf(CON_INIT, "hdr check ngx create dll: %s", ngxreason);
     if(rc != SAUER_NGX_OK || !gwhandle)
         return false;
     dlaainw = info.in_w ? info.in_w : uint32_t(inw);
@@ -2608,7 +2682,7 @@ static bool configure(int inw, int inh, int outw, int outh, int mode)
     ngxcfghdr = int(info.hdr);
     ngxcfgautoexp = int(info.auto_exposure);
     ngxfeatfresh = 1;
-    conoutf(CON_INIT, "hdr lot2 ngx contrat IsHDR=%u AutoExposure=%u MVLowRes=1 DepthInverted=0 MVJittered=0 flags=0x%x in %ux%u out %ux%u couleur %s",
+    conoutf(CON_INIT, "hdr check ngx contract IsHDR=%u AutoExposure=%u MVLowRes=1 DepthInverted=0 MVJittered=0 flags=0x%x in %ux%u out %ux%u colour %s",
             (unsigned)info.hdr, (unsigned)info.auto_exposure, (unsigned)info.flags,
             dlaainw, dlaainh, dlaaoutw, dlaaouth,
             info.hdr ? "VK_FORMAT_R16G16B16A16_SFLOAT" : "VK_FORMAT_R8G8B8A8_UNORM");
@@ -2924,6 +2998,12 @@ static bool packinputs(const hwrttemporalinput *tin)
     return packok;
 }
 
+// Sharpening after DLAA/DLSS (Graphics > Anti-Aliasing), 0 = off, the default.
+// The open RCAS filter of AMD FidelityFX FSR (the one FSR sharpening uses),
+// on the DLAA/DLSS picture while it is put on the screen, same 0-100 scale as
+// FSR sharpening. SDR picture only (not in native HDR). Saved.
+VARP(hwrtdlsssharpness, 0, 0, 100);
+
 static bool blitoutput()
 {
     if(hwrtdlaainject == 4)
@@ -2931,7 +3011,14 @@ static bool blitoutput()
         setreason("injected: blit failure");
         return false;
     }
-    Shader *s = useshaderbyname("hwrtdlaablit");
+    Shader *s = NULL;
+    bool sharpen = hwrtdlsssharpness > 0 && !fsrmode(ngxmodeapp);
+    if(sharpen)
+    {
+        s = useshaderbyname("hwrtdlaarcas");
+        if(!s || s->invalid()) sharpen = false;
+    }
+    if(!sharpen) s = useshaderbyname("hwrtdlaablit");
     if(!s || s->invalid())
     {
         setreason("missing shader hwrtdlaablit");
@@ -2949,12 +3036,19 @@ static bool blitoutput()
     glActiveTexture_(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, texcolorout.gltex);
     s->set();
+    if(sharpen)
+    {
+        // FSR's scale: strength in stops 2 - 2 * sharpness, RCAS gets 2^-stops.
+        float stops = 2.0f - 2.0f * clamp(hwrtdlsssharpness / 100.0f, 0.0f, 1.0f);
+        LOCALPARAMF(rcasparams, powf(2.0f, -stops), 1.0f / max(screenw, 1), 1.0f / max(screenh, 1), 0);
+    }
     screenquad(1, 1);
     glBindFramebuffer_(GL_FRAMEBUFFER, prevfb);
     glViewport(prevvp[0], prevvp[1], prevvp[2], prevvp[3]);
     if(blend) glEnable(GL_BLEND);
     if(depth) glEnable(GL_DEPTH_TEST);
     if(cull) glEnable(GL_CULL_FACE);
+    scenepresented = true;
     return true;
 }
 
@@ -3737,7 +3831,7 @@ static void writeexposuretex()
     {
         explog = 1;
         explogmul = mul;
-        conoutf("hdr lot2 exposition FBO 0x%x stops %.3f valeur %.6f pre_exposure=1 exposure_scale=1 texture_R32F=%.6f AutoExposure=0 IsHDR=%d",
+        conoutf("hdr check exposure FBO 0x%x stops %.3f value %.6f pre_exposure=1 exposure_scale=1 texture_R32F=%.6f AutoExposure=0 IsHDR=%d",
                 int(expst), stops, mul, mul, ngxcfghdr);
     }
     glBindFramebuffer_(GL_FRAMEBUFFER, prevfb);
@@ -3780,7 +3874,7 @@ static void hwrthdrngxread(int inw, int inh, int outw, int outh)
     int x0, y0, yc;
     hdrstamporigin(x0, y0, yc);
     bool sr = ngxissrmode(hwrtngxmode);
-    conoutf("hdr lot2 ngx lecture in %dx%d vk 0x%x out %dx%d vk 0x%x IsHDR %d pre_exposure=1 exposure_scale=1",
+    conoutf("hdr check ngx read in %dx%d vk 0x%x out %dx%d vk 0x%x IsHDR %d pre_exposure=1 exposure_scale=1",
             inw, inh, int(texcolorin.format), outw, outh, int(texcolorout.format), ngxcfghdr);
     loopi(4)
     {
@@ -3797,9 +3891,9 @@ static void hwrthdrngxread(int inw, int inh, int outw, int outh)
         float eout = fabsf(outrgba[0] - HDR_STAMP_VAL[i]);
         bool pin = inok && ein <= tol && fabsf(inrgba[1] - HDR_STAMP_VAL[i]) <= tol && fabsf(inrgba[2] - HDR_STAMP_VAL[i]) <= tol;
         bool pout = outok && eout <= tol && fabsf(outrgba[1] - HDR_STAMP_VAL[i]) <= tol && fabsf(outrgba[2] - HDR_STAMP_VAL[i]) <= tol;
-        conoutf("hdr lot2 ngx in %s (x %d y %d) %s got %.6f %.6f %.6f expect %.6f tol %.4f errabs %.6f",
+        conoutf("hdr check ngx in %s (x %d y %d) %s got %.6f %.6f %.6f expect %.6f tol %.4f errabs %.6f",
                 HDR_STAMP_NAME[i], sx, sy, pin ? "ok" : "FAIL", inrgba[0], inrgba[1], inrgba[2], HDR_STAMP_VAL[i], tol, ein);
-        conoutf("hdr lot2 ngx out %s (x %d y %d) %s got %.6f %.6f %.6f expect %.6f tol %.4f errabs %.6f",
+        conoutf("hdr check ngx out %s (x %d y %d) %s got %.6f %.6f %.6f expect %.6f tol %.4f errabs %.6f",
                 HDR_STAMP_NAME[i], ox, oy, pout ? "ok" : "FAIL", outrgba[0], outrgba[1], outrgba[2], HDR_STAMP_VAL[i], tol, eout);
     }
 }
@@ -3817,7 +3911,7 @@ static void hwrthdrngxwindow()
         while(glGetError() != GL_NO_ERROR);
         glReadPixels(x, y, 1, 1, GL_RGBA, GL_FLOAT, rgba);
         int err = int(glGetError());
-        conoutf("hdr lot2 ngx window %s (x %d y %d) %.6f %.6f %.6f gl 0x%x",
+        conoutf("hdr check ngx window %s (x %d y %d) %.6f %.6f %.6f gl 0x%x",
                 HDR_STAMP_NAME[i], x, y, rgba[0], rgba[1], rgba[2], err);
     }
 }
@@ -3913,14 +4007,14 @@ void hwrtdlaaframe()
         }
         bool useout = !ngxfeatfresh && !roundtrip && texcolorout.gltex;
         if(!useout)
-            conoutf("hdr lot2 ngx premiere image: tone map de la scene lineaire (sortie de reset non presentee)");
+            conoutf("hdr check ngx first frame: tone map of the linear scene (reset output not presented)");
         blitok = hwrthdrtonemap(useout ? texcolorout.gltex : scenecolor, useout);
         if(doread)
         {
             hwrthdrngxwindow();
             hdrreadpending = 0;
             if(getlogfile()) fflush(getlogfile());
-            conoutf("hdr lot2 read_done");
+            conoutf("hdr check read_done");
         }
         if(blitok) hwrthdrpresentedone();
     }
@@ -4042,15 +4136,15 @@ static void samplemem()
 static void dlaashotsdir()
 {
     string d1, d2, d3;
-    copystring(d1, "shots");
+    copystring(d1, "bench");
     path(d1);
     createdir(d1);
-    copystring(d2, "shots/dlss-q");
+    copystring(d2, "bench/dlaa-q");
     path(d2);
     createdir(d2);
     if(ngxshotsub[0])
     {
-        nformatstring(d3, sizeof(d3), "shots/dlss-q/%s", ngxshotsub);
+        nformatstring(d3, sizeof(d3), "bench/dlaa-q/%s", ngxshotsub);
         path(d3);
         createdir(d3);
     }
@@ -4058,8 +4152,8 @@ static void dlaashotsdir()
 
 static void dlaashotrel(char *dst, int len, const char *file)
 {
-    if(ngxshotsub[0]) nformatstring(dst, len, "shots/dlss-q/%s/%s", ngxshotsub, file);
-    else nformatstring(dst, len, "shots/dlss-q/%s", file);
+    if(ngxshotsub[0]) nformatstring(dst, len, "bench/dlaa-q/%s/%s", ngxshotsub, file);
+    else nformatstring(dst, len, "bench/dlaa-q/%s", file);
     path(dst);
 }
 
@@ -4078,7 +4172,7 @@ static void hwrtdlaashotdir(char *name)
         *d = 0;
     }
     dlaashotsdir();
-    conoutf("hwrt ngx: proof dir shots/dlss-q/%s", ngxshotsub[0] ? ngxshotsub : "(root)");
+    conoutf("hwrt ngx: proof dir bench/dlaa-q/%s", ngxshotsub[0] ? ngxshotsub : "(root)");
 }
 COMMAND(hwrtdlaashotdir, "s");
 
@@ -4422,7 +4516,7 @@ static void dlaabenchwrite()
         return;
     }
     double wall = benchrunend > benchrunstart ? benchrunend - benchrunstart : 0;
-    fprintf(f, "protocol timed-still-v2  (replaces 300-frame ~1s integer-ms benches; those files live in shots/dlaa-ngx/bench-300frames)\n");
+    fprintf(f, "protocol timed-still-v2  (replaces the older 300-frame ~1s integer-ms benches)\n");
     fprintf(f, "bench %s frames %d warmup_s %d measure_s %d output %dx%d render %dx%d ngx_active_in %ux%u ngx_active_out %ux%u ngx_last_in %ux%u ngx_last_out %ux%u mode_pref %d mode_app %d blocked %s\n",
             benchname, benchn, DLAA_BENCHWARMSEC, benchrunsec, screenw, screenh, lastscenew, lastsceneh,
             dlaainw, dlaainh, dlaaoutw, dlaaouth, lastngxinw, lastngxinh, lastngxoutw, lastngxouth,
@@ -4639,11 +4733,11 @@ COMMAND(hwrtdlaaseq, "si");
 static void hwrtdlaalabalign()
 {
     // Same initial temporal/jitter/bias persist for A/B. This sets tin->reset
-    // so NGX history starts empty on both sides. Lab only.
-    hwrttemporalreset("lab align");
+    // so NGX history starts empty on both sides. Debug only.
+    hwrttemporalreset("test align");
     hwrtresetvelocity();
     hwrtdlaabiasreset();
-    conoutf("hwrt ngx: lab align (jitter sequence, velocity, bias persist; NGX reset flag)");
+    conoutf("hwrt ngx: test align (jitter sequence, velocity, bias persist; NGX reset flag)");
 }
 COMMAND(hwrtdlaalabalign, "");
 ICOMMAND(hwrtdlaabiassrcfb, "", (), intret(lastbiassrcfb));

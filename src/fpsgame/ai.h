@@ -310,6 +310,9 @@ namespace ai
 	extern void damaged(fpsent *d, fpsent *e);
 	extern void killed(fpsent *d, fpsent *e);
 	extern void itemspawned(int ent);
+	extern void noise(fpsent *d, int n, const vec &pos);
+	extern bool tinyapanamed(fpsent *d, const char *name);
+	extern void stylebotplay(int cn, int st);
 
     extern void render();
 }

@@ -31,7 +31,7 @@ namespace game
     VARP(friendcolor, 0, 8, 9); // leftover 30 Aug; ally/enemy split below
     VARP(friendallycolor, -1, 8, 9);   // -1 none, 8 cyan — same team
     VARP(friendenemycolor, -1, 6, 9);  // -1 none, 6 orange — other team / FFA
-    VARP(mycolor, -1, 9, 9);           // -1 none; your body + name, independent of friends
+    VARP(mycolor, -1, -1, 9);          // -1 none (default: stock look); your body + name, independent of friends
     SVARP(clantag, "");
     SVAR(friendaddname, "");
     VAR(numfriends, 0, 0, MAXFRIENDS);

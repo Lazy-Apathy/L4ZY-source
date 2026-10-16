@@ -518,7 +518,7 @@ enum { HWRT_MODE_MASK_MODELS = 0x100, HWRT_MODE_SHADE_MODELS = 0x200, HWRT_MODE_
 // world's spec shaders their highlights back (hwrtspecular). Bits 16-20 carry
 // the water plane count.
 enum { HWRT_MODE_REFL_WATER = 0x2000, HWRT_MODE_REFL_WORLD = 0x4000, HWRT_MODE_SPEC = 0x8000, HWRT_MODE_REFL_PLANESHIFT = 16 };
-// rt-performance-lot4: sky ray reach in 32-unit steps (bits 24-29), adaptive reach, fast camera.
+// Performance options: sky ray reach in 32-unit steps (bits 24-29), adaptive reach, fast camera.
 enum { HWRT_MODE_SKYRANGE_SHIFT = 24, HWRT_MODE_RT_ADAPT = 0x200000, HWRT_MODE_RT_FAST = 0x400000, HWRT_MODE_SKYOPAQUE = 0x800000 };
 
 extern int hwrthdrprobe;

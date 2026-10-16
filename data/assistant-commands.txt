@@ -63,7 +63,7 @@ action nextfollow INT? | follow the next (1) or previous (-1) player | suivre su
 action universaldelta INT | mouse wheel action: 1 up, -1 down (while playing: next / previous weapon in wheel order; in edit mode: the edit tools) | molette roulette arme
 action suicide | kill yourself (you respawn) | suicide mourir tuer
 action togglemainmenu | open / close the main menu (Esc by default) | menu principal echap
-action addbot INT? | add a bot (local game, or as master); optional skill 1-100 | bot ajouter
+action addbot INT? WORD? | add a bot (local game, or as master); optional skill 1-101; optional style classic or tinyapa (on an L4ZY server a tinyapa bot stays Tiny Apa whoever's game runs it; elsewhere it follows bots play). Also on the Master page: Add bot: Classic / Tiny Apa | bot ajouter tiny apa classique style
 action delbot | remove a bot | bot retirer supprimer
 action conskip INT | scroll the console (or the expanded chat F10 / the kill list F8 while open): 5 = back, -1000 = to the newest line | console defiler remonter historique
 action spectator INT | 1 = become a spectator, 0 = join the game again | spectateur regarder rejoindre
@@ -71,6 +71,8 @@ action paused INT | 1 = pause, 0 = resume (local games and demos, or as master) 
 action demorewind INT? | while watching a demo: go back, in milliseconds (default 10000 = 10 s) | demo reculer retour arriere
 action demoforward INT? | while watching a demo: go ahead, in milliseconds (default 10000 = 10 s) | demo avancer
 action toggledemohd | while watching a demo: switch between the exact HD aim and the vanilla aim | demo hd visee
+action toggledemobar | while watching a demo: hide or show the demo controls and the player list, to watch or film the demo cleanly | demo cacher masquer barre controles filmer
+action toggledemoxray | while watching a demo played on this computer: show every player through the walls in their colour, or not (also the X-RAY button of the demo bar) | demo rayons x xray travers murs silhouettes
 action allowspedit | hold it to enter edit mode in single player modes (Ctrl by default) | edition editer solo ctrl
 action editcopy | edit mode: copy the selection | edition copier
 action editpaste | edit mode: paste | edition coller

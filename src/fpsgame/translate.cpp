@@ -57,6 +57,24 @@ static vector<tjob *> tjobs;
 static SDL_mutex *tmutex = NULL;
 static int tfailstreak = 0, tcooloff = 0;
 
+// AI behind the service, from the background /update poll: -1 unknown (service
+// not answered yet, or too old to say), 0 none, 1 ready, 2 loading. With no AI
+// at all, nothing is sent to the service: chat is shown and sent at once.
+static int tai = -1, tai_hintms = 0;
+static bool tai_wasnone = false;
+
+static bool tnoai()
+{
+    return tai == 0;
+}
+
+static void tnoaisent()
+{
+    if(tai_hintms && totalmillis - tai_hintms < 60000) return;
+    tai_hintms = totalmillis ? totalmillis : 1;
+    conoutf("\f4no AI loaded, sent as typed: install a model in Chat Translation > Model");
+}
+
 static char tprev_src[TBUF], tprev_dst[TBUF], tprev_watch[TBUF], tprev_draw[TBUF];
 static char tprev_lang[16], tprev_watchlang[16], tprev_mention[MAXNAMELEN+8], tprev_watchmention[MAXNAMELEN+8];
 static int tprev_watchms = 0, tprev_femme = 0;
@@ -1271,6 +1289,18 @@ static void tupdatesetkv(const char *k, const char *v)
     else if(!strcmp(k, "notes") && !tupdate_msg[0]) tmodelcopyascii(tupdate_msg, sizeof(tupdate_msg), v);
     else if(!strcmp(k, "progress")) tupdate_progress = clamp(atoi(v), 0, 100);
     else if(!strcmp(k, "avail")) tupdateavail = clamp(atoi(v), 0, 3);
+    else if(!strcmp(k, "ai")) tai = clamp(atoi(v), 0, 2);
+}
+
+// The first AI ready after "none" in this game: say so once. The translation
+// settings are never changed here: on, unless the player turned it off.
+static void tainote()
+{
+    if(tai == 0) { tai_wasnone = true; return; }
+    if(tai != 1 || !tai_wasnone) return;
+    tai_wasnone = false;
+    if(translatechat || translateteamchat) conoutf("\f0AI loaded: chat translation is on (F7 mutes it)");
+    else conoutf("\f4AI loaded: chat translation stays off as you chose (F7 turns it on)");
 }
 
 static void tupdateparse(const char *resp)
@@ -1286,6 +1316,7 @@ static void tupdateparse(const char *resp)
     tupdate_progress = 0;
     tupdate_restart = false;
     tupdateavail = 0;
+    tai = -1;
 
     char *hdrend = strstr(resp, "\r\n\r\n");
     const char *raw = hdrend ? hdrend + 4 : "";
@@ -1309,6 +1340,7 @@ static void tupdateparse(const char *resp)
         while(*p=='\r' || *p=='\n') p++;
     }
     if(!tupdate_state[0]) copystring(tupdate_state, "ok", sizeof(tupdate_state));
+    tainote();
     if(tupdateavail == 1 && !tupdate_announced && tupdate_ver[0])
     {
         tupdate_announced = true;
@@ -2158,6 +2190,11 @@ static void tsayrdo(char *text, bool team)
         conoutf("/%s <message> : careful translation (slower), sent only if it succeeds", team ? "tsayteamr" : "tsayr");
         return;
     }
+    if(tnoai())
+    {
+        conoutf("\f4no AI loaded, nothing sent: install a model in Chat Translation > Model");
+        return;
+    }
     if(tcarefulbusy())
     {
         conoutf("\f4still translating the previous line carefully, nothing sent: %s", buf);
@@ -2184,7 +2221,7 @@ static void tsayrdo(char *text, bool team)
 static void tpollpreview()
 {
     tprev_draw[0] = 0;
-    if(!translatepreview) return;
+    if(!translatepreview || tnoai()) return;
     if(commandmillis < 0) return;
 
     char text[TBUF], lang[16], mention[MAXNAMELEN+8], last[TBUF], lastspk[MAXSTRLEN];
@@ -2284,8 +2321,9 @@ bool translateincoming(fpsent *d, const char *text, bool team)
     const char *forjob = body[0] ? body : (text ? text : "");
     bool own = d && d == player1;
     bool mute = team ? !translateteamchat : !translatechat;
+    bool noai = tnoai();
 
-    if(mute && !own && d && forjob[0] && !tcooling())
+    if(mute && !noai && !own && d && forjob[0] && !tcooling())
     {
         if(tjobs.length() < TMAXJOBS-2)
         {
@@ -2302,7 +2340,7 @@ bool translateincoming(fpsent *d, const char *text, bool team)
 
     if(!d || !text || !text[0]) return false;
 
-    if(mute || tcooling())
+    if(mute || noai || tcooling())
     {
         int uid;
         if(team) uid = conoutfid(CON_TEAMCHAT, "\fs\f8[team]\fr %s: \f8%s", chatcolorname(d), chatpaintmention(text, '8'));
@@ -2394,6 +2432,11 @@ static void tretryfrom(tretryline src, bool inplace)
     if(!src.used || !src.original[0])
     {
         conoutf("/tretry : no chat, MOTD or [INFO] line to retranslate yet");
+        return;
+    }
+    if(tnoai())
+    {
+        conoutf("\f4no AI loaded, nothing to retranslate: install a model in Chat Translation > Model");
         return;
     }
     if(tuidbusy(src.uid))
@@ -2525,6 +2568,12 @@ static void tsaydo(char *text, bool team, bool reply, const char *mention, const
     copystring(buf, text, TBUF);
     ttrim(buf);
     if(!buf[0]) return;
+    if(tnoai())
+    {
+        tsendtranslated(buf, buf, team, mention, tlangout());
+        tnoaisent();
+        return;
+    }
     if(reply && !(last && last[0]) && !tlast_in_text[0] && !(mention && mention[0]))
         conoutf("\f4no chat to reply to, using %s", tlangout());
     if(tcooling())
@@ -2755,7 +2804,7 @@ bool completeplayername(char *s, int maxlen, int dir, bool tab)
 
 bool trytranslatedsay(const char *text, const char *action)
 {
-    if(!translateauto || !text || !text[0] || text[0]=='/') return false;
+    if(!translateauto || tnoai() || !text || !text[0] || text[0]=='/') return false;
     bool team = action && strstr(action, "sayteam");
     tsaydo(const_cast<char *>(text), team, tautolast(), NULL, NULL, NULL);
     return true;
@@ -2874,6 +2923,8 @@ ICOMMAND(translatestatus, "", (),
     conoutf("traduction : %s, recu -> %s, envoi -> %s, auto-translate %s, femme %s, service %s:%d (%s), %d en attente",
         on, tlangin(), tlangout(), tautolabel(), translatefemme ? "on" : "off", thost(), tport(), svc, pending);
 });
+
+ICOMMAND(translateai, "", (), intret(tai));
 
 // settings assistant (engine/menus.cpp): same local service, blocking call, run from its own thread
 bool assistanthttp(const char *pathq, const char *body, int bodylen, char *resp, int resplen, int timeoutms)

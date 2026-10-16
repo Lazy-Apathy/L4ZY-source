@@ -369,7 +369,7 @@ config always wins.
 | `hwrtworldgain` | GL's world overbright, applied to the light mode 7 traces. Default 2, which is what `renderva.cpp` hands the world shader as `colorparams`. Scales point lights, sun and sky; never the `ambient` constant, so raising it opens the gap between lit and shadowed rather than flattening it. 1 is the old half-dark world |
 | `hwrtskinbudget` | megabytes of GPU memory allowed for the model-skin array at 1024 before falling back to 512 (default 1024, min 64, max 4096). A ceiling, not a reservation. 192 layers at 1024 need 768 MB, so the default never trips the fallback |
 | `hwrtmaxinsts` | how many TLAS instances the scenery may fill (default 4096 = the cap, min 128). Only mapmodels answer to it, and always the nearest ones, so lowering it never removes a player and what it drops is on the horizon. Barely a speed dial: dispatch on `cmvalley` at 1440p in its forest is 5.90 ms for the nearest 256, 6.94 for 1024, 7.46 for all 2614, i.e. 48 fps either way against 62 with `hwrt 0`. What a ray costs is the alpha-tested canopy in front of the camera, which the sort always keeps |
-| `hwrtskyrays` | cosine-weighted hemisphere rays for skylight (default 1 since 2026-10-04, cap 4). With NRD + blue noise one ray shows no grain (`shots/rayons-ciel` study, then a tester's test). Whenever NRD is not the effective denoiser (Sauer filter / skyage: NRD off, unavailable or failed), at least 4 rays are traced, without changing the saved value: there one ray is a coin flip and filter + TAA did not reach zero dots. `l4zymigration 2` moves a saved 4 to 1 once; `hwrtskystatus` prints `cvar_rays` and `eff_rays`. `hwrtskyfilter` still averages leftover grain with a 5×5 on the same plane before the bake-style `max()`. Unfiltered on `authentic` at 1440p: 331 / 294 / 224 fps at 1 / 2 / 4 rays (GL 869) |
+| `hwrtskyrays` | cosine-weighted hemisphere rays for skylight (default 1 since 2026-10-04, cap 4). With NRD + blue noise one ray shows no grain (side-by-side study, then a tester's test). Whenever NRD is not the effective denoiser (Sauer filter / skyage: NRD off, unavailable or failed), at least 4 rays are traced, without changing the saved value: there one ray is a coin flip and filter + TAA did not reach zero dots. `l4zymigration 2` moves a saved 4 to 1 once; `hwrtskystatus` prints `cvar_rays` and `eff_rays`. `hwrtskyfilter` still averages leftover grain with a 5×5 on the same plane before the bake-style `max()`. Unfiltered on `authentic` at 1440p: 331 / 294 / 224 fps at 1 / 2 / 4 rays (GL 869) |
 | `hwrtskyfilter` | 1 (default) = the workgroup skyvis filter. Neighbours on the same plane share leftover grain. 0 is the raw term |
 | `hwrtskytemporal` | frames of skyvis to accumulate on top of the spatial filter (default 32, cap 128; 0 or 1 is off). skyvis is view-independent geometry, so a hit recognised as the same surface point inherits the whole running average that point carries — no colour clamp, and therefore not capped by its own neighbourhood the way `looktaa` is. History lives in a ping-pong `RGBA16F` pair (bindings 13/14), 59 MB at 1440p. 96 frames measure the same as 32: the ceiling is the rejection test, not the frame count |
 | `hwrtskybluenoise` | 1 (default) = the sky rays of the world pixels NRD denoises come from a 128×128 blue-noise tile (binding 25, two void-and-cluster masks, u1/u2) shifted every frame by the R2 sequence, the four rays of a pixel spread on a (1/2, 1/4) lattice. Same ray count, same estimator, same converged value; less grain into REBLUR. The skyage path (Sauer filter, models, NRD off) keeps the pcg hash. 0 = the hash everywhere. Not saved; a change reseeds the sky history |
@@ -377,14 +377,14 @@ config always wins.
 | `hwrtvelocity` | 0 (default) = no extra work. 1 = write the velocity image every frame (static world, rigid mapmodels, colour-visible skinned players, first-person hudgun). Does not change the presented picture. Not VARP, so it is not saved |
 | `hwrtdlaajitter` | 0 (default) = off. 1 = trial Halton(2,3) subpixel offset once per main view, not saved. Independent of looktaa accumulation; looktaa jitter and resolve are skipped while this is on so the offset is not applied twice. The FPS gun gets the same pixel shift despite its own FOV. Turning it off restores the usual looktaa path. The jittered picture can shimmer: that is not DLAA quality |
 | `hwrtveldebug` | 0 = off. 1 = coloured vectors (grey = still, magenta = unsupported). 2 = reprojected previous frame. 3 = reprojection error (green = aligned, red = wrong). `hwrtvelcycle` walks 0→1→2→3→0 and uses `setvar`, so returning to off frees the diagnostic textures and drops history. Overlay only; the velocity image itself is unchanged. The overlay is the 3D scene including the first-person gun. Modes 2/3 add `(prev_jitter - curr_jitter)` when warping two jittered colour frames |
-| `hwrtvelhud` | 1 (default) = write first-person hudgun vectors (lot 5). 0 = leave those pixels to the world pass |
+| `hwrtvelhud` | 1 (default) = write first-person hudgun vectors (stage 5). 0 = leave those pixels to the world pass |
 | `hwrtsundisk` | 0 (default) keeps the map skybox in the lighting view. 1 skips the cubemap and draws a GL disk on `sunlightdir` so a painted sun cannot disagree with the shadow |
 | `rtaoradius` | hemisphere ray length in Sauer world units (default 32) |
 | `rtaoscale` | 0 = overlay only; 0..1 multiplies AO onto the vanilla lightmapped frame |
 | `rtaobias` | origin offset along the reconstructed normal, so the ray does not self-hit |
 | `hwrtngxmode` | saved upscaler choice: 0 Native, 1 DLAA, 2-4 DLSS Quality/Balanced/Performance, 5 FSR Native, 6-8 FSR Quality/Balanced/Performance. `hwrtngxstats` prints the state in force |
 | `hwrtdlssmipbias` | 0 (default since 2026-10-04) = scene textures keep mip bias 0 in DLAA/DLSS, as before the DLSS guide pass. 1 = the guide's bias log2(render/display) - 1 (DLAA -1, Quality -1.58, Performance -2) on world and model textures; sharper, but a tester saw aliasing/shimmer with it, even in DLAA. FSR and Native always 0. Not saved |
-| `hwrtdiffmip` | 2 (default since aliasing-rt). Which mip level the traced world diffuse is read at (primary hits and their blend layer). 0 = level 0 always (before 2026-10-04: magnified close up, but a far or grazing surface aliases and shimmers). 1 = old footprint experiment: `textureGrad` from the pixel footprint, isotropic, no bias (stable but soft, grazing floors blur). 2 (aliasing-rt) = footprint from the neighbour pixels' rays on the face plane (ray differentials, render resolution, same jittered matrix as the primary ray), scaled by 2^`hwrtdiffmipbias`, plus log2(render/display) with `hwrtdiffmipauto` when DLSS/FSR upscale, sampled through an anisotropic sampler (`hwrtdiffaniso`, binding 29, needs `samplerAnisotropy`). Close surfaces stay at level 0 (same image as 0), far and grazing ones get filtered. Reflections keep their own ray-cone level; models keep level 0. Not saved |
+| `hwrtdiffmip` | 2 (default since 2026-10-04). Which mip level the traced world diffuse is read at (primary hits and their blend layer). 0 = level 0 always (before 2026-10-04: magnified close up, but a far or grazing surface aliases and shimmers). 1 = old footprint experiment: `textureGrad` from the pixel footprint, isotropic, no bias (stable but soft, grazing floors blur). 2 = footprint from the neighbour pixels' rays on the face plane (ray differentials, render resolution, same jittered matrix as the primary ray), scaled by 2^`hwrtdiffmipbias`, plus log2(render/display) with `hwrtdiffmipauto` when DLSS/FSR upscale, sampled through an anisotropic sampler (`hwrtdiffaniso`, binding 29, needs `samplerAnisotropy`). Close surfaces stay at level 0 (same image as 0), far and grazing ones get filtered. Reflections keep their own ray-cone level; models keep level 0. Not saved |
 | `hwrtdiffmipbias` | 0 (was -0.5 until 2026-10-05): lod bias of `hwrtdiffmip 2` (negative = sharper). Under DLAA in motion the shimmer of a far or grazing texture grows with the detail it keeps; -0.5 measured 15-35 % more shimmer on mid and far walls and floors for 20-30 % more detail. Close (magnified) surfaces are unchanged. -3..2. Saved; menu Graphics > RT Textures: Stable (0) / Sharper (-0.5) |
 | `hwrtdiffmipauto` | 1: add log2(render width / display width) to that bias while DLSS/FSR render below the display (DLSS Quality about -0.58). 0 = footprint of the render pixel only. Not saved |
 | `hwrtdiffaniso` | 1: anisotropic filtering (up to 16x, device limit) for `hwrtdiffmip 2`. 0 = isotropic `textureGrad`. Not saved |
@@ -787,7 +787,7 @@ lattice, so a pixel already covers four azimuths and both radius halves.
 built and simulated as well; for 1/age accumulation and REBLUR's history it was
 no better than the R2 shift and eight times larger.
 
-Measured (lab, 2026-10-01, RTX 4070 Ti SUPER, 1600×900 window, SDR, still
+Measured (2026-10-01, RTX 4070 Ti SUPER, 1600×900 window, SDR, still
 camera, 11 canon maps, 9 with sky light; reference = same chain with 256
 pcg rays per pixel averaged over 24 frames; error = RMSE of the skyvis view
 over world pixels, final image after DLAA/DLSS): with NRD the error falls by
@@ -1021,7 +1021,7 @@ the two queues deadlock.
 | `lights.cpp` | `ET_LIGHT` enumeration into a 256-cap SSBO plus a 144-byte sun/sky header (which now also carries the previous dispatch's `viewProj`, its camera position and the temporal blend weight), updated every frame |
 | `sky.cpp` | optional GL sun disk along `sunlightdir` (`hwrtsundisk` 1; default off so the map skybox stays) |
 | `velocity.cpp` | static-scenery, rigid-mapmodel and skinned-player motion vectors (`RGBA16F`, pixels, +Y up, unjittered when the trial is on) plus the reprojection overlay. GL only; off by default |
-| `temporal.cpp` | lot 6 HUD-less RGB8+D24 capture after the FPS gun, trial Halton jitter, unjittered/used matrix pair. No NGX |
+| `temporal.cpp` | stage 6 HUD-less RGB8+D24 capture after the FPS gun, trial Halton jitter, unjittered/used matrix pair. No NGX |
 | `shaders/debug.comp` | the phase 1 probe. Compile with `tools/compile-hwrt-shaders.py` |
 | `shaders/silhouette.comp` | phase 2 camera primary ray + `rayQueryKHR`. Same compile script |
 | `shaders/rtao.comp` | phase 3 depth reconstruct + hemisphere `rayQueryKHR`. Same compile script |
@@ -1036,7 +1036,7 @@ opaque world cubes and rigid mapmodels, unmarks players / water / grass /
 alpha / particles / deforming models, then writes the velocity image after
 particles (camera motion from depth, rigid object motion from a depth-tested
 alphatested pass); the first-person hudgun is then drawn into that image
-under the avatar projection (lot 5) so its silhouette carries vectors.
+under the avatar projection (stage 5) so its silhouette carries vectors.
 `allchanged` calls `hwrtrebuildworld` and
 `hwrtresetvelocity`, `cleanupgl` and the
 main `cleanup` call `hwrtcleanup` / `cleanuptemporal`, `drawskybox` keeps the map cubemap
@@ -1208,13 +1208,13 @@ exactly the ones a block-buffered log loses.
   (mapmodels that are `EF_ANIM`, skeletal, or vertex-deforming are unmarked,
   as are pickups, flags, water, grass, world-alpha, particles, attached
   vwep/armour, ragdolls, and the first-person body when it is only a shadow
-  occluder). Colour-visible `ENT_PLAYER` skeletal meshes (lot 3: `mrfixit`
+  occluder). Colour-visible `ENT_PLAYER` skeletal meshes (stage 3: `mrfixit`
   as local third-person / bot) write stencil 3 and receive their own
   per-vertex vectors from the dualquats actually stored last frame — not
   from rewinding `lastmillis`. Other playermodels share that path but are
   not claimed. Spinning rigid mapmodels are marked. Sky never receives the
   mark. Decals and the RT composite keep it: they are paint / lighting on
-  the same surface. The first-person hudgun (lot 5, `mrfixit/hudguns/*`)
+  the same surface. The first-person hudgun (stage 5, `mrfixit/hudguns/*`)
   is rasterised into this image after the world/character passes, with
   the same avatar FOV / `avatardepth` projection the colour gun uses, and
   its own history slots (not the third-person body or vwep). Unsupported

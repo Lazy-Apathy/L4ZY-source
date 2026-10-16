@@ -154,6 +154,31 @@ namespace game
 
     bool clanmodactive() { return clanmod != 0; }
 
+    // a clan server in an online game: Tiny Apa bots can be asked for when they are added, and named for everyone
+    bool tinyapaserver() { return remote && clanmod != 0; }
+    ICOMMAND(tinyapaserver, "", (), intret(tinyapaserver() ? 1 : 0));
+
+    // /addbot [skill] [classic|tinyapa]: without a style, as always; with one, on a clan server the server keeps the
+    // style (Tiny Apa bots go to L4ZY games only); elsewhere a normal bot that follows the bots play setting
+    void addbotstyled(int skill, const char *style)
+    {
+        int st = -1;
+        if(style[0])
+        {
+            if(!strcasecmp(style, "tinyapa") || !strcmp(style, "2")) st = 2;
+            else if(!strcasecmp(style, "classic") || !strcmp(style, "0")) st = 0;
+            else { conoutf(CON_ERROR, "addbot: the style is classic or tinyapa"); return; }
+        }
+        if(st >= 0 && tinyapaserver())
+        {
+            defformatstring(msg, "%s %d %d", ADDBOT_CMD, skill, st);
+            addmsg(N_SERVCMD, "rs", msg);
+            return;
+        }
+        if(st == 2 && remote) conoutf("This server cannot keep Tiny Apa bots: this bot plays as each game's bots play setting.");
+        addmsg(N_ADDBOT, "ri", skill);
+    }
+
     bool isdemoplayback() { return demoplayback; }
 
     // Client announce, the WC-NG way (Jed, 01/10): once a remote server has
@@ -193,7 +218,7 @@ namespace game
         }
         // Servers turn this into an integer, so only a released version goes out
         // as is: exactly four dot-separated numbers, YEAR.MONTH.DAY.N. Anything
-        // else (unreleased lab or dev build) is announced as the word "dev".
+        // else (unreleased test or dev build) is announced as the word "dev".
         int len = 0, parts = 0, digits = 0;
         bool valid = true;
         for(const char *c = raw; *c && *c != '\r' && *c != '\n'; c++)
@@ -2169,6 +2194,12 @@ namespace game
                     int actor = -1, victim = -1, fovms = 0, xhms = 0;
                     if(sscanf(text + sizeof(FRAGRTALL_CMD)-1, " %d %d %d %d", &actor, &victim, &fovms, &xhms) == 4)
                         applyfragrtall(actor, victim, fovms, xhms);
+                    break;
+                }
+                if(!strncmp(text, BOTPLAY_CMD, sizeof(BOTPLAY_CMD)-1) && text[sizeof(BOTPLAY_CMD)-1] == ' ')
+                {
+                    int bcn = -1, st = 0;
+                    if(clanmodactive() && sscanf(text + sizeof(BOTPLAY_CMD)-1, " %d %d", &bcn, &st) == 2) ai::stylebotplay(bcn, st);
                     break;
                 }
                 if(!strncmp(text, DEMOREADY_CMD, sizeof(DEMOREADY_CMD)-1) && text[sizeof(DEMOREADY_CMD)-1] == ' ')

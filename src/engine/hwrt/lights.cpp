@@ -35,7 +35,7 @@ extern int farplane;
 // World.diff in hitlight.comp: 0 = lod 0 bilinear (the compute path until
 // 2026-10-04: far and grazing surfaces alias and shimmer), 1 = textureGrad from
 // the pixel's UV footprint on the hit triangle, isotropic, no bias (old A/B:
-// stable but soft, grazing floors blur). Default 2 (aliasing-rt, 2026-10-04):
+// stable but soft, grazing floors blur). Default 2 (anti-aliasing work, 2026-10-04):
 // the same footprint (neighbour pixel rays on the face plane, render
 // resolution, jittered matrix), scaled by 2^hwrtdiffmipbias (+ log2(render/
 // display) with hwrtdiffmipauto when DLSS/FSR upscale), filtered
@@ -88,7 +88,7 @@ ICOMMAND(hwrtdiffmipstatus, "", (),
 });
 // 0 play (albedo * lighting). 1 albedo only. 2 lighting only (white albedo).
 // 3 lod heatmap of the world-diffuse footprint (blue 0, green 1, red 2+).
-// Lab vis only: never a play look.
+// Debug view only: never a play look.
 VAR(hwrtdiffvis, 0, 0, 3);
 // Sky hemisphere seed. 0 = pixel + frame (old crawl). 1 = pixel only, so a
 // still camera does not retoss 1spp skyvis every frame. A world-quantized
@@ -109,7 +109,7 @@ VAR(hwrtskyhistfilter, 0, 1, 1);
 // 1/32 from the first accepted tap, which is the noisy-then-settles flash.
 VAR(hwrtskyage, 0, 1, 1);
 // 0 play. 1 reuse heatmap (hold green, mix dark-green, reset yellow, geom red,
-// miss blue). 2 skyvis grayscale. 3 age/32 grayscale. Lab vis only.
+// miss blue). 2 skyvis grayscale. 3 age/32 grayscale. Debug view only.
 VAR(hwrtskyvisdbg, 0, 0, 3);
 // Sky rays from the blue-noise tile (trace.cpp, binding 25) instead of the pcg
 // hash, for the world pixels NRD denoises. Same ray count and estimator; less
@@ -511,7 +511,7 @@ static bool hwrtportalcol(int entidx, const extentity &tp, const char *tpmdl, ve
 // map lamp away from a pixel. 0: the RT lighting before the option (those
 // lights then only reach what GL still draws, such as the HUD gun).
 VARP(hwrtdynlights, 0, 1, 1);
-// Lab, not saved: at most this many weapon lights, the ones closest to the
+// Debug, not saved: at most this many weapon lights, the ones closest to the
 // camera; their shadow (1, walls only; 0 none). Shapes and intensities:
 // dynlight.cpp.
 VAR(hwrtdynlightmax, 1, 16, 32);
@@ -693,7 +693,7 @@ static int hwrtmergeglow(hwrtglowcand *c, int nc, float mergedist)
     return nout;
 }
 
-// Extended light sources (lab, not saved, all off by default). A point source
+// Extended light sources (debug, not saved, all off by default). A point source
 // throws a hard shadow from a single ray; an extended one throws a penumbra
 // that is sharp where the occluder touches the receiver and widens with the
 // distance between them. 0 everywhere keeps the single exact ray.
@@ -728,7 +728,7 @@ VAR(hwrtsoftadapt, 0, 1, 1);
 // penumbra mottles with one ray, take more. 0 = always hwrtsoftrays.
 FVAR(hwrtsoftraysangle, 0, 1.5f, 90);
 VAR(hwrtsoftraysmin, 1, 1, 16);
-// Optimised extended sources (sources-etendues-opti). 0 = the prototype's rays as they were (hwrtsoftrays,
+// Optimised extended sources (hwrtsoftopt). 0 = the prototype's rays as they were (hwrtsoftrays,
 // hwrtsoftraysangle, hwrtsoftadapt, hwrtsoftnoise). 1 (default) = one ray per source per pixel to a point of the
 // source that changes with the pixel (blue noise) and with every frame: the same image as the prototype's "auto"
 // (1 to 4 rays by apparent size) for the cost of one ray, as the code is that of a point source with a moved
@@ -748,7 +748,7 @@ FVAR(hwrtsoftfilter, 0, 0.25f, 2);
 // Soft shadows, the saved setting of the menu (Graphics > Ray tracing > Shadows: Off / On). 0 off (point
 // lights and hard shadows, the picture and cost of before), 1 the sun (1 degree; also the "sun" lamp of old
 // maps; console only), 2 the sun and the lamps (default, the menu's On: map lamps 4 units, flames sized from
-// their emitter, teleporters and lava 3 units). It sets the lab sizes above (their defaults are those of 2);
+// their emitter, teleporters and lava 3 units). It sets the debug sizes above (their defaults are those of 2);
 // with hwrtsoftopt 1 (default) that is one ray per source per pixel.
 // The prototype's rays (hwrtsoftopt 0) get its recommended "auto" (1 to 4 rays by apparent size).
 static void softshadowsapply();

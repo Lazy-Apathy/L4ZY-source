@@ -78,9 +78,10 @@ namespace demohd
     static bool play_loaded = false, autofollowdone = false, hdzoomframe = false;
     static float hdzoomval = 0;
     static int scanmillis = 0, dmolenms = 0;
-    static bool dbdrag = false, dbhidden = false;
+    static bool dbdrag = false;
+    static int dbhidden = 0; // 1 hidden by its button (SHOW stays), 2 by the key (nothing left)
     static float dbdragk = 0;
-    static float dbbox[8][4];
+    static float dbbox[9][4];
     static vector<fileitem> files;
 
     static int clockms()
@@ -1110,11 +1111,12 @@ namespace demohd
     {
         dmolenms = scandmolen(dmofilepath);
         dbdrag = false;
-        dbhidden = false;
+        dbhidden = 0;
         loadtrack(dmofilepath);
         if(track.length()) dmolenms = max(dmolenms, track.last().t);
         play_idx = 0;
         autofollowdone = false;
+        game::demoxrayreset(); // a demo opens: X-ray at its start value; going back in it (onplaybackreset) keeps it
     }
 
     void onplaybackend()
@@ -1128,7 +1130,7 @@ namespace demohd
         play_idx = 0;
         dmolenms = 0;
         dbdrag = false;
-        dbhidden = false;
+        dbhidden = 0;
         autofollowdone = false;
     }
 
@@ -1502,22 +1504,41 @@ namespace demohd
 
     void stoprecording() { finish(true); }
 
+    // Demo controls, drawn like the client menus (near black panels, thin orange
+    // edge, white text and icons, orange for hover and for what is on, a line of
+    // help over the control under the mouse). A compact block at the bottom
+    // centre: state and exact time, timeline (click or drag), back / play-pause /
+    // ahead (10 s, 0.5 s while Alt is held), speed, X-ray; the players you can
+    // follow at the bottom right (click a name to follow); HIDE / SHOW top right.
+    // Ids: 0 block, 1 back, 2 play / pause, 3 ahead, 4 timeline, 5 speed,
+    // 6 X-ray, 7 hide / show, 8 player list (rows in dbrows).
+    enum { DB_N = 9, DB_ROWS = 24, DB_ORANGE = 0xFF7A18 };
+    static float dbrowbox[DB_ROWS][4];
+    static int dbrowcn[DB_ROWS], dbnrows = 0;
+
     static void dbset(int id, float x, float y, float w, float h)
     {
-        if(id < 0 || id >= 8) return;
+        if(id < 0 || id >= DB_N) return;
         dbbox[id][0] = x; dbbox[id][1] = y; dbbox[id][2] = w; dbbox[id][3] = h;
+    }
+
+    static bool dbin(const float *b, float px, float py)
+    {
+        return b[2] > 0 && px >= b[0] && py >= b[1] && px < b[0]+b[2] && py < b[1]+b[3];
     }
 
     static int dbhit(float px, float py)
     {
-        // the buttons first, then the bar behind them (0)
-        for(int n = 1; n <= 8; n++)
-        {
-            int i = n%8;
-            if(dbbox[i][2] <= 0) continue;
-            if(px >= dbbox[i][0] && py >= dbbox[i][1] && px < dbbox[i][0]+dbbox[i][2] && py < dbbox[i][1]+dbbox[i][3])
-                return i;
-        }
+        // the controls first, then the panels behind them (8, 0)
+        for(int i = 1; i < DB_N; i++) if(i != 8 && dbin(dbbox[i], px, py)) return i;
+        if(dbin(dbbox[8], px, py)) return 8;
+        if(dbin(dbbox[0], px, py)) return 0;
+        return -1;
+    }
+
+    static int dbhitrow(float px, float py)
+    {
+        loopi(dbnrows) if(dbin(dbrowbox[i], px, py)) return i;
         return -1;
     }
 
@@ -1527,107 +1548,375 @@ namespace demohd
         nformatstring(dst, len, "%d:%02d", ms/60000, (ms/1000)%60);
     }
 
-    static void dbdrawbtn(int id, int w, int h, int hover, const char *label, bool on)
+    static void dbtimems(int ms, char *dst, int len)
+    {
+        ms = max(ms, 0);
+        nformatstring(dst, len, "%d:%02d.%03d", ms/60000, (ms/1000)%60, ms%1000);
+    }
+
+    static bool dbalt() { return (SDL_GetModState() & KMOD_ALT) != 0; }
+    static int dbstep() { return dbalt() ? 500 : 10000; }
+
+    static const int dbspeeds[4] = { 25, 50, 100, 200 };
+    static void dbnextspeed(int dir)
+    {
+        int cur = 2;
+        loopi(4) if(game::gamespeed >= dbspeeds[i]) cur = i;
+        if(game::gamespeed != dbspeeds[cur]) cur = dir > 0 ? cur : min(cur+1, 3);
+        game::changegamespeed(dbspeeds[(cur + (dir > 0 ? 1 : 3)) % 4]);
+    }
+
+    static void dbedge(float x, float y, float w, float h, float t, int alpha)
+    {
+        hudrect(x, y, w, t, DB_ORANGE, alpha);
+        hudrect(x, y + h - t, w, t, DB_ORANGE, alpha);
+        hudrect(x, y, t, h, DB_ORANGE, alpha);
+        hudrect(x + w - t, y, t, h, DB_ORANGE, alpha);
+    }
+
+    static void dbpanel(float x, float y, float w, float h, float t)
+    {
+        hudrect(x, y, w, h, 0x080A0E, 175);
+        dbedge(x, y, w, h, t, 150);
+    }
+
+    // text th pixels high, top left at x, y
+    static float dbtextk(float th)
+    {
+        int tw = 0, fh = 0;
+        text_bounds("0", tw, fh);
+        return th / max(fh, 1);
+    }
+
+    static void dbtext(const char *s, float x, float y, float th, int color, int alpha = 255)
+    {
+        float k = dbtextk(th);
+        pushhudmatrix();
+        hudmatrix.translate(x, y, 0);
+        hudmatrix.scale(k, k, 1);
+        flushhudmatrix();
+        draw_text(s, 0, 0, (color>>16)&0xFF, (color>>8)&0xFF, color&0xFF, alpha);
+        pophudmatrix();
+    }
+
+    static float dbtextw(const char *s, float th)
+    {
+        int sw = 0, sh = 0;
+        text_bounds(s, sw, sh);
+        return sw * dbtextk(th);
+    }
+
+    static void dbicon(const char *path, float x, float y, float s, int color, int alpha = 255)
+    {
+        if(!settexture(path, 3)) return;
+        gle::colorub((color>>16)&0xFF, (color>>8)&0xFF, color&0xFF, alpha);
+        gle::defvertex(2);
+        gle::deftexcoord0();
+        gle::begin(GL_TRIANGLE_STRIP);
+        gle::attribf(x,   y);   gle::attribf(0, 0);
+        gle::attribf(x+s, y);   gle::attribf(1, 0);
+        gle::attribf(x,   y+s); gle::attribf(0, 1);
+        gle::attribf(x+s, y+s); gle::attribf(1, 1);
+        gle::end();
+        gle::colorf(1, 1, 1, 1);
+    }
+
+    // one flat control: optional icon then optional text, centred; orange
+    // underline and orange text when on, orange tint under the mouse
+    static void dbdrawbtn(int id, int w, int h, int hover, const char *icon, const char *label, bool on, float th)
     {
         float bx = dbbox[id][0]*w, by = dbbox[id][1]*h, bw = dbbox[id][2]*w, bh = dbbox[id][3]*h;
-        int col = on ? 0x4A90D9 : (hover==id ? 0x80C0FF : 0x3A3A48);
-        hudrect(bx, by, bw, bh, col, 220);
-        int lw = 0, lh = 0;
-        text_bounds(label, lw, lh);
-        draw_text(label, int(bx + (bw-lw)/2), int(by + (bh-lh)/2), 255, 255, 255, 255);
+        if(bw <= 0) return;
+        bool hit = hover==id;
+        hudrect(bx, by, bw, bh, on ? 0x2E1D0E : 0x1C2026, 205);
+        if(hit) hudrect(bx, by, bw, bh, DB_ORANGE, 45);
+        float ul = max(2.0f, bh*0.08f);
+        if(on || hit) hudrect(bx, by + bh - ul, bw, ul, DB_ORANGE, on ? 235 : 150);
+        int col = on || hit ? DB_ORANGE : 0xFFFFFF;
+        float is = icon ? bh*0.5f : 0, gap = icon && label ? bh*0.14f : 0, lw = label ? dbtextw(label, th) : 0;
+        float x = bx + (bw - (is + gap + lw))/2;
+        if(icon)
+        {
+            defformatstring(path, "data/demobar_%s.png", icon);
+            dbicon(path, x, by + (bh - is)/2, is, col);
+        }
+        if(label) dbtext(label, x + is + gap, by + (bh - th)/2, th, col);
+    }
+
+    // the line of help over (or under, for the top right button) a control
+    static void dbtip(const char *tip, const float *b, int w, int h, float th, bool below)
+    {
+        if(!tip) return;
+        float tw = dbtextw(tip, th), pad = th*0.5f;
+        float bw = tw + 2*pad, bh = th + pad*1.2f;
+        float cx = (b[0] + b[2]/2)*w;
+        float x = clamp(cx - bw/2, 4.0f, w - bw - 4.0f), y = below ? (b[1] + b[3])*h + 6 : b[1]*h - bh - 6;
+        hudrect(x, y, bw, bh, 0x080A0E, 235);
+        dbedge(x, y, bw, bh, 1, 210);
+        dbtext(tip, x + pad, y + (bh - th)/2, th, 0xFFFFFF);
+    }
+
+    // Spectating in a game (not a demo): the same player list, only what a
+    // spectator already has (names, teams, who you follow; no position). While
+    // the scoreboard key is held, a cursor appears and a click on a name follows
+    // that player. Nothing while you play.
+    VARP(spectatorlist, 0, 1, 1);
+
+    bool specshown()
+    {
+        return spectatorlist && !game::demoplayback && game::connected && game::player1 && game::player1->state == CS_SPECTATOR;
+    }
+
+    bool speccursor()
+    {
+        return specshown() && game::showscoreboard;
+    }
+
+    // blue side: in a demo the recorder's team; spectating, the same side as the
+    // scoreboard and the names over the heads (isteam with your own team)
+    static bool dbally(fpsent *d)
+    {
+        if(game::demoplayback) return visteam(d) == 1;
+        return m_check(game::gamemode, M_TEAM) && !strcmp(game::player1->team, d->team);
+    }
+
+    static int dbcolor(fpsent *d)
+    {
+        int col;
+        if(game::demoplayback)
+        {
+            col = namecolor(d, 0xFFFFDD);
+            if(d->state == CS_DEAD && !visteam(d)) col = (col>>1)&0x7F7F7F;
+        }
+        else
+        {
+            col = m_check(game::gamemode, M_TEAM) ? (dbally(d) ? 0x6496FF : 0xFF4B19) : 0xFFFFDD;
+            if(d->state == CS_DEAD) col = (col>>1)&0x7F7F7F;
+        }
+        return game::friendnamecolor(d, col);
+    }
+
+    // players you can follow, bottom right, above the SPECTATOR label
+    static void dbplayers(int w, int h, float s, float cx, float cy)
+    {
+        dbnrows = 0;
+        dbbox[8][2] = 0;
+        vector<fpsent *> list;
+        loopv(game::players)
+        {
+            fpsent *d = game::players[i];
+            if(d && d != game::player1 && d->state != CS_SPECTATOR && d->lifesequence >= 0) list.add(d);
+        }
+        if(list.empty()) return;
+        // your side first, then the others, each in the order of the game
+        vector<fpsent *> sorted;
+        loopv(list) if(dbally(list[i])) sorted.add(list[i]);
+        loopv(list) if(!dbally(list[i])) sorted.add(list[i]);
+        float th = 21*s, rowh = 27*s, pad = 9*s, eye = 20*s;
+        int maxrows = clamp(int((h*0.44f) / rowh), 4, int(DB_ROWS));
+        int n = min(sorted.length(), maxrows);
+        float namew = dbtextw("PLAYERS", th*0.85f);
+        loopi(n) namew = max(namew, dbtextw(game::colorname(sorted[i]), th));
+        const char *foot = game::demoplayback || speccursor() ? NULL : "Hold Tab to pick a player";
+        if(foot) namew = max(namew, dbtextw(foot, th*0.8f) - eye - pad);
+        float pw = namew + eye + 3*pad, ph = n*rowh + rowh + pad + (foot ? rowh : 0);
+        float px = w - pw - 18*s, py = (game::demoplayback ? h*0.745f : h*0.82f) - ph;
+        dbpanel(px, py, pw, ph, max(1.0f, s));
+        dbset(8, px/w, py/h, pw/w, ph/h);
+        dbtext("PLAYERS", px + pad, py + pad*0.6f, th*0.85f, 0x8A9199);
+        fpsent *f = game::followingplayer();
+        int hoverrow = dbhitrow(cx, cy);
+        loopi(n)
+        {
+            fpsent *d = sorted[i];
+            float ry = py + rowh + i*rowh;
+            float rb[4] = { px/w, ry/h, pw/w, rowh/h };
+            memcpy(dbrowbox[i], rb, sizeof(rb));
+            dbrowcn[i] = d->clientnum;
+            bool followed = d == f, hit = hoverrow == i;
+            if(followed) hudrect(px + 1, ry, pw - 2, rowh, DB_ORANGE, 40);
+            if(hit) hudrect(px + 1, ry, pw - 2, rowh, DB_ORANGE, 45);
+            if(followed) dbicon("data/following.png", px + pad, ry + (rowh - eye)/2, eye, 0xFFFFFF);
+            int col = dbcolor(d);
+            dbtext(game::colorname(d), px + 2*pad + eye, ry + (rowh - th)/2, th, hit ? DB_ORANGE : col);
+        }
+        if(foot) dbtext(foot, px + pad, py + rowh + n*rowh + (rowh - th*0.8f)/2, th*0.8f, 0x8A9199);
+        dbnrows = n;
     }
 
     void drawhud(int w, int h)
     {
-        loopi(8) dbbox[i][2] = 0;
+        loopi(DB_N) dbbox[i][2] = 0;
+        dbnrows = 0;
         if(!game::demoplayback || !w || !h) return;
+        if(dbhidden == 2) return; // hidden by the key: nothing at all, for watching or filming
 
         float cx, cy;
         g3d_cursorpos(cx, cy);
 
+        float s = h/1080.0f, th = 23*s, small = 16*s;
         float hidew = max(72.0f, h*0.08f), hideh = max(28.0f, h*0.035f);
-        dbset(7, w - hidew - 12, 12, hidew, hideh);
-        loopi(8) { dbbox[i][0] /= w; dbbox[i][1] /= h; dbbox[i][2] /= w; dbbox[i][3] /= h; }
-
+        dbset(7, (w - hidew - 12)/w, 12.0f/h, hidew/w, hideh/h);
         int hover = dbhit(cx, cy);
-        dbdrawbtn(7, w, h, hover, dbhidden ? "SHOW" : "HIDE", false);
-        if(dbhidden) return;
+        if(dbhidden)
+        {
+            dbdrawbtn(7, w, h, hover, "show", "SHOW", false, th*0.85f);
+            if(hover==7) dbtip("Show the demo controls", dbbox[7], w, h, small, true);
+            return;
+        }
 
         int dur = max(dmolenms, 1);
         int now = clamp(server::demotime(), 0, dur);
         float k = dbdrag ? dbdragk : clamp(float(now)/float(dur), 0.0f, 1.0f);
+        bool paused = game::ispaused(), alt = dbalt();
 
-        float margin = w*0.03f;
-        float bh = max(40.0f, h*0.06f);
-        float y = h - bh - h*0.018f;
-        float x = margin;
-        float btnw = bh*1.65f, gap = 6;
-        float btn = bh - 10;
-        float by = y + 5;
+        // the block: state + time, timeline, help line, buttons
+        float pad = 12*s, btnh = 40*s, gap = 6*s;
+        float bw[5] = { 100*s, 120*s, 100*s, 96*s, game::demoxrayallowed() ? 128*s : 0 };
+        float roww = bw[0] + bw[1] + bw[2] + bw[3] + (bw[4] > 0 ? bw[4] + gap : 0) + 3*gap;
+        float blockw = max(roww, 580*s) + 2*pad;
+        float blockh = pad + th + 8*s + 18*s + 4*s + small + 8*s + btnh + pad;
+        float bx = (w - blockw)/2, by = h*0.915f - blockh;
+        dbpanel(bx, by, blockw, blockh, max(1.0f, s));
+        dbset(0, bx/w, by/h, blockw/w, blockh/h);
 
-        dbset(0, margin, y, w - 2*margin, bh); // the bar itself: a click on it is not for the game
-        dbset(1, x, by, btnw, btn);
-        x += btnw + gap;
-        dbset(2, x, by, btnw, btn);
-        x += btnw + gap;
-        dbset(3, x, by, btnw, btn);
-        x += btnw + gap + 8;
-
-        float right = w - margin;
-        float spdw = btnw*1.15f;
-        dbset(6, right - spdw, by, spdw, btn);
-        dbset(5, right - spdw*2 - gap, by, spdw, btn);
-
+        float y = by + pad;
+        const char *state = paused ? "PAUSED" : "PLAYING";
+        dbtext(state, bx + pad, y, th, paused ? DB_ORANGE : 0xFFFFFF);
+        if(game::gamespeed != 100)
+        {
+            defformatstring(sp, "%.2fx", game::gamespeed/100.0f);
+            dbtext(sp, bx + pad + dbtextw(state, th) + 10*s, y, th, 0x8A9199);
+        }
         string tnow, tdur;
-        dbtime(int(k*dur + 0.5f), tnow, sizeof(tnow));
-        dbtime(dur, tdur, sizeof(tdur));
+        dbtimems(int(k*dur + 0.5f), tnow, sizeof(tnow));
+        dbtimems(dur, tdur, sizeof(tdur));
         defformatstring(times, "%s / %s", tnow, tdur);
-        int tw = 0, th = 0;
-        text_bounds(times, tw, th);
-        float timew = tw + 16;
-        float sliderx = x;
-        float sliderw = max(80.0f, dbbox[5][0] - gap - 8 - timew - sliderx);
-        dbset(4, sliderx, by + btn*0.28f, sliderw, btn*0.44f);
-        float timex = sliderx + sliderw + 8;
+        dbtext(times, bx + blockw - pad - dbtextw(times, th), y, th, 0xE6E6E6);
+        y += th + 8*s;
 
-        for(int i = 0; i <= 6; i++) { dbbox[i][0] /= w; dbbox[i][1] /= h; dbbox[i][2] /= w; dbbox[i][3] /= h; }
-
+        float tlx = bx + pad, tlw = blockw - 2*pad, tlh = 18*s;
+        dbset(4, tlx/w, y/h, tlw/w, tlh/h);
         if(dbdrag && dbbox[4][2] > 0)
         {
             dbdragk = clamp((cx - dbbox[4][0]) / dbbox[4][2], 0.0f, 1.0f);
             k = dbdragk;
         }
-
-        hudrect(margin - 8, y - 6, w - 2*margin + 16, bh + 12, 0x101018, 170);
-
         hover = dbhit(cx, cy);
-        dbdrawbtn(7, w, h, hover, "HIDE", false);
-        const char *btnlbl[7] = { "", "-10s", game::ispaused() ? "PLAY" : "PAUSE", "+10s", "", "50%", "100%" };
-        loopi(3) dbdrawbtn(i+1, w, h, hover, btnlbl[i+1], false);
+        bool tlhit = hover==4 || dbdrag;
+        float track = max(3.0f, 5*s), ty = y + (tlh - track)/2;
+        hudrect(tlx, ty, tlw, track, 0x3A3F48, 230);
+        hudrect(tlx, ty, tlw*k, track, tlhit ? DB_ORANGE : 0xFFFFFF, 240);
+        float knob = 14*s;
+        hudrect(tlx + tlw*k - knob/4, y + (tlh - knob)/2, knob/2, knob, tlhit ? DB_ORANGE : 0xFFFFFF, 255);
+        y += tlh + 4*s;
 
-        float sx = dbbox[4][0]*w, sy = dbbox[4][1]*h, sw = dbbox[4][2]*w, sh = dbbox[4][3]*h;
-        hudrect(sx, sy, sw, sh, 0x2A2A33, 220);
-        hudrect(sx, sy, sw*k, sh, hover==4 || dbdrag ? 0x70B0FF : 0x4A90D9, 230);
-        hudrect(sx + sw*k - 5, sy - 4, 10, sh + 8, 0xE8F0FF, 255);
+        const char *help = alt ? "ALT: STEPS OF 0.5 S" : "HOLD ALT FOR 0.5 S STEPS";
+        dbtext(help, bx + (blockw - dbtextw(help, small))/2, y, small, alt ? DB_ORANGE : 0x8A9199);
+        y += small + 8*s;
 
-        draw_text(times, int(timex), int(by + (btn-th)/2), 220, 220, 220, 255);
+        float x = bx + (blockw - roww)/2;
+        int ids[5] = { 1, 2, 3, 5, 6 };
+        loopi(5) if(bw[i] > 0) { dbset(ids[i], x/w, y/h, bw[i]/w, btnh/h); x += bw[i] + gap; }
+        hover = dbhit(cx, cy);
 
-        loopi(2)
+        dbdrawbtn(1, w, h, hover, "back", alt ? "0.5s" : "10s", false, th*0.95f);
+        dbdrawbtn(2, w, h, hover, paused ? "play" : "pause", paused ? "PLAY" : "PAUSE", false, th*0.95f);
+        dbdrawbtn(3, w, h, hover, "forward", alt ? "0.5s" : "10s", false, th*0.95f);
+        defformatstring(spd, "%.2fx", game::gamespeed/100.0f);
+        dbdrawbtn(5, w, h, hover, NULL, spd, game::gamespeed != 100, th*0.95f);
+        if(bw[4] > 0) dbdrawbtn(6, w, h, hover, "xray", "X-RAY", game::demoxrayactive(), th*0.95f);
+        dbdrawbtn(7, w, h, hover, "hide", "HIDE", false, th*0.85f);
+
+        dbplayers(w, h, s, cx, cy);
+
+        // help over the control under the mouse
+        const char *tip = NULL;
+        string tipbuf;
+        int row = dbhitrow(cx, cy);
+        switch(dbdrag ? -1 : hover)
         {
-            int id = 5+i;
-            bool on = (id==5 && game::gamespeed==50) || (id==6 && game::gamespeed==100);
-            dbdrawbtn(id, w, h, hover, btnlbl[id], on);
+            case 1: tip = alt ? "Back 0.5 s" : "Back 10 s (Alt: 0.5 s)"; break;
+            case 2: tip = paused ? "Play" : "Pause"; break;
+            case 3: tip = alt ? "Ahead 0.5 s" : "Ahead 10 s (Alt: 0.5 s)"; break;
+            case 5: tip = "Speed: click for faster, Alt+click for slower"; break;
+            case 6: tip = game::demoxrayactive() ? "X-ray on: players seen through walls" : "X-ray: see players through walls"; break;
+            case 7: tip = "Hide the demo controls"; break;
+            case 4:
+            {
+                float hk = dbbox[4][2] > 0 ? clamp((cx - dbbox[4][0]) / dbbox[4][2], 0.0f, 1.0f) : 0;
+                string t;
+                dbtime(int(hk*dur + 0.5f), t, sizeof(t));
+                formatstring(tipbuf, "Go to %s", t);
+                tip = tipbuf;
+                break;
+            }
+            case 8:
+                if(row >= 0)
+                {
+                    fpsent *d = game::getclient(dbrowcn[row]);
+                    if(d) { formatstring(tipbuf, "Follow %s", game::colorname(d)); tip = tipbuf; }
+                    dbtip(tip, dbrowbox[row], w, h, small, false);
+                    tip = NULL;
+                }
+                break;
         }
+        if(tip) dbtip(tip, dbbox[hover], w, h, small, hover==7);
+    }
+
+    // player list while spectating in a game (see specshown)
+    void drawspec(int w, int h)
+    {
+        dbnrows = 0;
+        if(!specshown() || !w || !h) return;
+        float cx = 0, cy = 0;
+        bool cur = speccursor();
+        if(cur) g3d_cursorpos(cx, cy);
+        else cx = cy = -1;
+        float s = h/1080.0f;
+        dbplayers(w, h, s, cx, cy);
+        int row = cur ? dbhitrow(cx, cy) : -1;
+        if(row >= 0)
+        {
+            fpsent *d = game::getclient(dbrowcn[row]);
+            if(d)
+            {
+                defformatstring(tip, "Follow %s", game::colorname(d));
+                dbtip(tip, dbrowbox[row], w, h, 16*s, false);
+            }
+        }
+    }
+
+    static bool speckey(int code, bool isdown)
+    {
+        static bool pressed = false;
+        if(code != -1) return false;
+        if(!isdown) { bool was = pressed; pressed = false; return was; }
+        if(!speccursor()) return false;
+        float cx, cy;
+        g3d_cursorpos(cx, cy);
+        int row = dbhitrow(cx, cy);
+        if(row < 0) return false; // elsewhere: the click is for the game (next player)
+        pressed = true;
+        defformatstring(cmd, "follow %d", dbrowcn[row]);
+        execute(cmd);
+        return true;
+    }
+
+    void togglebar()
+    {
+        dbhidden = dbhidden ? 0 : 2;
+        dbdrag = false;
     }
 
     bool barkey(int code, bool isdown)
     {
-        if(!game::demoplayback) return false;
+        if(!game::demoplayback) return speckey(code, isdown);
         if(code != -1) return false;
         float cx, cy;
         g3d_cursorpos(cx, cy);
-        int hit = dbhit(cx, cy);
-        // a click away from the bar goes to the game (left click = next
+        int hit = dbhit(cx, cy), row = hit==8 ? dbhitrow(cx, cy) : -1;
+        // a click away from the controls goes to the game (left click = next
         // player to watch, like the right click); its release too
         static bool barpressed = false;
         if(isdown && (hit < 0 || (dbhidden && hit != 7))) { barpressed = false; return false; }
@@ -1637,20 +1926,25 @@ namespace demohd
         {
             if(hit==7)
             {
-                dbhidden = !dbhidden;
+                dbhidden = dbhidden ? 0 : 1;
                 dbdrag = false;
             }
             else if(dbhidden) {}
-            else if(hit==1) server::seekdemoms(max(server::demotime() - 10000, 0));
+            else if(hit==1) server::seekdemoms(max(server::demotime() - dbstep(), 0));
             else if(hit==2) server::forcepaused(!server::ispaused());
-            else if(hit==3) server::seekdemoms(server::demotime() + 10000);
+            else if(hit==3) server::seekdemoms(server::demotime() + dbstep());
             else if(hit==4)
             {
                 dbdrag = true;
                 if(dbbox[4][2] > 0) dbdragk = clamp((cx - dbbox[4][0]) / dbbox[4][2], 0.0f, 1.0f);
             }
-            else if(hit==5) game::changegamespeed(50);
-            else if(hit==6) game::changegamespeed(100);
+            else if(hit==5) dbnextspeed(dbalt() ? -1 : 1);
+            else if(hit==6) game::toggledemoxray();
+            else if(hit==8 && row >= 0)
+            {
+                defformatstring(cmd, "follow %d", dbrowcn[row]);
+                execute(cmd);
+            }
         }
         else if(dbdrag)
         {
@@ -1662,6 +1956,12 @@ namespace demohd
     }
 }
 
+ICOMMAND(toggledemobar, "", (),
+{
+    if(!game::demoplayback) { conoutf("only while watching a demo"); return; }
+    demohd::togglebar();
+});
+
 static void hdprune() { demohd::prune(); }
 
 void game::demohdsample() { game::reactframe(); demohd::captureframe(); }
@@ -1670,7 +1970,7 @@ void game::demohdafterpacket(int chan, const uchar *data, int len) { if(!game::s
 void game::demohdwritepos(const uchar *data, int len) { demohd::writepos(data, len); }
 
 extern int hidehud;
-bool game::demobarcursor() { return demoplayback && !mainmenu && !hidehud; }
+bool game::demobarcursor() { return (demoplayback || demohd::speccursor()) && !mainmenu && !hidehud; }
 bool game::demobarkey(int code, bool isdown) { return demohd::barkey(code, isdown); }
 
 static bool hdcopyfile(const char *src, const char *dst)

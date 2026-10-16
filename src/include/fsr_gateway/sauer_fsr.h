@@ -92,7 +92,7 @@ typedef struct SauerFsrCreate
     uint32_t hdr;               /* 1: scene-linear RGBA16F colour + exposure texture */
     uint32_t auto_exposure;     /* 1: FFX_FSR3UPSCALER_ENABLE_AUTO_EXPOSURE (SDR only) */
     uint32_t depth_inverted;    /* 0: 0 near .. 1 far */
-    uint32_t debug_checking;    /* 1: FFX_FSR3UPSCALER_ENABLE_DEBUG_CHECKING (lab) */
+    uint32_t debug_checking;    /* 1: FFX_FSR3UPSCALER_ENABLE_DEBUG_CHECKING (debug) */
 } SauerFsrCreate;
 
 typedef struct SauerFsrCreateInfo

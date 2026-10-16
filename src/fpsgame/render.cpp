@@ -225,9 +225,9 @@ namespace game
 
     VAR(testquad, 0, 0, 1);
     VAR(testarmour, 0, 0, 1);
-    // Lot 4 slot test: 0 = testquad as usual, 1 = local player only, 2 = bots only.
+    // Stage 4 slot test: 0 = testquad as usual, 1 = local player only, 2 = bots only.
     VAR(hwrtvelquadwho, 0, 0, 2);
-    // Lot 4 slot test: pin every player's gun so a bot AI cannot swap vwep mid-trial.
+    // Stage 4 slot test: pin every player's gun so a bot AI cannot swap vwep mid-trial.
     VAR(hwrtvelkeepgun, -1, -1, int(GUN_PISTOL));
 
     ICOMMAND(hwrtvelhudgun, "i", (int *g),
@@ -1095,3 +1095,82 @@ dynent *hwrtragdoll(int i)
     return game::ragdolls.inrange(i) ? game::ragdolls[i] : NULL;
 }
 
+
+// Demo X-ray (key toggledemoxray, X-RAY button of the demo bar): every player
+// still in the game seen through the walls in their colour. Only in a demo
+// played on this computer: demoxrayactive() checks it every frame and turns the
+// switch off anywhere else (games, spectating on a server, edit mode, demos
+// played by a server). Opening a demo sets it back to demoxraystart, the saved
+// start value (Off by default); going back in the same demo keeps it.
+namespace game
+{
+    // X-ray at demo start (saved, Off by default): the switch takes this value
+    // each time a demo opens; it only chooses the start, it shows nothing by
+    // itself outside a demo played on this computer.
+    VARP(demoxraystart, 0, 0, 1);
+    static bool demoxrayon = false;
+    static int demoxraymaps = 0, demoxrayapplied = -1;
+
+    bool demoxrayallowed()
+    {
+        return connected && demoplayback && !remote;
+    }
+
+    bool demoxrayactive()
+    {
+        if(!demoxrayallowed()) { demoxrayon = false; return false; }
+        if(demoxrayapplied != demoxraymaps)
+        {
+            demoxrayapplied = demoxraymaps;
+            demoxrayon = demoxraystart != 0;
+        }
+        return demoxrayon;
+    }
+
+    void demoxrayreset()
+    {
+        demoxrayon = false;
+        demoxraymaps++;
+    }
+
+    void toggledemoxray()
+    {
+        if(!demoplayback) { conoutf("X-ray is only while watching a demo"); return; }
+        if(!demoxrayallowed()) { conoutf("X-ray is only for demos played on this computer"); return; }
+        demoxrayactive(); // the start value of this demo first
+        demoxrayon = !demoxrayon;
+        conoutf("X-ray %s", demoxrayon ? "on" : "off");
+    }
+    ICOMMAND(toggledemoxray, "", (), toggledemoxray());
+    ICOMMAND(demoxray, "", (), intret(demoxrayactive() ? 1 : 0));
+
+    // The colour of the body (My colour, friend colours, team colours, the same
+    // rule as colorskinidx); without one, blue / red sides like the names, and
+    // green in free for all.
+    static int demoxraycolor(fpsent *d, int team)
+    {
+        int cidx = colorskinidx(d, team);
+        if(cidx >= 0)
+        {
+            vec c = friendcolorvecidx(cidx);
+            return (int(c.x*255 + 0.5f)<<16) | (int(c.y*255 + 0.5f)<<8) | int(c.z*255 + 0.5f);
+        }
+        return team==1 ? 0x6496FF : (team==2 ? 0xFF4B19 : 0x1EC850);
+    }
+
+    void renderdemoxray()
+    {
+        if(!demoxrayactive()) return;
+        fpsent *exclude = isthirdperson() ? NULL : followingplayer();
+        loopv(players)
+        {
+            fpsent *d = players[i];
+            if(d == player1 || d == exclude || d->lifesequence < 0) continue;
+            if(d->state!=CS_ALIVE && d->state!=CS_LAGGED && d->state!=CS_EDITING) continue;
+            int team = demohd::visteam(d);
+            if(!team && (teamskins || m_teammode)) team = isteam(player1->team, d->team) ? 1 : 2;
+            demoxraycolour(demoxraycolor(d, team));
+            renderplayer(d, getplayermodelinfo(d), team, 1, false);
+        }
+    }
+}

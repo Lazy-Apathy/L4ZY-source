@@ -238,7 +238,7 @@ hdrint: libenet $(NGX_CLIENT_OBJS)
 	$(WINDRES) -I vcpp -i vcpp/mingw.rc -J rc -o vcpp/mingw.res -O coff
 	$(CXX) $(CXXFLAGS) -o $(HDRINT_OUT) vcpp/mingw.res $(NGX_CLIENT_OBJS) $(CLIENT_LIBS)
 
-# Edges lot-5 integration candidate. Does not overwrite daily, daily-int, or aretes lab.
+# Edges integration candidate build. Does not overwrite the daily, daily-int or edges test builds.
 aretesint: libenet $(NGX_CLIENT_OBJS)
 	$(WINDRES) -I vcpp -i vcpp/mingw.rc -J rc -o vcpp/mingw.res -O coff
 	$(CXX) $(CXXFLAGS) -o $(WINBIN)/sauerbraten-aretes-int.exe vcpp/mingw.res $(NGX_CLIENT_OBJS) $(CLIENT_LIBS)
