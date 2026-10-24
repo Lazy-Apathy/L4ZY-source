@@ -1,0 +1,1720 @@
+L4ZY 2026.10.16.1: Menu drawing (look of the menus, scrolling, new menu controls)
+
+Apply after: 00-build-fix, 01-common
+From the root of the source tree: git apply 02-menu-drawing.patch
+Notes: 02-menu-drawing.md
+
+diff --git a/src/engine/3dgui.cpp b/src/engine/3dgui.cpp
+index a2699050a6173ccd26998fbf4f884ff65af84260..9f618c6db78ba642aca87d327908a71eacdf4efb 100644
+--- a/src/engine/3dgui.cpp
++++ b/src/engine/3dgui.cpp
+@@ -17,6 +17,8 @@ enum {FIELDCOMMIT, FIELDABORT, FIELDEDIT, FIELDSHOW, FIELDKEY};
+ 
+ static int fieldmode = FIELDSHOW; 
+ static bool fieldsactive = false;
++bool guifieldboxed = false; // set by guiinputfield around its field
++int guipanelspare = 0; // free height left in the last laid out menu panel (negative = it scrolls)
+ 
+ static bool hascursor;
+ static float cursorx = 0.5f, cursory = 0.5f;
+@@ -27,12 +29,23 @@ static float cursorx = 0.5f, cursory = 0.5f;
+ #define SKIN_H 128
+ #define SKIN_SCALE 4
+ #define INSERT (3*SKIN_SCALE)
++#define TAB2D_H (FONTH + INSERT)
+ #define MAXCOLUMNS 16
++#define GUI_PAD 18
++#define SCROLL_GAP 18
++#define SCROLL_THICK 4
++#define SCROLL_OUT 10
++#define GUI_PANEL_W 0.56f
++#define GUI_PANEL_H 0.80f
++#define GUI_PANEL_TOP 0.09f
++
++static Texture *guibackdroptex = NULL, *guibackdropnext = NULL;
+ 
+ VARP(guiautotab, 6, 16, 40);
+ VARP(guiclicktab, 0, 0, 1);
+ VARP(guifadein, 0, 1, 1);
+ VARP(guipreviewtime, 0, 15, 1000);
++VARP(scoreboardalpha, 0, 40, 100);
+ 
+ static int lastpreview = 0;
+ 
+@@ -53,11 +66,65 @@ struct gui : g3d_gui
+ 
+     int firstlist, nextlist;
+     int columns[MAXCOLUMNS];
++    int visih, scrolloff, bodyh, bodyw;
++    bool interactive, fixedpanel;
++
++    bool hasscrollbar() const { return gui2d && visih > 0 && visih < bodyh; }
++    int bodyrpad() const { return (fixedpanel || hasscrollbar()) ? SCROLL_GAP + SCROLL_THICK + SCROLL_OUT : GUI_PAD; }
++    int bodylpad() const { return bodyrpad(); }
++    float scrollx() const { return float((bodyw > 0 ? bodyw : xsize)/2 + SCROLL_GAP); }
++    int framew() const { return bodyw > 0 ? bodyw : xsize; }
+ 
+     static vector<list> lists;
+     static float hitx, hity;
+     static int curdepth, curlist, xsize, ysize, curx, cury;
+     static bool shouldmergehits, shouldautotab;
++    static bool bannerlayout, lastbanner, bannercenter;
++    static int bannerw;
++    static float floatu, floatv, floatscale;
++    static int overlayw, overlayh, floatsavedx, floatsavedy, floatsavedxs, floatsavedys, floatox, floatoy;
++    static bool infloating, floatsavedcenter;
++    static int *bindscroll, *bindscrollmax;
++    static bool pvorbit, pvdrag;
++    static float pvlastx;
++
++    int orbitplayer_(int x, int y, int size, int model, int team, int weap)
++    {
++        bool hit = windowhit==this && hitx>=x && hity>=y && hitx<x+size && hity<y+size;
++        if(hit && (mousebuttons&G3D_DOWN))
++        {
++            pvorbit = true;
++            pvdrag = false;
++            pvlastx = hitx;
++            game::holdplayerpreview(true);
++        }
++        if(pvorbit && (mousebuttons&G3D_PRESSED))
++        {
++            float dx = hitx - pvlastx;
++            if(fabs(dx) > 2) pvdrag = true;
++            if(pvdrag) game::rotateplayerpreview(-dx * 360.0f / max(float(size), 1.0f));
++            pvlastx = hitx;
++        }
++        if(!(mousebuttons&(G3D_PRESSED|G3D_DOWN)))
++        {
++            if(pvorbit) game::holdplayerpreview(false);
++            pvorbit = false;
++        }
++        int x1 = int(floor(screenw*(x*scale.x+origin.x))), y1 = int(floor(screenh*(1 - ((y+size)*scale.y+origin.y)))),
++            x2 = int(ceil(screenw*((x+size)*scale.x+origin.x))), y2 = int(ceil(screenh*(1 - (y*scale.y+origin.y))));
++        if(x2 > x1 && y2 > y1)
++        {
++            glDisable(GL_BLEND);
++            modelpreview::start(x1, y1, x2-x1, y2-y1, false);
++            game::renderplayerpreview(model, team, weap);
++            modelpreview::end();
++            restoreafterpreview();
++        }
++        int ret = hit ? mousebuttons|G3D_ROLLOVER : 0;
++        if(pvdrag && (ret&G3D_UP)) ret &= ~G3D_UP;
++        if(!pvorbit) pvdrag = false;
++        return ret;
++    }
+ 
+     static void reset()
+     {
+@@ -66,6 +133,77 @@ struct gui : g3d_gui
+ 
+     static int ty, tx, tpos, *tcurrent, tcolor; //tracking tab size and position since uses different layout method...
+ 
++    void hoverfill_(int x, int y, int w, bool pressed)
++    {
++        hudnotextureshader->set();
++        gle::colorub(255, 122, 24, pressed ? 96 : 50);
++        rect_(x, y, w, FONTH);
++        hudshader->set();
++    }
++
++    void hoverfilltext_(int textx, int textw, bool pressed)
++    {
++        hoverfill_(textx - INSERT, cury, max(textw, 8) + INSERT*2, pressed);
++    }
++
++    // disabled: takes a clickable button's room (rows do not jump when an option
++    // becomes available) but draws grey, no hover, and never reports a click
++    int button_(const char *text, int color, const char *icon, bool clickable, bool center, bool underline = false, bool disabled = false)
++    {
++        if(disabled) color = 0x707070;
++        const int padding = 18;
++        int w = 0;
++        if(icon) w += ICON_SIZE;
++        if(icon && text) w += padding;
++        if(text) w += text_width(text);
++
++        if(visible())
++        {
++            int hitw = (clickable && isvertical()) ? max(w, xsize) : w;
++            bool hit = !disabled && ishit(hitw, FONTH);
++            if(hit && clickable) color = 0xFF7A18;
++            int x = curx;
++            bool centertext = center || (bannercenter && isvertical() && !icon);
++            if(isvertical() && centertext) x += (xsize-w)/2;
++
++            if(hit && clickable)
++            {
++                if(bannerlayout && isvertical())
++                    hoverfilltext_(x, w, actionon);
++                else
++                    hoverfill_(curx, cury, isvertical() ? max(xsize, w) : w, actionon);
++            }
++            if(underline && isvertical() && text)
++            {
++                hudnotextureshader->set();
++                gle::colorub(255, 122, 24, 200);
++                rect_(x, cury + FONTH - 6, max(w, 8), 2);
++                hudshader->set();
++            }
++
++            if(icon)
++            {
++                if(icon[0] != ' ')
++                {
++                    const char *ext = strrchr(icon, '.');
++                    defformatstring(tname, "packages/icons/%s%s", icon, ext ? "" : ".jpg");
++                    icon_(textureload(tname, 3), false, x, cury, ICON_SIZE, clickable && hit, NULL, disabled);
++                }
++                x += ICON_SIZE;
++            }
++            if(icon && text) x += padding;
++            if(text) text_(text, x, cury, color, center || (hit && clickable && actionon), hit && clickable);
++        }
++        int extra = 0;
++        if(isvertical())
++        {
++            if(clickable) extra = (bannercenter || bannerlayout) ? FONTH/4 : FONTH/6;
++            else if(underline) extra = FONTH/8;
++        }
++        int flags = layout(w, FONTH + extra);
++        return disabled ? flags&G3D_ROLLOVER : flags;
++    }
++
+     bool allowautotab(bool on)
+     {
+         bool oldval = shouldautotab;
+@@ -113,7 +251,14 @@ struct gui : g3d_gui
+         return false;
+     }
+ 
+-    bool visible() { return (!tcurrent || tpos==*tcurrent) && !layoutpass; }
++    bool visible()
++    {
++        if(layoutpass) return false;
++        if(tcurrent && tpos!=*tcurrent) return false;
++        // 3D previews disable GL scissor; never draw rows that start under the frame.
++        if(gui2d && visih > 0 && visih < bodyh && cury >= -bodyh + scrolloff + visih) return false;
++        return true;
++    }
+ 
+     //tab is always at top of page
+     void tab(const char *name, int color) 
+@@ -131,19 +276,46 @@ struct gui : g3d_gui
+         else 
+         {	
+             cury = -ysize;
+-            int h = FONTH-2*INSERT,
+-                x1 = curx + tx,
+-                x2 = x1 + w + ((skinx[3]-skinx[2]) + (skinx[5]-skinx[4]))*SKIN_SCALE,
+-                y1 = cury - ((skiny[6]-skiny[1])-(skiny[3]-skiny[2]))*SKIN_SCALE-h,
+-                y2 = cury;
+-            bool hit = tcurrent && windowhit==this && hitx>=x1 && hity>=y1 && hitx<x2 && hity<y2;
+-            if(hit && (!guiclicktab || mousebuttons&G3D_DOWN)) 
+-                *tcurrent = tpos; //roll-over to switch tab
+-            
+-            drawskin(x1-skinx[visible()?2:6]*SKIN_SCALE, y1-skiny[1]*SKIN_SCALE, w, h, visible()?10:19, 9, gui2d ? 1 : 2, light, alpha);
+-            text_(name, x1 + (skinx[3]-skinx[2])*SKIN_SCALE - (w ? INSERT : INSERT/2), y1 + (skiny[2]-skiny[1])*SKIN_SCALE - INSERT, tcolor, visible());
++            if(gui2d)
++            {
++                int pad = INSERT;
++                int tw = text_width(name);
++                int x1 = curx + tx;
++                int x2 = x1 + tw + pad*2;
++                int y1 = cury - TAB2D_H, y2 = cury;
++                bool hit = tcurrent && windowhit==this && hitx>=x1 && hity>=y1 && hitx<x2 && hity<y2;
++                if(hit && (!guiclicktab || mousebuttons&G3D_DOWN))
++                    *tcurrent = tpos;
++                hudnotextureshader->set();
++                if(visible()) gle::colorub(255, 122, 24, 48);
++                else gle::colorub(28, 32, 38, 200);
++                rect_(x1, y1, x2-x1, y2-y1);
++                if(visible())
++                {
++                    gle::colorub(255, 122, 24, 220);
++                    rect_(x1, y2-3, x2-x1, 3);
++                }
++                hudshader->set();
++                text_(name, x1 + pad, y1 + (TAB2D_H - FONTH)/2, visible() || hit ? 0xFF7A18 : 0x8A9199, visible());
++            }
++            else
++            {
++                int h = FONTH-2*INSERT,
++                    x1 = curx + tx,
++                    x2 = x1 + w + ((skinx[3]-skinx[2]) + (skinx[5]-skinx[4]))*SKIN_SCALE,
++                    y1 = cury - ((skiny[6]-skiny[1])-(skiny[3]-skiny[2]))*SKIN_SCALE-h,
++                    y2 = cury;
++                bool hit = tcurrent && windowhit==this && hitx>=x1 && hity>=y1 && hitx<x2 && hity<y2;
++                if(hit && (!guiclicktab || mousebuttons&G3D_DOWN))
++                    *tcurrent = tpos;
++                int txoff = (skinx[3]-skinx[2])*SKIN_SCALE - (w ? INSERT : INSERT/2);
++                int tyoff = (skiny[2]-skiny[1])*SKIN_SCALE - INSERT;
++                drawskin(x1-skinx[visible()?2:6]*SKIN_SCALE, y1-skiny[1]*SKIN_SCALE, w, h, visible()?10:19, 9, 2, light, alpha);
++                text_(name, x1 + txoff, y1 + tyoff, tcolor, visible());
++            }
+         }
+-        tx += w + ((skinx[5]-skinx[4]) + (skinx[3]-skinx[2]))*SKIN_SCALE; 
++        if(gui2d) tx += text_width(name) + INSERT*3;
++        else tx += w + ((skinx[5]-skinx[4]) + (skinx[3]-skinx[2]))*SKIN_SCALE; 
+     }
+ 
+     bool ishorizontal() const { return curdepth&1; }
+@@ -221,7 +393,8 @@ struct gui : g3d_gui
+ 
+     int text  (const char *text, int color, const char *icon) { autotab(); return button_(text, color, icon, false, false); }
+     int button(const char *text, int color, const char *icon) { autotab(); return button_(text, color, icon, true, false); }
+-    int title (const char *text, int color, const char *icon) { autotab(); return button_(text, color, icon, false, true); }
++    int title (const char *text, int color, const char *icon) { autotab(); return button_(text, color, icon, false, false, true); }
++    int disabledbutton(const char *text, const char *icon) { autotab(); return button_(text, 0x707070, icon, true, false, false, true); }
+ 
+     void separator() { autotab(); line_(FONTH/3); }
+     void progress(float percent) { autotab(); line_((FONTH*4)/5, percent); }
+@@ -258,6 +431,152 @@ struct gui : g3d_gui
+         l.column = col;
+     }
+ 
++    void setbanner(bool on) { bannerlayout = bannercenter = on; }
++    void setbannercenter(bool on) { bannercenter = on; }
++    void bannersplit() { if(layoutpass) bannerw = max(bannerw, isvertical() ? xsize : ysize); }
++
++    void startfloat(float u, float v)
++    {
++        floatu = u;
++        floatv = v;
++        floatscale = 0.62f;
++        infloating = true;
++        floatsavedcenter = bannercenter;
++        bannercenter = false;
++        floatsavedx = curx;
++        floatsavedy = cury;
++        floatsavedxs = xsize;
++        floatsavedys = ysize;
++        pushlist();
++        pushlist();
++        if(!layoutpass)
++        {
++            floatox = int((u - origin.x) / scale.x);
++            floatoy = int((v - origin.y) / scale.y);
++            curx = 0;
++            cury = 0;
++            pushhudtranslate(float(floatox), float(floatoy), floatscale, floatscale);
++        }
++    }
++
++    void endfloat()
++    {
++        if(!lists.inrange(curlist)) return;
++        poplist();
++        if(!lists.inrange(curlist)) return;
++        list &l = lists[curlist];
++        if(layoutpass)
++        {
++            l.w = xsize;
++            l.h = ysize;
++            overlayw = xsize;
++            overlayh = ysize;
++        }
++        else
++        {
++            overlayw = l.w;
++            overlayh = l.h;
++            pophudmatrix();
++            hudshader->set();
++        }
++        curlist = l.parent;
++        curdepth--;
++        curx = floatsavedx;
++        cury = floatsavedy;
++        xsize = floatsavedxs;
++        ysize = floatsavedys;
++        bannercenter = floatsavedcenter;
++        infloating = false;
++    }
++
++    int colorswatch(int coloridx, bool selected)
++    {
++        autotab();
++        static const uchar cols[10][3] =
++        {
++            {  64, 255, 128 },
++            {  96, 160, 255 },
++            { 255, 192,  64 },
++            { 255,  64,  64 },
++            { 128, 128, 128 },
++            { 192,  64, 192 },
++            { 255, 128,   0 },
++            { 255, 255, 255 },
++            {  96, 240, 255 },
++            { 255, 128, 200 }
++        };
++        int size = FONTH;
++        if(visible())
++        {
++            float hx, hy;
++            maphit(hx, hy);
++            bool hit = windowhit==this && hx>=curx && hy>=cury && hx<curx+size && hy<cury+size;
++            hudnotextureshader->set();
++            if(coloridx < 0)
++            {
++                if(selected)
++                {
++                    gle::colorub(255, 122, 24, 255);
++                    rect_(curx, cury, size, size);
++                    gle::colorub(0, 0, 0, 255);
++                    rect_(curx + 3, cury + 3, size - 6, size - 6);
++                    gle::colorub(40, 40, 40, 255);
++                    rect_(curx + 6, cury + 6, size - 12, size - 12);
++                }
++                else
++                {
++                    gle::colorub(0, 0, 0, 255);
++                    rect_(curx, cury, size, size);
++                    int inset = hit ? 4 : 3;
++                    gle::colorub(40, 40, 40, 255);
++                    rect_(curx + inset, cury + inset, size - inset*2, size - inset*2);
++                }
++                float x0 = curx + size*0.28f, y0 = cury + size*0.28f;
++                float x1 = curx + size*0.72f, y1 = cury + size*0.72f;
++                gle::colorub(200, 200, 200, 255);
++                gle::defvertex(2);
++                gle::begin(GL_LINES);
++                gle::attribf(x0, y0); gle::attribf(x1, y1);
++                gle::attribf(x1, y0); gle::attribf(x0, y1);
++                xtraverts += gle::end();
++            }
++            else
++            {
++                coloridx = clamp(coloridx, 0, 9);
++                if(selected)
++                {
++                    gle::colorub(255, 122, 24, 255);
++                    rect_(curx, cury, size, size);
++                    gle::colorub(0, 0, 0, 255);
++                    rect_(curx + 3, cury + 3, size - 6, size - 6);
++                    gle::colorub(cols[coloridx][0], cols[coloridx][1], cols[coloridx][2], 255);
++                    rect_(curx + 6, cury + 6, size - 12, size - 12);
++                }
++                else
++                {
++                    gle::colorub(0, 0, 0, 255);
++                    rect_(curx, cury, size, size);
++                    int inset = hit ? 4 : 3;
++                    gle::colorub(cols[coloridx][0], cols[coloridx][1], cols[coloridx][2], 255);
++                    rect_(curx + inset, cury + inset, size - inset*2, size - inset*2);
++                }
++            }
++            hudshader->set();
++        }
++        return layout(size + FONTH/8, size);
++    }
++
++    void maphit(float &hx, float &hy)
++    {
++        hx = hitx;
++        hy = hity;
++        if(infloating && floatscale > 0)
++        {
++            hx = (hitx - floatox) / floatscale;
++            hy = (hity - floatoy) / floatscale;
++        }
++    }
++
+     int layout(int w, int h)
+     {
+         if(layoutpass)
+@@ -277,9 +596,10 @@ struct gui : g3d_gui
+         else
+         {
+             bool hit = ishit(w, h);
++            bool vis = visible();
+             if(ishorizontal()) curx += w;
+             else cury += h;
+-            return (hit && visible()) ? mousebuttons|G3D_ROLLOVER : 0;
++            return (hit && vis) ? mousebuttons|G3D_ROLLOVER : 0;
+         }
+     }
+ 
+@@ -292,10 +612,12 @@ struct gui : g3d_gui
+ 
+     bool ishit(int w, int h, int x = curx, int y = cury)
+     {
+-        if(shouldmergehits) return windowhit==this && (ishorizontal() ? hitx>=x && hitx<x+w : hity>=y && hity<y+h);
++        float hx, hy;
++        maphit(hx, hy);
++        if(shouldmergehits) return windowhit==this && (ishorizontal() ? hx>=x && hx<x+w : hy>=y && hy<y+h);
+         if(ishorizontal()) h = ysize;
+         else w = xsize;
+-        return windowhit==this && hitx>=x && hity>=y && hitx<x+w && hity<y+h;
++        return windowhit==this && hx>=x && hy>=y && hx<x+w && hy<y+h;
+     }
+ 
+     int image(Texture *t, float scale, const char *overlaid)
+@@ -321,45 +643,85 @@ struct gui : g3d_gui
+         autotab();
+         if(sizescale==0) sizescale = 1;
+         int size = (int)(sizescale*2*FONTH)-SHADOW;
++        int ret = 0;
+         if(model>=0 && visible())
+         {
+-            bool hit = ishit(size+SHADOW, size+SHADOW);
+             float xs = size, ys = size, xi = curx, yi = cury;
+-            if(overlaid && hit && actionon)
++            if(overlaid && actionon && windowhit==this)
+             {
+                 hudnotextureshader->set();
+                 gle::colorf(0, 0, 0, 0.75f);
+                 rect_(xi+SHADOW, yi+SHADOW, xs, ys);
+                 hudshader->set();
+             }
+-            int x1 = int(floor(screenw*(xi*scale.x+origin.x))), y1 = int(floor(screenh*(1 - ((yi+ys)*scale.y+origin.y)))),
+-                x2 = int(ceil(screenw*((xi+xs)*scale.x+origin.x))), y2 = int(ceil(screenh*(1 - (yi*scale.y+origin.y))));
+-            glDisable(GL_BLEND);
+-            modelpreview::start(x1, y1, x2-x1, y2-y1, overlaid!=NULL);
+-            game::renderplayerpreview(model, team, weap);
+-            modelpreview::end();
+-            hudshader->set();
+-            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+-            glEnable(GL_BLEND);
++            ret = orbitplayer_(curx, cury, size, model, team, weap);
+             if(overlaid)
+             {
++                bool hit = ret&G3D_ROLLOVER;
+                 if(hit)
+                 {
+                     hudnotextureshader->set();
+                     glBlendFunc(GL_ZERO, GL_SRC_COLOR);
+-                    gle::colorf(1, 0.5f, 0.5f);
++                    gle::colorf(1, 0.55f, 0.18f);
+                     rect_(xi, yi, xs, ys);
+                     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+                     hudshader->set();
+                 }
+-                if(overlaid[0]) text_(overlaid, xi + xs/12, yi + ys - ys/12 - FONTH, hit ? 0xFF0000 : 0xFFFFFF, hit, hit);
++                if(overlaid[0]) text_(overlaid, xi + xs/12, yi + ys - ys/12 - FONTH, hit ? 0xFF7A18 : 0xFFFFFF, hit, hit);
+                 if(!overlaytex) overlaytex = textureload("data/guioverlay.png", 3);
+                 gle::color(light);
+                 glBindTexture(GL_TEXTURE_2D, overlaytex->id);
+                 rect_(xi, yi, xs, ys, 0);
+             }
+         }
+-        return layout(size+SHADOW, size+SHADOW);
++        int laid = layout(size+SHADOW, size+SHADOW);
++        if(ret) return ret;
++        if(pvdrag && (laid&G3D_UP)) laid &= ~G3D_UP;
++        return laid;
++    }
++
++    int playeroverlay(int model, int team, int weap, float sizescale)
++    {
++        if(layoutpass || model<0 || !visible()) return 0;
++        (void)sizescale;
++        (void)sizescale;
++        const float u0 = 0.50f, u1 = 0.97f, v0 = 0.04f, v1 = 0.98f;
++        bool hit = cursorx >= u0 && cursorx < u1 && cursory >= v0 && cursory < v1;
++        if(hit && (mousebuttons&G3D_DOWN))
++        {
++            pvorbit = true;
++            pvdrag = false;
++            pvlastx = cursorx;
++            game::holdplayerpreview(true);
++        }
++        if(pvorbit && (mousebuttons&G3D_PRESSED))
++        {
++            float dx = cursorx - pvlastx;
++            if(fabs(dx) > 0.004f) pvdrag = true;
++            if(pvdrag) game::rotateplayerpreview(-dx * 360.0f / max(u1 - u0, 0.1f));
++            pvlastx = cursorx;
++        }
++        if(!(mousebuttons&(G3D_PRESSED|G3D_DOWN)))
++        {
++            if(pvorbit) game::holdplayerpreview(false);
++            pvorbit = false;
++        }
++        int vx = int(floor(screenw * u0));
++        int vw = int(ceil(screenw * u1)) - vx;
++        int vy = int(floor(screenh * (1 - v1)));
++        int vh = int(ceil(screenh * (1 - v0))) - vy;
++        if(vw > 1 && vh > 1)
++        {
++            glDisable(GL_BLEND);
++            modelpreview::start(vx, vy, vw, vh, false);
++            game::renderplayerpreview(model, team, weap);
++            modelpreview::end();
++            restoreafterpreview();
++        }
++        int ret = hit ? mousebuttons|G3D_ROLLOVER : 0;
++        if(pvdrag && (ret&G3D_UP)) ret &= ~G3D_UP;
++        if(!pvorbit) pvdrag = false;
++        return ret;
+     }
+ 
+     int modelpreview(const char *name, int anim, float sizescale, const char *overlaid, bool throttle)
+@@ -395,21 +757,19 @@ struct gui : g3d_gui
+                 rendermodel(&light, name, anim, o, yaw, 0, 0, NULL, NULL, 0);
+             }
+             modelpreview::end();
+-            hudshader->set();
+-            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+-            glEnable(GL_BLEND);
++            restoreafterpreview();
+             if(overlaid)
+             {
+                 if(hit)
+                 {
+                     hudnotextureshader->set();
+                     glBlendFunc(GL_ZERO, GL_SRC_COLOR);
+-                    gle::colorf(1, 0.5f, 0.5f);
++                    gle::colorf(1, 0.55f, 0.18f);
+                     rect_(xi, yi, xs, ys);
+                     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+                     hudshader->set();
+                 }
+-                if(overlaid[0]) text_(overlaid, xi + xs/12, yi + ys - ys/12 - FONTH, hit ? 0xFF0000 : 0xFFFFFF, hit, hit);
++                if(overlaid[0]) text_(overlaid, xi + xs/12, yi + ys - ys/12 - FONTH, hit ? 0xFF7A18 : 0xFFFFFF, hit, hit);
+                 if(!overlaytex) overlaytex = textureload("data/guioverlay.png", 3);
+                 gle::color(light);
+                 glBindTexture(GL_TEXTURE_2D, overlaytex->id);
+@@ -441,21 +801,19 @@ struct gui : g3d_gui
+             modelpreview::start(x1, y1, x2-x1, y2-y1, overlaid!=NULL);
+             previewprefab(prefab, color);
+             modelpreview::end();
+-            hudshader->set();
+-            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+-            glEnable(GL_BLEND);
++            restoreafterpreview();
+             if(overlaid)
+             {
+                 if(hit)
+                 {
+                     hudnotextureshader->set();
+                     glBlendFunc(GL_ZERO, GL_SRC_COLOR);
+-                    gle::colorf(1, 0.5f, 0.5f);
++                    gle::colorf(1, 0.55f, 0.18f);
+                     rect_(xi, yi, xs, ys);
+                     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+                     hudshader->set();
+                 }
+-                if(overlaid[0]) text_(overlaid, xi + FONTH/2, yi + FONTH/2, hit ? 0xFF0000 : 0xFFFFFF, hit, hit);
++                if(overlaid[0]) text_(overlaid, xi + FONTH/2, yi + FONTH/2, hit ? 0xFF7A18 : 0xFFFFFF, hit, hit);
+                 if(!overlaytex) overlaytex = textureload("data/guioverlay.png", 3);
+                 gle::color(light);
+                 glBindTexture(GL_TEXTURE_2D, overlaytex->id);
+@@ -470,6 +828,41 @@ struct gui : g3d_gui
+         autotab();
+         int x = curx;
+         int y = cury;
++        int offset = vmin < vmax ? clamp(val, vmin, vmax) : clamp(val, vmax, vmin);
++        int span = vmax==vmin ? 1 : (vmax-vmin);
++        if(gui2d && isvertical())
++        {
++            int barh = max(FONTH/7, 6);
++            if(visible())
++            {
++                if(!label) label = intstr(val);
++                int lw = text_width(label);
++                int bw = max(xsize, lw + FONTH);
++                bool hit = ishit(bw, FONTH, x, y);
++                float pct = float(offset-vmin)/float(span);
++                if(pct < 0) pct = 0;
++                if(pct > 1) pct = 1;
++                hudnotextureshader->set();
++                gle::colorub(40, 44, 52, 230);
++                rect_(x, y + (FONTH-barh)/2, bw, barh);
++                int fillw = max(int(bw * pct), barh);
++                gle::colorub(255, 122, 24, hit ? 255 : 200);
++                rect_(x, y + (FONTH-barh)/2, fillw, barh);
++                hudshader->set();
++                if(hit) color = 0xFF7A18;
++                int px = x + int((bw-lw)*pct);
++                text_(label, px, y, color, hit && actionon, hit);
++                if(hit && actionon)
++                {
++                    int vnew = int((float(span+((vmin<vmax)?1:-1))*(hitx-x-FONTH/2))/max(bw-lw, 1));
++                    vnew += vmin;
++                    vnew = vmin < vmax ? clamp(vnew, vmin, vmax) : clamp(vnew, vmax, vmin);
++                    if(vnew != val) val = vnew;
++                }
++            }
++            layout(0, FONTH + FONTH/8);
++            return;
++        }
+         line_((FONTH*2)/3);
+         if(visible())
+         {
+@@ -477,21 +870,21 @@ struct gui : g3d_gui
+             int w = text_width(label);
+ 
+             bool hit;
+-            int px, py, offset = vmin < vmax ? clamp(val, vmin, vmax) : clamp(val, vmax, vmin);
++            int px, py;
+             if(ishorizontal())
+             {
+                 hit = ishit(FONTH, ysize, x, y);
+                 px = x + (FONTH-w)/2;
+-                py = y + (ysize-FONTH) - ((ysize-FONTH)*(offset-vmin))/((vmax==vmin) ? 1 : (vmax-vmin)); //vmin at bottom
++                py = y + (ysize-FONTH) - ((ysize-FONTH)*(offset-vmin))/span;
+             }
+             else
+             {
+                 hit = ishit(xsize, FONTH, x, y);
+-                px = x + FONTH/2 - w/2 + ((xsize-w)*(offset-vmin))/((vmax==vmin) ? 1 : (vmax-vmin)); //vmin at left
++                px = x + FONTH/2 - w/2 + ((xsize-w)*(offset-vmin))/span;
+                 py = y;
+             }
+ 
+-            if(hit) color = 0xFF0000;
++            if(hit) color = 0xFF7A18;
+             text_(label, px, py, color, hit && actionon, hit);
+             if(hit && actionon)
+             {
+@@ -532,6 +925,7 @@ struct gui : g3d_gui
+             {
+                 int temp;
+                 text_bounds(e->lines[0].text, temp, e->pixelheight, e->pixelwidth); //only single line editors can have variable height
++                if(guifieldboxed) e->pixelheight = max(e->pixelheight, FONTH*2);
+             }
+             else 
+                 e->pixelheight = FONTH*max(height, 1); 
+@@ -542,12 +936,16 @@ struct gui : g3d_gui
+         bool wasvertical = isvertical();
+         if(wasvertical && e->maxy != 1) pushlist();
+         
++        // 2D menus underline a one-line field; a boxed field (guiinputfield) keeps its frame
++        bool underline = gui2d && e->maxy==1 && !guifieldboxed;
+         char *result = NULL;
+         if(visible() && !layoutpass)
+         {
+             e->rendered = true;
+ 
+             bool hit = ishit(w, h);
++            float hx, hy;
++            maphit(hx, hy);
+             if(hit) 
+             {
+                 if(mousebuttons&G3D_DOWN) //mouse request focus
+@@ -559,7 +957,7 @@ struct gui : g3d_gui
+                 } 
+             }
+             bool editing = (fieldmode != FIELDSHOW) && (e==currentfocus());
+-            if(hit && editing && (mousebuttons&G3D_PRESSED)!=0 && fieldtype==FIELDEDIT) e->hit(int(floor(hitx-(curx+FONTW/2))), int(floor(hity-cury)), (mousebuttons&G3D_DRAGGED)!=0); //mouse request position
++            if(hit && editing && (mousebuttons&G3D_PRESSED)!=0 && fieldtype==FIELDEDIT) e->hit(int(floor(hx-((underline) ? curx : curx+FONTW/2))), int(floor(hy-cury)), (mousebuttons&G3D_DRAGGED)!=0); //mouse request position
+             if(editing && ((fieldmode==FIELDCOMMIT) || (fieldmode==FIELDABORT) || !hit)) // commit field if user pressed enter or wandered out of focus 
+             {
+                 if(fieldmode==FIELDCOMMIT || (fieldmode!=FIELDABORT && !hit)) result = e->currentline().text;
+@@ -568,13 +966,35 @@ struct gui : g3d_gui
+             } 
+             else fieldsactive = true;
+             
+-            e->draw(curx+FONTW/2, cury, color, hit && editing);
++            int drawx = (underline) ? curx : curx+FONTW/2;
++            int drawcolor = color;
++            if(underline && hit)
++            {
++                int tw = text_width(e->currentline().text);
++                hoverfilltext_(drawx, tw, editing);
++                drawcolor = 0xFF7A18;
++            }
++            e->draw(drawx, cury, drawcolor, hit && editing);
+             
+             hudnotextureshader->set();
+             glDisable(GL_BLEND);
+-            if(editing) gle::colorf(1, 0, 0);
+-            else gle::colorub(color>>16, (color>>8)&0xFF, color&0xFF);
+-            rect_(curx, cury, w, h, true);
++            if(underline)
++            {
++                // orange outline so an empty field is visible without hovering it
++                gle::colorub(255, 122, 24);
++                rect_(curx, cury, w, h, true);
++                if(editing)
++                {
++                    int tw = text_width(e->currentline().text);
++                    rect_(drawx - INSERT, cury+h-2, max(tw, 8) + INSERT*2, 2);
++                }
++            }
++            else
++            {
++                if(editing) gle::colorub(255, 122, 24, 220);
++                else gle::colorub(color>>16, (color>>8)&0xFF, color&0xFF);
++                rect_(curx, cury, w, h, true);
++            }
+             glEnable(GL_BLEND);
+             hudshader->set();
+         }
+@@ -652,13 +1072,14 @@ struct gui : g3d_gui
+         hudshader->set();
+     }
+ 
+-    void icon_(Texture *t, bool overlaid, int x, int y, int size, bool hit, const char *title = NULL)
++    void icon_(Texture *t, bool overlaid, int x, int y, int size, bool hit, const char *title = NULL, bool dim = false)
+     {
+         float scale = float(size)/max(t->xs, t->ys); //scale and preserve aspect ratio
+         float xs = t->xs*scale, ys = t->ys*scale;
+         x += int((size-xs)/2);
+         y += int((size-ys)/2);
+-        const vec &color = hit ? vec(1, 0.5f, 0.5f) : (overlaid ? vec(1, 1, 1) : light);
++        vec color = hit ? vec(1, 0.55f, 0.18f) : (overlaid ? vec(1, 1, 1) : light);
++        if(dim) color.mul(0.4f);
+         glBindTexture(GL_TEXTURE_2D, t->id);
+         if(hit && actionon)
+         {
+@@ -674,7 +1095,7 @@ struct gui : g3d_gui
+             glBindTexture(GL_TEXTURE_2D, overlaytex->id);
+             gle::color(light);
+             rect_(x, y, xs, ys, 0);
+-            if(title) text_(title, x + xs/12, y + ys - ys/12 - FONTH, hit ? 0xFF0000 : 0xFFFFFF, hit && actionon, hit);
++            if(title) text_(title, x + xs/12, y + ys - ys/12 - FONTH, hit ? 0xFF7A18 : 0xFFFFFF, hit && actionon, hit);
+         }
+     }        
+ 
+@@ -709,7 +1130,7 @@ struct gui : g3d_gui
+         SETSHADER(hudrgb);
+         gle::defvertex(2);
+         gle::deftexcoord0();
+-        const vec &color = hit ? vec(1, 0.5f, 0.5f) : (overlaid ? vec(1, 1, 1) : light);
++        const vec &color = hit ? vec(1, 0.55f, 0.18f) : (overlaid ? vec(1, 1, 1) : light);
+         vec2 tc[4] = { vec2(0, 0), vec2(1, 0), vec2(1, 1), vec2(0, 1) };
+         float xoff = vslot.offset.x, yoff = vslot.offset.y;
+         if(vslot.rotation)
+@@ -769,21 +1190,32 @@ struct gui : g3d_gui
+     {		
+         if(visible())
+         {
+-            if(!slidertex) slidertex = textureload("data/guislider.png", 3);
+-            glBindTexture(GL_TEXTURE_2D, slidertex->id);
+-            if(percent < 0.99f) 
++            if(gui2d && percent > 0.99f)
++            {
++                hudnotextureshader->set();
++                gle::colorub(255, 122, 24, 64);
++                if(ishorizontal()) rect_(curx + FONTH/2 - 1, cury, 2, ysize);
++                else rect_(curx, cury + FONTH/2 - 1, xsize, 2);
++                hudshader->set();
++            }
++            else
+             {
+-                gle::colorf(light.x, light.y, light.z, 0.375f);
++                if(!slidertex) slidertex = textureload("data/guislider.png", 3);
++                glBindTexture(GL_TEXTURE_2D, slidertex->id);
++                if(percent < 0.99f) 
++                {
++                    gle::colorf(light.x, light.y, light.z, 0.375f);
++                    if(ishorizontal()) 
++                        rect_(curx + FONTH/2 - size/2, cury, size, ysize, 0);
++                    else
++                        rect_(curx, cury + FONTH/2 - size/2, xsize, size, 1);
++                }
++                gle::color(light);
+                 if(ishorizontal()) 
+-                    rect_(curx + FONTH/2 - size/2, cury, size, ysize, 0);
+-                else
+-                    rect_(curx, cury + FONTH/2 - size/2, xsize, size, 1);
++                    rect_(curx + FONTH/2 - size/2, cury + ysize*(1-percent), size, ysize*percent, 0);
++                else 
++                    rect_(curx, cury + FONTH/2 - size/2, xsize*percent, size, 1);
+             }
+-            gle::color(light);
+-            if(ishorizontal()) 
+-                rect_(curx + FONTH/2 - size/2, cury + ysize*(1-percent), size, ysize*percent, 0);
+-            else 
+-                rect_(curx, cury + FONTH/2 - size/2, xsize*percent, size, 1);
+         }
+         layout(ishorizontal() ? FONTH : 0, ishorizontal() ? 0 : FONTH);
+     }
+@@ -799,37 +1231,6 @@ struct gui : g3d_gui
+         layout(width, height);
+     }
+ 
+-    int button_(const char *text, int color, const char *icon, bool clickable, bool center)
+-    {
+-        const int padding = 10;
+-        int w = 0;
+-        if(icon) w += ICON_SIZE;
+-        if(icon && text) w += padding;
+-        if(text) w += text_width(text);
+-    
+-        if(visible())
+-        {
+-            bool hit = ishit(w, FONTH);
+-            if(hit && clickable) color = 0xFF0000;	
+-            int x = curx;	
+-            if(isvertical() && center) x += (xsize-w)/2;
+-        
+-            if(icon)
+-            {
+-                if(icon[0] != ' ')
+-                {
+-                    const char *ext = strrchr(icon, '.');
+-                    defformatstring(tname, "packages/icons/%s%s", icon, ext ? "" : ".jpg");
+-                    icon_(textureload(tname, 3), false, x, cury, ICON_SIZE, clickable && hit);
+-                }
+-                x += ICON_SIZE;
+-            }
+-            if(icon && text) x += padding;
+-            if(text) text_(text, x, cury, color, center || (hit && clickable && actionon), hit && clickable);
+-        }
+-        return layout(w, FONTH);
+-    }
+-
+     static Texture *skintex, *overlaytex, *slidertex;
+     static const int skinx[], skiny[];
+     static const struct patch { ushort left, right, top, bottom; uchar flags; } patches[];
+@@ -935,22 +1336,96 @@ struct gui : g3d_gui
+         if(tcurrent) h += ((skiny[5]-skiny[1])-(skiny[3]-skiny[2]))*SKIN_SCALE + FONTH-2*INSERT;
+         else h += (skiny[6]-skiny[3])*SKIN_SCALE;
+ 
+-        float aspect = forceaspect ? 1.0f/forceaspect : float(screenh)/float(screenw), fit = 1.0f;
+-        if(w*aspect*basescale>1.0f) fit = 1.0f/(w*aspect*basescale);
+-        if(h*basescale*fit>maxscale) fit *= maxscale/(h*basescale*fit);
+-        origin = vec(0.5f-((w-xsize)/2 - (skinx[2]-skinx[1])*SKIN_SCALE)*aspect*scale.x*fit, 0.5f + (0.5f*h-(skiny[9]-skiny[7])*SKIN_SCALE)*scale.y*fit, 0);
+-        scale = vec(aspect*scale.x*fit, scale.y*fit, 1);
++        float aspect = forceaspect ? 1.0f/forceaspect : float(screenh)/float(screenw);
++        if(bannerlayout && gui2d)
++        {
++            float sx = aspect * basescale, sy = basescale;
++            float ndcw = xsize * sx;
++            if(ndcw > 0.90f)
++            {
++                float f = 0.90f / ndcw;
++                sx *= f;
++                sy *= f;
++            }
++            float ndch = ysize * sy;
++            if(ndch > 0.86f)
++            {
++                float f = 0.86f / ndch;
++                sx *= f;
++                sy *= f;
++            }
++            scale = vec(sx, sy, 1);
++            origin = vec(0.32f + xsize * 0.5f * sx, 0.07f + ysize * sy, 0);
++            visih = ysize;
++            bodyh = ysize;
++            bodyw = xsize;
++            scrolloff = 0;
++            fixedpanel = false;
++            if(interactive && bindscrollmax) *bindscrollmax = 0;
++            return;
++        }
++        // Overlay GUIs (Tab scoreboard, etc.) must not steal the menu's
++        // height/scroll: they shrink to fit like vanilla instead of clipping.
++        if(!interactive)
++        {
++            float fit = 1.0f;
++            if(w*aspect*basescale>1.0f) fit = 1.0f/(w*aspect*basescale);
++            if(h*basescale*fit>1.0f) fit *= 1.0f/(h*basescale*fit);
++            scale = vec(aspect*basescale*fit, basescale*fit, 1);
++            origin = vec(0.5f-((w-xsize)/2 - (skinx[2]-skinx[1])*SKIN_SCALE)*scale.x, 0.5f + (0.5f*h-(skiny[9]-skiny[7])*SKIN_SCALE)*scale.y, 0);
++            visih = ysize;
++            bodyh = ysize;
++            bodyw = xsize;
++            scrolloff = 0;
++            fixedpanel = false;
++            return;
++        }
++        // Same window for every interactive 2D menu: pad short pages, scroll long ones.
++        scale = vec(aspect*basescale, basescale, 1);
++        int wantw = max(1, int(GUI_PANEL_W / scale.x));
++        if(xsize > wantw)
++        {
++            float f = float(wantw) / float(max(xsize, 1));
++            scale.x *= f;
++            scale.y *= f;
++        }
++        bodyw = max(xsize, max(1, int(GUI_PANEL_W / scale.x)));
++        visih = max(FONTH*8, int(GUI_PANEL_H / scale.y));
++        visih -= visih % FONTH;
++        bodyh = ysize;
++        fixedpanel = true;
++        guipanelspare = visih - ysize;
++        int smax = max(0, ysize - visih);
++        if(bindscrollmax) *bindscrollmax = smax;
++        scrolloff = 0;
++        if(bindscroll)
++        {
++            *bindscroll = clamp(*bindscroll, 0, smax);
++            scrolloff = *bindscroll;
++        }
++        float ytop = float(-ysize + scrolloff);
++        origin = vec(0.5f, GUI_PANEL_TOP - ytop*scale.y, 0);
+     }
+ 
+     void start(int starttime, float initscale, int *tab, bool allowinput)
+     {	
++        interactive = allowinput;
+         if(gui2d) 
+         {
+             initscale *= 0.025f; 
+             if(allowinput) hascursor = true;
+         }
+         basescale = initscale;
+-        if(layoutpass) scale.x = scale.y = scale.z = guifadein ? basescale*min((totalmillis-starttime)/300.0f, 1.0f) : basescale;
++        if(layoutpass)
++        {
++            bannerlayout = false;
++            bannercenter = false;
++            bannerw = 0;
++            overlayw = overlayh = 0;
++            infloating = false;
++            floatscale = 1;
++            scale.x = scale.y = scale.z = (guifadein && !lastbanner) ? basescale*min((totalmillis-starttime)/300.0f, 1.0f) : basescale;
++        }
+         alpha = allowinput ? 0.80f : 0.60f;
+         passthrough = scale.x<basescale || !allowinput;
+         curdepth = -1;
+@@ -998,9 +1473,120 @@ struct gui : g3d_gui
+             resethudmatrix();
+             hudshader->set();
+ 
+-            drawskin(curx-skinx[2]*SKIN_SCALE, cury-skiny[6]*SKIN_SCALE, xsize, ysize, 0, 9, gui2d ? 1 : 2, light, alpha);
+-            if(!tcurrent) drawskin(curx-skinx[5]*SKIN_SCALE, cury-skiny[6]*SKIN_SCALE, xsize, 0, 9, 1, gui2d ? 1 : 2, light, alpha);
++            if(gui2d)
++            {
++                hudnotextureshader->set();
++                if(bannerlayout)
++                {
++                    const int pad = 40;
++                    float gy0 = (0.0f - origin.y) / scale.y;
++                    float gy1 = (1.0f - origin.y) / scale.y;
++                    float bx = -xsize/2.0f - pad;
++                    float bw = float((bannerw > 0 ? bannerw : xsize) + pad*2);
++                    gle::colorub(8, 10, 14, 248);
++                    rect_(bx, gy0, bw, gy1 - gy0);
++                    gle::colorub(255, 122, 24, 50);
++                    rect_(bx, gy0, 3, gy1 - gy0);
++                    gle::colorub(255, 122, 24, 22);
++                    rect_(bx + bw - 2, gy0, 2, gy1 - gy0);
++                }
++                else
++                {
++                    int pad = bodylpad(), rpad = bodyrpad();
++                    int fw = framew();
++                    int ytop = -ysize + scrolloff;
++                    int px = -fw/2 - pad, py = ytop - pad, pw = fw + pad + rpad, ph = visih + pad*2;
++                    if(tcurrent)
++                    {
++                        py -= TAB2D_H;
++                        ph += TAB2D_H;
++                    }
++                    if(guibackdroptex)
++                    {
++                        hudshader->set();
++                        glBindTexture(GL_TEXTURE_2D, guibackdroptex->id);
++                        gle::colorub(255, 255, 255, 255);
++                        rect_(px, py, pw, ph, 0);
++                        hudnotextureshader->set();
++                        gle::colorub(10, 12, 16, 168);
++                        rect_(px, py, pw, ph);
++                    }
++                    else
++                    {
++                        int bg = allowinput ? 242 : (scoreboardalpha*255)/100;
++                        gle::colorub(10, 12, 16, bg);
++                        rect_(px, py, pw, ph);
++                    }
++                    gle::colorub(255, 122, 24, 210);
++                    rect_(px, py, pw, 3);
++                    gle::colorub(255, 122, 24, 210);
++                    rect_(px, py + ph - 3, pw, 3);
++                    gle::colorub(255, 122, 24, 210);
++                    rect_(px, py, 3, ph);
++                    gle::colorub(255, 122, 24, 210);
++                    rect_(px + pw - 3, py, 3, ph);
++                }
++                hudshader->set();
++                clipbody();
++            }
++            else
++            {
++                drawskin(curx-skinx[2]*SKIN_SCALE, cury-skiny[6]*SKIN_SCALE, xsize, ysize, 0, 9, 2, light, alpha);
++                if(!tcurrent) drawskin(curx-skinx[5]*SKIN_SCALE, cury-skiny[6]*SKIN_SCALE, xsize, 0, 9, 1, 2, light, alpha);
++            }
++        }
++    }
++
++    void restoreafterpreview()
++    {
++        hudshader->set();
++        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
++        glEnable(GL_BLEND);
++        if(!gui2d) return;
++        hudmatrix.ortho(0, 1, 1, 0, -1, 1);
++        hudmatrix.translate(origin);
++        hudmatrix.scale(scale);
++        resethudmatrix();
++        clipbody();
++    }
++
++    void clipbody()
++    {
++        int h = bodyh > 0 ? bodyh : ysize;
++        int w = bodyw > 0 ? bodyw : xsize;
++        if(!gui2d || visih >= h || visih <= 0) return;
++        int pad = bodylpad(), rpad = bodyrpad();
++        float y0 = float(-h + scrolloff), y1 = y0 + visih;
++        float x0 = float(-w/2 - pad), x1 = float(w/2 + rpad);
++        int sx = int(floor(screenw * (origin.x + x0 * scale.x)));
++        int sw = int(ceil(screenw * (x1 - x0) * scale.x));
++        float ndc0 = origin.y + y0 * scale.y, ndc1 = origin.y + y1 * scale.y;
++        int sy = int(floor(screenh * (1 - ndc1)));
++        int sh = int(ceil(screenh * (ndc1 - ndc0)));
++        if(sw < 1 || sh < 1) return;
++        glScissor(sx, sy, sw, sh);
++        glEnable(GL_SCISSOR_TEST);
++    }
++
++    void drawscrollthumb()
++    {
++        int h = bodyh > 0 ? bodyh : ysize;
++        if(!gui2d || visih <= 0) return;
++        bool bar = hasscrollbar() && h > visih;
++        if(!bar && !fixedpanel) return;
++        float y0 = float(-h + scrolloff), track = float(visih);
++        float sx = scrollx();
++        hudnotextureshader->set();
++        gle::colorub(255, 122, 24, 36);
++        rect_(sx, y0, float(SCROLL_THICK), track);
++        if(bar)
++        {
++            float thumb = max(float(FONTH), track * visih / float(h));
++            float ty = y0 + (float(scrolloff) / float(max(h - visih, 1))) * (track - thumb);
++            gle::colorub(255, 122, 24, 210);
++            rect_(sx, ty, float(SCROLL_THICK), thumb);
+         }
++        hudshader->set();
+     }
+ 
+     void adjusthorizontalcolumn(int col, int i)
+@@ -1067,6 +1653,7 @@ struct gui : g3d_gui
+             ysize = max(ysize, (skiny[7]-skiny[6])*SKIN_SCALE);
+             if(tcurrent) *tcurrent = max(1, min(*tcurrent, tpos));
+             if(gui2d) adjustscale();
++            lastbanner = bannerlayout;
+             if(!windowhit && !passthrough)
+             {
+                 float dist = 0;
+@@ -1088,15 +1675,36 @@ struct gui : g3d_gui
+                     }
+                 }
+                 if((mousebuttons & G3D_PRESSED) && (fabs(hitx-firstx) > 2 || fabs(hity - firsty) > 2)) mousebuttons |= G3D_DRAGGED;
+-                if(dist>=0 && hitx>=-xsize/2 && hitx<=xsize/2 && hity<=0)
++                int y0 = -ysize + scrolloff, y1 = y0 + (visih > 0 ? visih : ysize);
++                if(gui2d) y1 += FONTH + GUI_PAD;
++                int fw = framew();
++                int hitl = -fw/2 - bodylpad();
++                int hitr = fw/2 + bodyrpad();
++                if(dist>=0 && hitx>=hitl && hitx<=hitr)
++                {
++                    if(hity>=y0 && hity<=y1)
++                        windowhit = this;
++                    else if(tcurrent && hitx<=tx-xsize/2)
++                    {
++                        int tabtop = gui2d ? y0 - TAB2D_H : -ysize-(FONTH-2*INSERT)-((skiny[6]-skiny[1])-(skiny[3]-skiny[2]))*SKIN_SCALE;
++                        if(hity>=tabtop && hity<y0) windowhit = this;
++                    }
++                }
++                if(overlayw > 0 && scale.x != 0 && scale.y != 0)
+                 {
+-                    if(hity>=-ysize || (tcurrent && hity>=-ysize-(FONTH-2*INSERT)-((skiny[6]-skiny[1])-(skiny[3]-skiny[2]))*SKIN_SCALE && hitx<=tx-xsize/2))
++                    float fs = floatscale > 0 ? floatscale : 1;
++                    int ox = int((floatu - origin.x) / scale.x);
++                    int oy = int((floatv - origin.y) / scale.y);
++                    int ow = int(overlayw * fs), oh = int(overlayh * fs);
++                    if(hitx>=ox && hitx<ox+ow && hity>=oy && hity<oy+oh)
+                         windowhit = this;
+                 }
+             }
+         }
+         else
+         {
++            glDisable(GL_SCISSOR_TEST);
++            drawscrollthumb();
+             if(tcurrent && tx<xsize) drawskin(curx+tx-skinx[5]*SKIN_SCALE, -ysize-skiny[6]*SKIN_SCALE, xsize-tx, FONTH, 9, 1, gui2d ? 1 : 2, light, alpha);
+         }
+         poplist();
+@@ -1155,6 +1763,14 @@ const gui::patch gui::patches[] =
+ vector<gui::list> gui::lists;
+ float gui::basescale, gui::maxscale = 1, gui::hitx, gui::hity, gui::alpha;
+ bool gui::passthrough, gui::shouldmergehits = false, gui::shouldautotab = true;
++bool gui::bannerlayout = false, gui::lastbanner = false, gui::bannercenter = false;
++bool gui::pvorbit = false, gui::pvdrag = false;
++float gui::pvlastx = 0;
++int gui::bannerw = 0;
++float gui::floatu = 0, gui::floatv = 0, gui::floatscale = 1;
++int gui::overlayw = 0, gui::overlayh = 0, gui::floatsavedx = 0, gui::floatsavedy = 0, gui::floatsavedxs = 0, gui::floatsavedys = 0, gui::floatox = 0, gui::floatoy = 0;
++bool gui::infloating = false, gui::floatsavedcenter = false;
++int *gui::bindscroll = NULL, *gui::bindscrollmax = NULL;
+ vec gui::light;
+ int gui::curdepth, gui::curlist, gui::xsize, gui::ysize, gui::curx, gui::cury;
+ int gui::ty, gui::tx, gui::tpos, *gui::tcurrent, gui::tcolor;
+@@ -1191,6 +1807,18 @@ bool g3d_key(int code, bool isdown)
+         return true;
+     }
+ 
++    if(code==-4 || code==-5)
++    {
++        if(isdown && gui::bindscroll && gui::bindscrollmax && *gui::bindscrollmax > 0)
++        {
++            int step = FONTH + FONTH/6;
++            if(code==-4) *gui::bindscroll = max(0, *gui::bindscroll - step);
++            else *gui::bindscroll = min(*gui::bindscrollmax, *gui::bindscroll + step);
++            return true;
++        }
++        if(windowhit && windowhit->gui2d) return true;
++    }
++
+     if(code==-1 && g3d_windowhit(isdown, true)) return true;
+     else if(code==-3 && g3d_windowhit(isdown, false)) return true;
+ 
+@@ -1259,6 +1887,12 @@ void g3d_cursorpos(float &x, float &y)
+     else x = y = 0.5f;
+ }
+ 
++void g3d_setcursor(float x, float y)
++{
++    cursorx = max(0.0f, min(1.0f, x));
++    cursory = max(0.0f, min(1.0f, y));
++}
++
+ void g3d_resetcursor()
+ {
+     cursorx = cursory = 0.5f;
+@@ -1288,6 +1922,12 @@ void g3d_addgui(g3d_callback *cb, vec &origin, int flags)
+     g.savedorigin = &origin;
+     g.dist = flags&GUI_BOTTOM && gui2d ? 1e16f : camera1->o.dist(g.origin);
+     g.gui2d = gui2d;
++    g.visih = 0;
++    g.bodyh = 0;
++    g.bodyw = 0;
++    g.scrolloff = 0;
++    g.interactive = true;
++    g.fixedpanel = false;
+ }
+ 
+ void g3d_limitscale(float scale)
+@@ -1295,6 +1935,19 @@ void g3d_limitscale(float scale)
+     gui::maxscale = scale;
+ }
+ 
++void g3d_setbackdrop(const char *path)
++{
++    if(!path || !path[0]) { guibackdropnext = NULL; return; }
++    Texture *t = textureload(path, 3, true, false);
++    guibackdropnext = (!t || t==notexture) ? NULL : t;
++}
++
++void g3d_bindscroll(int *scroll, int *scrollmax)
++{
++    gui::bindscroll = scroll;
++    gui::bindscrollmax = scrollmax;
++}
++
+ static inline bool g3d_sort(const gui &a, const gui &b) { return a.dist < b.dist; }
+ 
+ bool g3d_windowhit(bool on, bool act)
+@@ -1361,6 +2014,8 @@ void g3d_render()
+ 
+ void g3d_render2d()
+ {
++    guibackdroptex = guibackdropnext;
++    guibackdropnext = NULL;
+     if(guis2d.length())
+     {
+         glEnable(GL_BLEND);
+@@ -1396,3 +2051,10 @@ void consolebox(int x1, int y1, int x2, int y2)
+     pophudmatrix();
+ }
+ 
++
++// live text of a gui field (while typing, before Enter commits it)
++ICOMMAND(guifieldtext, "s", (char *name),
++{
++    loopv(editors) if(!strcmp(editors[i]->name, name)) { result(editors[i]->lines[0].text); return; }
++    result(getalias(name));
++});
+diff --git a/src/engine/engine.h b/src/engine/engine.h
+index c779ce51821a087ca61478caf4ce74a7189da6a4..8253c577ec7ceebaddbcdbfd624afcf0c397d56e 100644
+--- a/src/engine/engine.h
++++ b/src/engine/engine.h
+@@ -569,6 +569,7 @@ extern bool g3d_key(int code, bool isdown);
+ extern bool g3d_input(const char *str, int len);
+ // menus
+ extern int mainmenu;
++extern bool gui2dvisible();
+ extern bool overlaycursor();
+ 
+ extern void clearmainmenu();
+diff --git a/src/engine/menus.cpp b/src/engine/menus.cpp
+index 9c95e62fbbb26d44a0404c32485181dad13a99a4..500748523454bbcec5637b28aaaf9447ecfc791d 100644
+--- a/src/engine/menus.cpp
++++ b/src/engine/menus.cpp
+@@ -21,15 +21,15 @@ struct menu : g3d_callback
+     char *name, *header;
+     uint *contents, *init, *onclear;
+     bool showtab, keeptab;
+-    int menutab;
++    int menutab, scroll, scrollmax;
+ 
+-    menu() : name(NULL), header(NULL), contents(NULL), init(NULL), onclear(NULL), showtab(true), keeptab(false), menutab(1) {}
++    menu() : name(NULL), header(NULL), contents(NULL), init(NULL), onclear(NULL), showtab(true), keeptab(false), menutab(1), scroll(0), scrollmax(0) {}
+ 
+     void gui(g3d_gui &g, bool firstpass)
+     {
+         cgui = &g;
+         guitabnum = menutab;
+-        cgui->start(menustart, 0.03f, showtab ? &menutab : NULL);
++        cgui->start(menustart, 0.034f, showtab ? &menutab : NULL);
+         if(showtab) cgui->tab(header ? header : name, GUI_TITLE_COLOR);
+         execute(contents);
+         cgui->end();
+@@ -153,7 +153,11 @@ void pushgui(menu *m, int pos = -1)
+         menupos = menuinfrontofplayer();
+         g3d_resetcursor();
+     }
+-    if(pos < 0) guistack.add(m);
++    if(pos < 0)
++    {
++        m->scroll = 0;
++        guistack.add(m);
++    }
+     else guistack.insert(pos, m);
+     if(pos < 0 || pos==guistack.length()-1)
+     {
+@@ -179,6 +183,11 @@ void showgui(const char *name)
+     else restoregui(pos);
+ }
+ 
++bool gui2dvisible()
++{
++    return guistack.length() > 0;
++}
++
+ void hidegui(const char *name)
+ {
+     menu *m = guis.access(name);
+@@ -216,6 +225,13 @@ void clearguis(int level = -1)
+     cleargui(level);
+ }
+ 
++// the HUD editor needs the whole screen: every menu goes, the main one too
++void closeallguis()
++{
++    clearguis();
++    while(guistack.length()) popgui();
++}
++
+ void guionclear(char *action)
+ {
+     if(guistack.empty()) return;
+@@ -252,8 +268,8 @@ void guimerge(uint *contents)
+ void guibutton(char *name, char *action, char *icon)
+ {
+     if(!cgui) return;
+-    bool hideicon = !strcmp(icon, "0");
+-    int ret = cgui->button(name, GUI_BUTTON_COLOR, hideicon ? NULL : (icon[0] ? icon : (strstr(action, "showgui") ? "menu" : "action")));
++    bool hideicon = !icon[0] || !strcmp(icon, "0");
++    int ret = cgui->button(name, GUI_BUTTON_COLOR, hideicon ? NULL : icon);
+     if(ret&G3D_UP) 
+     {
+         updatelater.add().schedule(action[0] ? action : name);
+@@ -307,8 +323,8 @@ void guitextbox(char *text, int *width, int *height, int *color)
+ 
+ void guitext(char *name, char *icon)
+ {
+-    bool hideicon = !strcmp(icon, "0");
+-    if(cgui) cgui->text(name, !hideicon && icon[0] ? GUI_BUTTON_COLOR : GUI_TEXT_COLOR, hideicon ? NULL : (icon[0] ? icon : "info"));
++    bool hideicon = !icon[0] || !strcmp(icon, "0");
++    if(cgui) cgui->text(name, hideicon ? GUI_TEXT_COLOR : GUI_BUTTON_COLOR, hideicon ? NULL : icon);
+ }
+ 
+ void guititle(char *name)
+@@ -326,6 +342,12 @@ void guibar()
+     if(cgui) cgui->separator();
+ }
+ 
++void guibackdrop(char *path)
++{
++    g3d_setbackdrop(path);
++}
++
++
+ void guistrut(float *strut, int *alt)
+ {
+     if(cgui)
+@@ -344,6 +366,29 @@ void guicolumn(int *col)
+     if(cgui) cgui->column(*col);
+ }
+ 
++void guibanner(int *on)
++{
++    if(cgui) cgui->setbanner(*on!=0);
++}
++
++void guibannersplit()
++{
++    if(cgui) cgui->bannersplit();
++}
++
++void guibannercenter(int *on)
++{
++    if(cgui) cgui->setbannercenter(*on!=0);
++}
++
++void guifloat(float *u, float *v, uint *contents)
++{
++    if(!cgui) return;
++    cgui->startfloat(*u, *v);
++    execute(contents);
++    cgui->endfloat();
++}
++
+ 
+ template<class T> static void updateval(char *var, T val, char *onchange)
+ {
+@@ -366,7 +411,15 @@ static int getval(char *var)
+     }
+ }
+ 
+-static float getfval(char *var)
++void guicolorswatch(char *var, int *idx)
++{
++    if(!cgui) return;
++    int i = *idx < 0 ? -1 : clamp(*idx, 0, 9);
++    bool selected = getval(var) == i;
++    if(cgui->colorswatch(i, selected)&G3D_UP) updateval(var, i, (char *)"");
++}
++
++static float getfval(const char *var)
+ {
+     ident *id = readident(var);
+     if(!id) return 0;
+@@ -440,19 +493,71 @@ void guinameslider(char *var, char *names, char *list, char *onchange)
+     delete[] label;
+ }
+ 
++// A value a setting cannot take on this machine right now (e.g. hwrt 1 on a GPU
++// without ray tracing): "settinglock VAR VALUE [REASON]". REASON is run each time
++// it is needed and gives a short line, "" meaning the value is allowed again;
++// an empty REASON removes the lock. The guiradio / guicheckbox that would set
++// the value stays on screen but greyed out and inert, the settings search shows
++// it the same way, and the assistant refuses it, quoting the reason.
++struct settinglockentry
++{
++    string var;
++    float val;
++    char *reason;
++};
++static vector<settinglockentry> settinglocks;
++
++static void settinglock(char *var, float *val, char *reason)
++{
++    loopv(settinglocks) if(settinglocks[i].val == *val && !strcmp(settinglocks[i].var, var))
++    {
++        delete[] settinglocks[i].reason;
++        if(reason[0]) settinglocks[i].reason = newstring(reason);
++        else settinglocks.remove(i);
++        return;
++    }
++    if(!reason[0] || !var[0]) return;
++    settinglockentry &l = settinglocks.add();
++    copystring(l.var, var);
++    l.val = *val;
++    l.reason = newstring(reason);
++}
++COMMAND(settinglock, "sfs");
++
++// why VAR cannot be set to VAL now, or NULL when it can
++static const char *settinglocked(const char *var, float val)
++{
++    loopv(settinglocks) if(settinglocks[i].val == val && !strcmp(settinglocks[i].var, var))
++    {
++        static string why;
++        char *r = executestr(settinglocks[i].reason);
++        copystring(why, r ? r : "");
++        DELETEA(r);
++        if(why[0]) return why;
++    }
++    return NULL;
++}
++ICOMMAND(settinglockreason, "sf", (char *var, float *val), { const char *why = settinglocked(var, *val); result(why ? why : ""); });
++
+ void guicheckbox(char *name, char *var, float *on, float *off, char *onchange)
+ {
++    if(!cgui) return;
+     bool enabled = getfval(var)!=*off;
+-    if(cgui && cgui->button(name, GUI_BUTTON_COLOR, enabled ? "checkbox_on" : "checkbox_off")&G3D_UP)
++    float onval = *on || *off ? *on : 1.0f;
++    // switching off is always allowed; only turning on can be locked
++    if(!enabled && settinglocked(var, onval)) { cgui->disabledbutton(name, "checkbox_off"); return; }
++    if(cgui->button(name, GUI_BUTTON_COLOR, enabled ? "checkbox_on" : "checkbox_off")&G3D_UP)
+     {
+-        updateval(var, enabled ? *off : (*on || *off ? *on : 1.0f), onchange);
++        updateval(var, enabled ? *off : onval, onchange);
+     }
+ }
+ 
+ void guiradio(char *name, char *var, float *n, char *onchange)
+ {
++    if(!cgui) return;
+     bool enabled = getfval(var)==*n;
+-    if(cgui && cgui->button(name, GUI_BUTTON_COLOR, enabled ? "radio_on" : "radio_off")&G3D_UP)
++    if(settinglocked(var, *n)) { cgui->disabledbutton(name, enabled ? "radio_on" : "radio_off"); return; }
++    if(cgui->button(name, GUI_BUTTON_COLOR, enabled ? "radio_on" : "radio_off")&G3D_UP)
+     {
+         if(!enabled) updateval(var, *n, onchange);
+     }
+@@ -477,6 +582,19 @@ void guifield(char *var, int *maxlength, char *onchange)
+     if(result) updateval(var, result, onchange); 
+ }
+ 
++// a framed, wrapped text field (at least two lines high), for typing sentences
++extern bool guifieldboxed;
++void guiinputfield(char *var, int *width, char *onchange)
++{
++    if(!cgui) return;
++    const char *initval = getsval(var);
++    guifieldboxed = true;
++    char *result = cgui->field(var, GUI_BUTTON_COLOR, -max(abs(*width), 10), 0, initval);
++    guifieldboxed = false;
++    if(result) updateval(var, result, onchange);
++}
++COMMAND(guiinputfield, "sis");
++
+ //-ve maxlength indicates a wrapped text field of any (approx 260 chars) length, |maxlength| is the field width
+ void guieditor(char *name, int *maxlength, int *height, int *mode)
+ {
+@@ -599,6 +717,11 @@ COMMAND(guibar,"");
+ COMMAND(guistrut,"fi");
+ COMMAND(guispring, "i");
+ COMMAND(guicolumn, "i");
++COMMAND(guibanner, "i");
++COMMAND(guibannersplit, "");
++COMMAND(guibannercenter, "i");
++COMMAND(guifloat, "ffe");
++COMMAND(guicolorswatch, "si");
+ COMMAND(guiimage,"ssfiss");
+ COMMAND(guislider,"sbbs");
+ COMMAND(guilistslider, "sss");
+@@ -607,6 +730,7 @@ COMMAND(guiradio,"ssfs");
+ COMMAND(guibitfield, "ssis");
+ COMMAND(guicheckbox, "ssffs");
+ COMMAND(guitab, "s");
++COMMAND(guibackdrop, "s");
+ COMMAND(guifield, "sis");
+ COMMAND(guikeyfield, "sis");
+ COMMAND(guieditor, "siii");
+@@ -626,7 +750,21 @@ void guiplayerpreview(int *model, int *team, int *weap, char *action, float *sca
+         }
+     }
+ }
++void guiplayeroverlay(int *model, int *team, int *weap, char *action, float *scale)
++{
++    if(!cgui) return;
++    int ret = cgui->playeroverlay(*model, *team, *weap, *scale);
++    if(ret&G3D_UP)
++    {
++        if(*action)
++        {
++            updatelater.add().schedule(action);
++            if(shouldclearmenu) clearlater = true;
++        }
++    }
++}
+ COMMAND(guiplayerpreview, "iiisfis");
++COMMAND(guiplayeroverlay, "iiisf");
+ 
+ void guimodelpreview(char *model, char *animspec, char *action, float *scale, int *overlaid, char *title, int *throttle)
+ {
+@@ -776,13 +914,21 @@ void clearmainmenu()
+     }
+ }
+ 
++// scrolls the open menu to its end (clamped to the real height when laid out)
++ICOMMAND(guiscrollbottom, "", (), { if(guistack.length()) guistack.last()->scroll = 1<<20; });
++
+ void g3d_mainmenu()
+ {
+     if(!guistack.empty()) 
+     {   
+         extern int usegui2d;
+         if(!mainmenu && !usegui2d && camera1->o.dist(menupos) > menuautoclose) cleargui();
+-        else g3d_addgui(guistack.last(), menupos, GUI_2D | GUI_FOLLOW);
++        else
++        {
++            menu *m = guistack.last();
++            g3d_bindscroll(&m->scroll, &m->scrollmax);
++            g3d_addgui(m, menupos, GUI_2D | GUI_FOLLOW);
++        }
+     }
++    else g3d_bindscroll(NULL, NULL);
+ }
+-
+diff --git a/src/engine/serverbrowser.cpp b/src/engine/serverbrowser.cpp
+index f4ff8ca4d0cb5d031ff9bd0a0a68145520b6f3bd..e72021fbd405ef19446f35d9ced5131981028c72 100644
+--- a/src/engine/serverbrowser.cpp
++++ b/src/engine/serverbrowser.cpp
+@@ -562,37 +562,28 @@ serverinfo *selectedserver = NULL;
+ 
+ const char *showservers(g3d_gui *cgui, uint *header, int pagemin, int pagemax)
+ {
++    (void)pagemin;
++    (void)pagemax;
+     refreshservers();
+-    if(servers.empty())
+-    {
+-        if(header) execute(header);
+-        return NULL;
+-    }
++    if(header) execute(header);
++    if(servers.empty()) return NULL;
+     serverinfo *sc = NULL;
+-    for(int start = 0; start < servers.length();)
++    cgui->pushlist();
++    loopi(10)
+     {
+-        if(start > 0) cgui->tab();
+-        if(header) execute(header);
+-        int end = servers.length();
+-        cgui->pushlist();
+-        loopi(10)
++        if(!game::serverinfostartcolumn(cgui, i)) break;
++        loopvj(servers)
+         {
+-            if(!game::serverinfostartcolumn(cgui, i)) break;
+-            for(int j = start; j < end; j++)
+-            {
+-                if(!i && j+1 - start >= pagemin && (j+1 - start >= pagemax || cgui->shouldtab())) { end = j; break; }
+-                serverinfo &si = *servers[j];
+-                const char *sdesc = si.sdesc;
+-                if(si.address.host == ENET_HOST_ANY) sdesc = "[unknown host]";
+-                else if(si.ping == serverinfo::WAITING) sdesc = "[waiting for response]";
+-                if(game::serverinfoentry(cgui, i, si.name, si.port, sdesc, si.map, sdesc == si.sdesc ? si.ping : -1, si.attr, si.numplayers))
+-                    sc = &si;
+-            }
+-            game::serverinfoendcolumn(cgui, i);
++            serverinfo &si = *servers[j];
++            const char *sdesc = si.sdesc;
++            if(si.address.host == ENET_HOST_ANY) sdesc = "[unknown host]";
++            else if(si.ping == serverinfo::WAITING) sdesc = "[waiting for response]";
++            if(game::serverinfoentry(cgui, i, si.name, si.port, sdesc, si.map, sdesc == si.sdesc ? si.ping : -1, si.attr, si.numplayers))
++                sc = &si;
+         }
+-        cgui->poplist();
+-        start = end;
++        game::serverinfoendcolumn(cgui, i);
+     }
++    cgui->poplist();
+     if(selectedserver || !sc) return NULL;
+     selectedserver = sc;
+     return "connectselected";
+diff --git a/src/fpsgame/render.cpp b/src/fpsgame/render.cpp
+index d3c4a9098989b88db9f6b41b693c5d03b17ebc39..cf347a9a9d671546193c4da8f0dd3375b2fd7c12 100644
+--- a/src/fpsgame/render.cpp
++++ b/src/fpsgame/render.cpp
+@@ -175,6 +175,18 @@ namespace game
+     static bool pvintro = true, pvmanual = false, pvhold = false;
+     static float pvyaw = 210;
+ 
++    void rotateplayerpreview(float dyaw)
++    {
++        pvyaw = fmod(pvyaw + dyaw, 360.0f);
++        if(pvyaw < 0) pvyaw += 360.0f;
++        pvmanual = true;
++    }
++
++    void holdplayerpreview(bool on)
++    {
++        pvhold = on;
++    }
++
+     static void pickpreviewclip()
+     {
+         int r = rnd(100);
+diff --git a/src/fpsgame/scoreboard.cpp b/src/fpsgame/scoreboard.cpp
+index 8785444751eec0c58ddf518a6134a15dfe6174ad..f032075bdb70e1c6aacc9f45781d2fd9d49940b0 100644
+--- a/src/fpsgame/scoreboard.cpp
++++ b/src/fpsgame/scoreboard.cpp
+@@ -1,6 +1,8 @@
+ // creation of scoreboard
+ #include "game.h"
+ 
++extern bool gui2dvisible(); // engine: a menu is open
++
+ namespace game
+ {
+     VARP(scoreboard2d, 0, 1, 1);
+@@ -451,7 +453,8 @@ namespace game
+ 
+         void render()
+         {
+-            if(showing) g3d_addgui(this, menupos, (scoreboard2d ? GUI_FORCE_2D : GUI_2D | GUI_FOLLOW) | GUI_BOTTOM);
++            // not under an open menu: the two would draw over each other
++            if(showing && !gui2dvisible()) g3d_addgui(this, menupos, (scoreboard2d ? GUI_FORCE_2D : GUI_2D | GUI_FOLLOW) | GUI_BOTTOM);
+         }
+ 
+     } scoreboard;
+diff --git a/src/rpggame/rpg.cpp b/src/rpggame/rpg.cpp
+index bb30422b6ff1622fba2c783187afa618e4f5f1c7..2a047b7ce7ac9ff2c2446704d9b7f3e858e155d4 100644
+--- a/src/rpggame/rpg.cpp
++++ b/src/rpggame/rpg.cpp
+@@ -203,6 +203,14 @@ namespace game
+     {
+     }
+ 
++    void rotateplayerpreview(float dyaw)
++    {
++    }
++
++    void holdplayerpreview(bool on)
++    {
++    }
++
+     bool canjump() { return true; }
+     bool allowmove(physent *d) { return d->type!=ENT_AI || ((rpgent *)d)->allowmove(); }
+     void doattack(bool on) { player1->attacking = on; }
+diff --git a/src/shared/iengine.h b/src/shared/iengine.h
+index 20228ed075c6b2744cb4ceddfa3ec60a698c059d..c2e275912d91fd016e795a9dc393cefc4f0fc76f 100644
+--- a/src/shared/iengine.h
++++ b/src/shared/iengine.h
+@@ -544,6 +544,8 @@ struct g3d_gui
+         return button(str, color, icon);
+     }
+     virtual int title(const char *text, int color, const char *icon = NULL) = 0;
++    // laid out like button() but greyed out, and it never reports a click
++    virtual int disabledbutton(const char *text, const char *icon = NULL) { return this->text(text, 0x707070, icon) & G3D_ROLLOVER; }
+     int titlef(const char *fmt, int color, const char *icon = NULL, ...) PRINTFARGS(2, 5)
+     {
+         defvformatstring(str, icon, fmt);
+@@ -560,6 +562,7 @@ struct g3d_gui
+     virtual int image(Texture *t, float scale, const char *overlaid = NULL) = 0;
+     virtual int texture(VSlot &vslot, float scale, bool overlaid = true) = 0;
+     virtual int playerpreview(int model, int team, int weap, float scale, const char *overlaid = NULL) { return 0; }
++    virtual int playeroverlay(int model, int team, int weap, float scale) { return 0; }
+     virtual int modelpreview(const char *name, int anim, float scale, const char *overlaid = NULL, bool throttle = false) { return 0; }
+     virtual int prefabpreview(const char *prefab, const vec &color, float scale, const char *overlaid = NULL, bool throttle = false) { return 0; }
+     virtual void slider(int &val, int vmin, int vmax, int color, const char *label = NULL) = 0;
+@@ -569,6 +572,12 @@ struct g3d_gui
+     virtual void space(float size) = 0;
+     virtual void spring(int weight = 1) = 0;
+     virtual void column(int col) = 0;
++    virtual void setbanner(bool on) {}
++    virtual void setbannercenter(bool on) {}
++    virtual void bannersplit() {}
++    virtual void startfloat(float u, float v) { (void)u; (void)v; }
++    virtual void endfloat() {}
++    virtual int colorswatch(int coloridx, bool selected) { (void)coloridx; (void)selected; return 0; }
+     virtual char *keyfield(const char *name, int color, int length, int height = 0, const char *initval = NULL, int initmode = EDITORFOCUSED) = 0;
+     virtual char *field(const char *name, int color, int length, int height = 0, const char *initval = NULL, int initmode = EDITORFOCUSED) = 0;
+     virtual void textbox(const char *text, int width, int height, int color = 0xFFFFFF) = 0;
+@@ -594,7 +603,9 @@ enum
+ 
+ extern void g3d_addgui(g3d_callback *cb, vec &origin, int flags = 0);
+ extern bool g3d_movecursor(int dx, int dy);
++extern void g3d_setcursor(float x, float y);
+ extern void g3d_cursorpos(float &x, float &y);
+ extern void g3d_resetcursor();
+ extern void g3d_limitscale(float scale);
+-
++extern void g3d_bindscroll(int *scroll, int *scrollmax);
++extern void g3d_setbackdrop(const char *path);

@@ -1,0 +1,3748 @@
+L4ZY 2026.10.16.1: Launcher, installer and updates
+
+Apply after: 00-build-fix to 14-settings-search-and-assistant (in order)
+From the root of the source tree: git apply 15-launcher-and-updates.patch
+Notes: 15-launcher-and-updates.md
+
+diff --git a/distrib/docs/licenses/THIRD-PARTY-NOTICES.txt b/distrib/docs/licenses/THIRD-PARTY-NOTICES.txt
+new file mode 100644
+index 0000000000000000000000000000000000000000..aa8cdfdb460d4941042a227af071f910d5710ad0
+--- /dev/null
++++ b/distrib/docs/licenses/THIRD-PARTY-NOTICES.txt
+@@ -0,0 +1,105 @@
++L4ZY - third-party components and licences
++==============================================
++
++L4ZY is a modified client of Cube 2: Sauerbraten (2020 edition), with
++ray-traced lighting, NVIDIA DLSS/DLAA and AMD FSR 3.1 upscaling, NVIDIA NRD
++denoising, HDR output, optional 3D sound (Steam Audio) and a local chat
++translation service. This is not an official Sauerbraten release.
++
++Engine source code (modified)
++  Cube 2: Sauerbraten engine, zlib licence (c) 2001-2020 Wouter van
++  Oortmerssen, Lee Salzman, Mike Dysart, Robert Pointon, Quinton Reeves.
++  Altered version: see sauerbraten-source-license.txt. ENet: MIT-style licence.
++
++Game media (maps, textures, models, sounds in packages/)
++  Unmodified Sauerbraten media, each under its author's licence; see
++  packages/readme.txt, the readme files inside each package folder, and
++  sauerbraten-README.html (section "License"). Some media are licensed for
++  non-commercial use only (for example data/license.txt, CC BY-NC-SA).
++  L4ZY is distributed free of charge.
++
++Libraries next to the game (bin64/)
++  SDL2, SDL2_image, SDL2_mixer and their codecs: see bin64/LICENSE.*.txt and
++  bin64/README-SDL.txt.
++
++NVIDIA DLSS / NGX (bin64/ngx-*/nvngx_dlss.dll, gateway sauer_ngx.dll)
++NVIDIA NRD (bin64/nrd/sauer_nrd.dll)
++  Provided under the NVIDIA RTX SDKs licence (NVIDIA-RTX-SDKs-LICENSE.txt and
++  bin64/nrd/LICENSE-NRD.txt). As an end user you may not reverse engineer,
++  decompile or disassemble these NVIDIA components, remove their notices, or
++  redistribute them separately from L4ZY. NVIDIA does not sponsor or
++  endorse L4ZY.
++
++AMD FidelityFX Super Resolution 3.1 upscaler (bin64/fsr/sauer_fsr.dll)
++  Built from the AMD FidelityFX SDK v1.1.4 (upscaler and Vulkan backend only,
++  no frame generation), with AMD's FSR 3.1.5 RCAS fix back-ported. MIT licence,
++  full text in bin64/fsr/LICENSE-FidelityFX.txt and below. AMD does not sponsor
++  or endorse L4ZY. AMD, FidelityFX and FSR are trademarks of Advanced Micro
++  Devices, Inc.
++
++  This file is part of the FidelityFX SDK.
++
++  Copyright (C) 2024 Advanced Micro Devices, Inc.
++
++  Permission is hereby granted, free of charge, to any person obtaining a copy
++  of this software and associated documentation files(the "Software"), to deal
++  in the Software without restriction, including without limitation the rights
++  to use, copy, modify, merge, publish, distribute, sublicense, and /or sell
++  copies of the Software, and to permit persons to whom the Software is
++  furnished to do so, subject to the following conditions :
++
++  The above copyright notice and this permission notice shall be included in
++  all copies or substantial portions of the Software.
++
++  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
++  THE SOFTWARE.
++
++Steam Audio 4.8.1 (bin64/phonon.dll), used for the optional 3D sound
++  Copyright (c) Valve Corporation. Apache License 2.0, see
++  licenses/steam-audio/LICENSE.txt. Unmodified binary from the official
++  release https://github.com/ValveSoftware/steam-audio/releases/tag/v4.8.1
++  (steamaudio_4.8.1.zip, SHA-256 4a0aa5ec1176f38f0b0993a37c2259d9e86f27e2
++  2d5e24f83ec4c3cb9a1d5449). It is loaded only when 3D sound is switched on.
++  Valve does not sponsor or endorse L4ZY.
++  phonon.dll contains third-party components under their own licences,
++  reproduced in licenses/steam-audio/THIRDPARTY.md: Intel Integrated
++  Performance Primitives (Intel Simplified Software License: binary
++  redistribution without modification; no reverse engineering, decompilation
++  or disassembly), FFTS (BSD 3-clause), PFFFT (BSD-style), MySOFA
++  (BSD 3-clause), Intel Embree (Apache 2.0), AMD RadeonRays (MIT),
++  AMD TrueAudio Next (MIT), CIPIC HRTF Database (Copyright (c) 2001 The
++  Regents of the University of California, All Rights Reserved) and Google
++  Spherical Harmonics Library (Apache 2.0).
++
++XeGTAO 1.02 (shader code ported to GLSL in data/glsl.cfg, used by the
++Ambient Occlusion of the classic lighting)
++  Copyright (C) 2016-2021, Intel Corporation. MIT License, see
++  licenses/xegtao/LICENSE.txt. Source: https://github.com/GameTechDev/XeGTAO
++  (XeGTAO.h / XeGTAO.hlsli, version 1.02 of 2021-09-03). The horizon-search
++  main pass and the depth MIP filter were translated and adapted; the noise,
++  denoiser and the way the result is applied are L4ZY's own.
++
++Python 3.14.7 embeddable package (runtime/python)
++  Python Software Foundation licence, see runtime/python/LICENSE.txt
++  (includes OpenSSL, libffi, SQLite, expat, zlib notices).
++
++llama.cpp b10621, Vulkan build (runtime/llama)
++  MIT licence, see runtime/llama/LICENSE-llama.cpp.txt.
++  LLVM OpenMP runtime (libomp.dll): see runtime/llama/LICENSE-LLVM-OpenMP.
++
++Microsoft Visual C++ runtime 14.52 (runtime/llama/msvcp140.dll,
++vcruntime140.dll, vcruntime140_1.dll)
++  Redistributable files from the Microsoft Visual Studio "CRT.Redist" package,
++  distributed under the Visual Studio licence terms for Distributable Code.
++
++Translation models (not included in the installer)
++  Downloaded on request from the official Qwen repositories on Hugging Face
++  (Qwen3-4B / 8B / 14B GGUF), Apache License 2.0, (c) Alibaba Cloud / Qwen team.
++
++Installer
++  Built with NSIS (zlib licence).
+diff --git a/distrib/docs/licenses/sauerbraten-README.html b/distrib/docs/licenses/sauerbraten-README.html
+new file mode 100644
+index 0000000000000000000000000000000000000000..3e4a8c686facb932334d4fed5aa6c62c89405240
+--- /dev/null
++++ b/distrib/docs/licenses/sauerbraten-README.html
+@@ -0,0 +1,378 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<!DOCTYPE html
++     PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
++     "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
++
++<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
++
++<head>
++<title>Cube 2: Sauerbraten</title>
++<link rel="stylesheet" type="text/css" href="docs/style.css" />
++<link rel="shortcut icon" href="docs/favicon.ico" />
++</head>
++
++<body>
++
++<div align="center"><a href="http://sauerbraten.org/"><img src="docs/cube2logo.png" alt="Cube 2: Sauerbraten" style="border: none" /></a></div>
++
++<h1>Cube 2: Sauerbraten</h1>
++
++<div class="contents">
++<ul class="contents">
++<li>
++<a href="#links"><b>Links</b></a>
++</li>
++<li>
++<a href="#documentation"><b>Documentation</b></a>
++</li>
++<li>
++<a href="#the_wiki"><b>The Wiki</b></a>
++</li>
++<li>
++<a href="#current_features"><b>Current Features</b></a>
++<ul class="contents2">
++<li>
++<a href="#game_features">Game Features</a>
++</li>
++<li>
++<a href="#engine_features">Engine Features</a>
++</li>
++</ul>
++</li>
++<li>
++<a href="#credits_slash_authors"><b>Credits / Authors</b></a>
++</li>
++<li>
++<a href="#license"><b>License</b></a>
++</li>
++</ul>
++</div>
++
++<h2 id="links">Links</h2>
++
++<p>
++First of all, welcome to Cube 2: Sauerbraten! To start off, if you are looking for help with the game itself, refer to the
++	<a href="#documentation"><b>Documentation</b></a> below. Here are some places of interest on the internet, which are related to
++	<i>Cube / Cube 2: Sauerbraten</i>.
++</p>
++
++<ul>
++<li>
++<a href="http://cubeengine.com/">Cube and Cube 2 Engines</a>: Start Page for the Cube Engine series.
++</li>
++<li>
++<a href="http://sauerbraten.org/">Cube 2: Sauerbraten</a>: The Sauerbraten FPS (First Person Shooter) Homepage.
++</li>
++<li>
++<a href="http://quadropolis.us/">Quadropolis</a>: Online Cube Engine community, with user made maps, mods, and scripts.
++</li>
++<li>
++<a href="irc://irc.quakenet.org/sauerbraten">Sauerbraten IRC Channel</a>: Online public chat with Cube developers, supporters and fans, via the <a href="http://www.quakenet.org/">QuakeNet IRC Network</a>.
++</li>
++<li>
++<a href="http://cubeengine.com/forum.php">Cube Forums</a>: If after reading the documentation and wiki you
++still have any questions, you can try <i>searching</i> the forums. If your question isn't answered there,
++you can try posting to a relevant thread, or creating your own, being sure to supply a good description
++of your problem, and your operating system/hardware/software setup, while refraining from wild accusations.
++</li>
++</ul>
++
++<h2 id="documentation">Documentation</h2>
++
++<p>
++Cube 2: Sauerbraten is a multiplayer/singleplayer FPS freeware game project.
++The source code for the engine used in these games is Open Source (ZLIB licence, read the &quot;License&quot;
++section below carefully before starting ANY kind of project based on this engine).
++</p>
++
++<p>
++You will want to read (roughly this order):
++</p>
++
++<ul>
++<li>
++<a href="docs/game.html">Game</a>: Information on gameplay.
++</li>
++<li>
++<a href="docs/config.html">Config</a>: How to run the game, configure it for your machine, and extend it with scripts.
++</li>
++<li>
++<a href="docs/editing.html">Editing Tutorial</a>: A guide to making maps.
++</li>
++<li>
++<a href="docs/editref.html">Editing Reference</a>: Map making reference.
++</li>
++<li>
++<a href="docs/models.html">Models</a>: How to put models into the game.
++</li>
++<li>
++<a href="docs/history.html">History</a>: For seeing latest changes.
++</li>
++<li>
++<a href="docs/rpg.html">Example RPG Game Information</a>: Information on running, building, or scripting the example RPG game.
++</li>
++</ul>
++
++<h2 id="the_wiki">The Wiki</h2>
++
++<p>
++In addition to the documentation provided, the wiki has a lot of useful information for working
++with the game and engine, contributed by the community which elaborates and breaks alot of the information
++down into more digestable chunks. This is just provided a short rundown of the most useful topics to new players,
++and those looking for quick readable information. For more go visit the
++<a href="http://cubeengine.com/wiki/">Cube Wiki</a>.
++</p>
++
++<ul>
++<li>
++<a href="http://cubeengine.com/wiki/Beginners_Guide">Beginners Guide</a>: Go through the steps to get up and running.
++</li>
++<li>
++<a href="http://cubeengine.com/wiki/FAQ">Frequently Asked Questions</a>: Get the answers to some commonly asked
++questions, like; &quot;<i>The game runs very slowly, how can I fix it?</i>&quot;,
++&quot;<i>Why is the game behaving strangely?</i>&quot;, and &quot;<i>How do I fix the 'Hall of Mirrors' effect?</i>&quot;.
++</li>
++<li>
++<a href="http://cubeengine.com/wiki/Performance_Guide">Performance Guide</a>: Things you can try to make the game
++either run faster or look better on your machine.
++</li>
++<li>
++<a href="http://quadropolis.us/taxonomy/term/21">Older Stuff</a>: From Quadropolis.
++</li>
++<li>
++Some <a href="docs/dev/wikistuff.html">old</a> random documentation bits from our previous wiki that don't
++have a place yet.
++</li>
++</ul>
++
++<h2 id="current_features">Current Features</h2>
++
++<p>
++Cube 2: Sauerbraten is an open source project, and maintains constant development, yet it is very feature-rich and playable as a game. What follows is a list of the most prominent features.
++</p>
++
++<h3 id="game_features">Game Features</h3>
++
++<ul>
++<li>
++Oldskool fast &amp; intense gameplay (read: similar to Doom 2 / Quake 1).
++</li>
++<li>Many multiplayer gameplay modes, most in teamplay variants as well: deathmatch, instagib, efficiency,
++tactics, capture (domination/battlefield style), CTF (capture the flag), coop edit (!).
++</li>
++<li>
++Masterserver &amp; ingame server browser.
++</li>
++<li>
++Lag-free gameplay experience.
++</li>
++<li>
++Two singleplayer modes: DMSP (fight a monster invasion on any DM map), classic SP
++(progression driven SP like other games)
++</li>
++<li>
++7 weapons tuned for maximum satisfaction: double barrelled shogun, rocket launcher,
++machine gun, rifle, grenade launcher, pistol, fist.
++</li>
++</ul>
++
++<h3 id="engine_features">Engine Features</h3>
++
++<ul>
++<li>
++6 directional heightfield in octree world structure allowing for instant easy in-game geometry editing (even
++in multiplayer, coop edit).
++</li>
++<li>
++Rendering engine optimized for high geometry throughput, supporting hardware occlusion culling and software precomputed conservative PVS with occluder fusion.
++</li>
++<li>
++Lightmap based lighting with accurate shadows from everything including mapmodels,
++smooth lighting for faceted geometry, and fast compiles. Soft shadowmap based shadows for dynamic entities.
++</li>
++<li>
++Pixel and vertex shader support, each model and world texture can have its own shader assigned. Supports normal and parallax mapping, specular and dynamic lighting with bloom and glow, environment-mapped and planar reflections/refractions, and post-process effects.
++</li>
++<li>
++Robust physics written specifically for this world structure.
++</li>
++<li>
++Loading of md2/md3/md5/obj/smd/iqm models for skeletal and vertex animated characters, weapons, items, and world objects. Supports animation blending, procedural pitch animation, and ragdoll physics for skeletally-animated characters.
++</li>
++<li>
++Network library designed for high speed games, client/server network system.
++</li>
++<li>
++Small but complete configuration/scripting language.
++</li>
++<li>
++Simple stereo positional sound system.
++</li>
++<li>
++Particle engine, supporting text particles, volumetric explosions, soft particles, and decals.
++</li>
++<li>
++3d menu/gui system, for in-world representation of choices.
++</li>
++</ul>
++
++<h2 id="credits_slash_authors">Credits / Authors</h2>
++
++<div class="credits">Programming</div>
++
++<ul>
++<li>
++<i>Wouter &quot;Aardappel&quot; van Oortmerssen</i>: A lot of the general code, and the original concept and design. (<a href="http://strlen.com/">website</a>)
++</li>
++<li>
++<i>Lee &quot;eihrul&quot; Salzman</i>: ENet networking library, *nix ports, and a lot of the general code, especially rendering/lightmaps/physics related. (<a href="http://sauerbraten.org/lee/">website</a>)
++</li>
++<li>
++<i>Mike &quot;Gilt&quot; Dysart</i>: General programming, especially editing/physics related.
++</li>
++<li>
++<i>Robert &quot;baby-rabbit&quot; Pointon</i>: GUI, particle rendering, and movie recording code, MacOSX porting. (<a href="http://www.fernlightning.com/">website</a>)
++</li>
++<li>
++<i>Quinton &quot;quin&quot; Reeves</i>: Bots/AI code. Asissts with community management, documentation/wiki, and development. (<a href="http://www.redeclipse.net/">website</a>)
++</li>
++</ul>
++
++<div class="credits">Additional Code</div>
++
++<ul>
++<li>
++<i>Julian Mayer</i>: MacOSX ports.
++</li>
++<li>
++<i>Adrian &quot;driAn&quot; Henke</i>: MD3 code.
++</li>
++<li>
++<i>Jerry Siebe</i>: Geometry rendering optimisations.
++</li>
++</ul>
++
++<div class="credits">Level Design</div>
++
++<ul>
++<li>
++<i>Kurt &quot;kdoom&quot; Kessler</i>: A bunch of DM/capture maps, k_rpg1.
++</li>
++<li>
++<i>Nieb</i>: academy, authentic, autumn, bt_falls, c_valley, complex, curvy_castle, flagstone, garden, hallo, hashi, headroom, island, justice, nevil_c, nmp4, nmp8, nmp9, ot, park, ra, shipwreck, turbine
++</li>
++<li>
++<i>John &quot;metlslime&quot; fitzgibbons</i>: metl* maps.
++</li>
++    <li>MitaMan: singleplayer episodes</li>
++    <li>
++With additional maps by: Aardappel, driAn, Gilt, voot, Bryan "KillHour" Shalke, staffy, sparr, JCDPC, ZappaZ, RatBoy, Fanatic, rocknrol, KaiserTodretter, BlikjeBier, wurfel, aftasardem, Lazy [HUN], Gregor Koch, Junebug, Gabriele "Blindabuser" Magurno, PainKillAH, MeatROme, TUX, Mayhem, mIscreant, schmutzwurst, Kal, DairyKing, Hero, WahnFred, jonlimle, t-chen, viruz, Snowy, 4t3one, sinsch, Meister, Fatum, RaZgRiZ, SirAlex, Chris_0076, HeWho, Majikal, Suicizer, Ardelico, Cooper, Zeronic, Skur, flubz0r, SomeDude, Redon, MisanthropiX, Doko, Destroyer, TomekGNO, Kretren, Drakker, KI113R, rabe, SuperMan, Crap_I'm_Dead, b4lkLu, Windecker, Justin, and others.
++</li>
++</ul>
++
++<div class="credits">Art / Content</div>
++
++<ul>
++<li>
++<i>
++    John &quot;Geartrooper&quot; Siar</i>: Mr. Fixit, Ironsnout, RPG characters, monsters, new hudguns and vweps.
++</li>
++<li>
++<i>Gabriele "Blindabuser" Magurno</i>: Logos, loading screen, announcer voices.
++</li>
++<li>
++<i>MakkE</i>: Mapmodels, old hudguns, items.
++</li>
++<li>
++<i>Dietmar &quot;dcp&quot; Pier</i>: Mapmodels, old hudguns.
++</li>
++<li>
++<i>DarthVim</i>: Old hudguns.
++</li>
++<li>
++<i>Nieb</i>: Textures, Mapmodels, Skyboxes.
++</li>
++<li>
++<i>Sock</i>: The egyptian &amp; tech texture sets (<a href="http://www.planetquake.com/simland">website</a>).
++</li>
++<li>
++<i>Iikka &quot;Fingers&quot; Keranen</i>: The ikbase ik2k texture sets  (<a href="http://www.digital-eel.com/surface">website</a>).
++</li>
++<li>
++<i>Lunaran, Gibbie, Gregor Koch, J&eacute;sus "aftasardem" Maia, MitaMan, and philipk</i>: Normalmapped texture sets.
++</li>
++<li>
++<i>SkiingPenguins</i>: Skyboxes.
++</li>
++<li>
++Additional art by: metlslime (textures), Than (textures), Remedy Entertainment Ltd (textures), Seth &amp; Ulrich Galbraith (GPL models), Brian "EvilBastard" Collins, Conrad, Magarnigal, Psionic, James Green, Andreas M&ouml;ller, Ryan Butts &amp; Jeramy Cooke (md2 models), KaiserTodretter (items), Tentus (mapmodels), Kurt Kessler (mapmodels), Philip Klevestav (textures), leileilol/OpenArena (GPL bullet hole decal).
++</li>
++</ul>
++
++<div class="credits">Sound / Music</div>
++
++<ul>
++<li>
++<i>Marc &quot;Fanatic&quot; A. Pullen</i>: Soundtrack.
++</li>
++</ul>
++
++<div class="credits">Other</div>
++
++<ul>
++<li>
++<i>Kristian "sleepwalkr" Duske</i>: website / messageboard, hosting, master server.
++</li>
++<li>
++<i>Pushplay</i>: Documentation help.
++</li>
++<li>
++<i>The SDL team</i>: For their libraries (<a href="http://www.libsdl.org/">website</a>).
++</li>
++</ul>
++
++<h2 id="license">License</h2>
++
++<p>
++The game is freeware, you may freely distribute the archive and/or installer <i>unmodified</i> on any media.
++You may re-compress using different archival formats suitable for your OS (i.e. zip/tgz/rpm/deb/dmg), any changes beyond that require explicit permission from the developers.
++</p>
++
++<p>
++You may play Cube 2: Sauerbraten for any purpose as long as you don't blame the authors for any damages incurred.
++</p>
++
++<p>
++If you want to produce new content with the Cube 2 Engine, you have to be aware that the source code may be Open Source, but the game and the media it consist of have their individual licenses and copyrights.
++This means that you have roughly 3 options:
++</p>
++
++<ul>
++<li>
++You may produce new content for the &quot;Sauerbraten&quot; game, for example as a <i>custom map</i> (.ogz/.cfg/textures etc).
++Contributing <i>content</i> to the original game is most welcome, and the most productive way of working with the community.
++</li>
++<li>
++If you want to create your own gameplay beyond what you can do with a map, the best way to do this is as a &quot;mod&quot; (same as above, but with new executable that
++incorporates your gameplay), that <i>requires an existing install</i>, and <i>installs only the new files</i> you created in parallel to the existing files.
++</li>
++<li>
++If you insist on making a standalone game based on Cube 2, do realize that <i>only the sourcecode</i> is yours to use freely (if you abide by the ZLIB license, see below),
++while the media is <i>not</i>. You can't simply redistribute the entire package with your modified files, as the majority of game media is not yours to use freely (it is made
++by many authors with a variety of licences and copyright restrictions). Unless you have explicit permission from the authors, or the readme says explicitly "may be used
++for any purpose" or similar language, it will be illegal to include in your standalone game based on the engine (you may not assume that just because a file
++has no explicit license, that it is free of copyright). Therefore, if you wish to produce a standalone game, be prepared to make many of the maps, models, textures, sounds etc from scratch
++yourself.
++</li>
++</ul>
++
++<p>
++In this sense Cube 2: Sauerbraten is similar to games like Quake (its code is Open Source, but its media is not), it is a game that is meant
++to be added to, not copied and used as a template. Sauerbraten is not meant to be a quick game creation kit, it is a game.
++</p>
++<p>
++If you wish to use the source code (ZLIB license) in any way, read the src/readme_source.txt file carefully.
++</p>
++
++</body>
++</html>
+diff --git a/distrib/docs/licenses/sauerbraten-source-license.txt b/distrib/docs/licenses/sauerbraten-source-license.txt
+new file mode 100644
+index 0000000000000000000000000000000000000000..b8ed466fc2b71ca40df6dd9067ec9c4ee04290b3
+--- /dev/null
++++ b/distrib/docs/licenses/sauerbraten-source-license.txt
+@@ -0,0 +1,92 @@
++Sauerbraten source code license, usage, and documentation.
++
++You may use the Sauerbraten source code if you abide by the ZLIB license
++http://www.opensource.org/licenses/zlib-license.php
++(very similar to the BSD license):
++
++
++LICENSE
++=======
++
++Sauerbraten game engine source code, any release.
++
++Copyright (C) 2001-2020 Wouter van Oortmerssen, Lee Salzman, Mike Dysart, Robert Pointon, and Quinton Reeves
++
++This software is provided 'as-is', without any express or implied
++warranty.  In no event will the authors be held liable for any damages
++arising from the use of this software.
++
++Permission is granted to anyone to use this software for any purpose,
++including commercial applications, and to alter it and redistribute it
++freely, subject to the following restrictions:
++
++1. The origin of this software must not be misrepresented; you must not
++   claim that you wrote the original software. If you use this software
++   in a product, an acknowledgment in the product documentation would be
++   appreciated but is not required.
++2. Altered source versions must be plainly marked as such, and must not be
++   misrepresented as being the original software.
++3. This notice may not be removed or altered from any source distribution.
++
++
++LICENSE NOTES
++=============
++The license covers the source code found in the "src" directory of this
++archive as well as the .cfg files under the "data" directory. The included 
++ENet network library which Sauerbraten uses is covered by an MIT-style 
++license, which is however compatible with the above license for all 
++practical purposes.
++
++Game media included in the game (maps, textures, sounds, models etc.)
++are NOT covered by this license, and may have individual copyrights and
++distribution restrictions (see individual readmes).
++
++
++USAGE
++=====
++Compiling the sources should be straight forward.
++
++Unix users need to make sure to have the development version of all libs
++installed (OpenGL, SDL, SDL_mixer, SDL_image, zlib). The included
++Makefile can be used to build.
++
++Windows users can use the included Visual Studio project files in the vcpp 
++directory,  which references the lib/include directories for the external 
++libraries and should thus be self contained. Release mode builds will place 
++executables in the bin dir ready for testing and distribution.
++
++An alternative to Visual Studio for Windows is MinGW/MSYS, which can be compiled
++using the provided Makefile. Another alternative for Windows is to compile under
++Code::Blocks with the provided vcpp/sauerbraten.cbp project file.
++
++The Sauerbraten sources are very small, compact, and non-redundant, so anyone
++wishing to modify the source code should be able to gain an overview of
++Sauerbraten's inner workings by simply reading through the source code in its
++entirety. Small amounts of comments should guide you through the more
++tricky sections.
++
++When reading the source code and trying to understand Sauerbaten's internal design,
++keep in mind the goal of Cube: minimalism. I wanted to create a very complete
++game / game engine with absolutely minimal means, and made a sport out of it
++keeping the implementation small and simple. Sauerbraten is not a commercial 
++product, it is merely the author's idea of a fun little programming project.
++
++
++AUTHORS
++======
++Wouter "Aardappel" van Oortmerssen
++http://strlen.com
++
++Lee "eihrul" Salzman 
++http://sauerbraten.org/lee/
++
++Mike "Gilt" Dysart
++
++Robert "baby-rabbit" Pointon
++http://www.fernlightning.com
++
++Quinton "Quin" Reeves
++http://www.redeclipse.net
++
++For additional authors/contributors, see the Sauerbraten binary distribution readme.
++
+diff --git a/distrib/game/autoexec.cfg b/distrib/game/autoexec.cfg
+new file mode 100644
+index 0000000000000000000000000000000000000000..c4566831cee5d73675dd2bf77a3a665c1847f70b
+--- /dev/null
++++ b/distrib/game/autoexec.cfg
+@@ -0,0 +1,4 @@
++// L4ZY : autoexec par defaut (un autoexec.cfg dans ton profil a priorite).
++// Menu de traduction du chat.
++exec "traduction.cfg"
++translatetimeout 20000
+diff --git a/distrib/installer/l4zy.nsi b/distrib/installer/l4zy.nsi
+new file mode 100644
+index 0000000000000000000000000000000000000000..c8da8b1e5344db3003a8a3d63927ea8c77520797
+--- /dev/null
++++ b/distrib/installer/l4zy.nsi
+@@ -0,0 +1,333 @@
++; Installateur L4ZY (NSIS 3, Unicode). Construit par tools/sauerrt_build.py.
++; Installation par utilisateur (pas de droits administrateur), dans
++; %LOCALAPPDATA%\Programs\L4ZY par defaut : les mises a jour se font
++; ensuite sans demande d'elevation.
++;
++; Options (mode silencieux /S pour les essais) :
++;   /D=<dossier>     dossier d'installation (dernier argument, sans guillemets)
++;   /PORTABLE        donnees du joueur dans <dossier>\userdata (essais isoles)
++;   /NOSTARTER       sans effet (aucun modele n est telecharge a l installation)
++;   /NOSHORTCUTS     ni raccourcis, ni entree "Programmes et fonctionnalites"
++
++Unicode true
++ManifestDPIAware true
++RequestExecutionLevel user
++SetCompressor zlib
++SetDatablockOptimize on
++Name "L4ZY ${VERSION}"
++OutFile "${OUTFILE}"
++Icon "${ICON}"
++UninstallIcon "${ICON}"
++InstallDir "$LOCALAPPDATA\Programs\L4ZY"
++BrandingText "L4ZY ${VERSION}"
++VIProductVersion "1.0.0.0"
++VIAddVersionKey /LANG=0 "ProductName" "L4ZY"
++VIAddVersionKey /LANG=0 "FileDescription" "L4ZY ${VERSION} setup"
++VIAddVersionKey /LANG=0 "ProductVersion" "${VERSION}"
++VIAddVersionKey /LANG=0 "FileVersion" "${VERSION}"
++VIAddVersionKey /LANG=0 "LegalCopyright" "Sauerbraten engine zlib licence; see docs"
++
++!include "MUI2.nsh"
++!include "FileFunc.nsh"
++!include "LogicLib.nsh"
++!include "StrFunc.nsh"
++${StrStr}
++${UnStrStr}
++
++!define MUI_ICON "${ICON}"
++!define MUI_UNICON "${ICON}"
++!define MUI_ABORTWARNING
++!define MUI_FINISHPAGE_RUN "$INSTDIR\L4ZY.exe"
++!define MUI_FINISHPAGE_RUN_TEXT "$(RunNow)"
++
++!insertmacro MUI_PAGE_WELCOME
++!define MUI_PAGE_CUSTOMFUNCTION_LEAVE DirLeave
++!insertmacro MUI_PAGE_DIRECTORY
++!insertmacro MUI_PAGE_COMPONENTS
++!insertmacro MUI_PAGE_INSTFILES
++!insertmacro MUI_PAGE_FINISH
++!insertmacro MUI_UNPAGE_CONFIRM
++!insertmacro MUI_UNPAGE_INSTFILES
++
++!insertmacro MUI_LANGUAGE "French"
++!insertmacro MUI_LANGUAGE "English"
++
++LangString RunNow ${LANG_FRENCH} "Lancer L4ZY"
++LangString RunNow ${LANG_ENGLISH} "Start L4ZY"
++LangString SecGame ${LANG_FRENCH} "L4ZY (jeu, traduction, mises à jour)"
++LangString SecGame ${LANG_ENGLISH} "L4ZY (game, translation, updates)"
++LangString SecDesk ${LANG_FRENCH} "Raccourci sur le bureau"
++LangString SecDesk ${LANG_ENGLISH} "Desktop shortcut"
++LangString Running ${LANG_FRENCH} "L4ZY est ouvert depuis ce dossier. Ferme le jeu puis réessaie."
++LangString Running ${LANG_ENGLISH} "L4ZY is running from this folder. Close the game and try again."
++LangString Junction ${LANG_FRENCH} "Ce dossier contient une jonction ou un lien ($R9). Choisis un autre dossier."
++LangString Junction ${LANG_ENGLISH} "This folder contains a junction or link ($R9). Choose another folder."
++LangString Rollback ${LANG_FRENCH} "L4ZY - revenir à la version précédente"
++LangString Rollback ${LANG_ENGLISH} "L4ZY - go back to the previous version"
++LangString NotL4zy ${LANG_FRENCH} "Ce dossier contient déjà un autre jeu ou d'autres fichiers ($R9) et ce n'est pas une installation L4ZY. L4ZY n'y touche pas : choisis un dossier vide ou ton dossier L4ZY."
++LangString NotL4zy ${LANG_ENGLISH} "This folder already holds another game or other files ($R9) and is not an L4ZY installation. L4ZY will not touch it: choose an empty folder or your L4ZY folder."
++LangString UnNotL4zy ${LANG_FRENCH} "Ce dossier n'est pas une installation L4ZY : rien n'a été supprimé."
++LangString UnNotL4zy ${LANG_ENGLISH} "This folder is not an L4ZY installation: nothing was removed."
++LangString KeepData ${LANG_FRENCH} "Tes réglages, corrections de traduction et modèles sont conservés (Documents\My Games\L4ZY et %LOCALAPPDATA%\L4ZY)."
++LangString KeepData ${LANG_ENGLISH} "Your settings, translation corrections and models are kept (Documents\My Games\L4ZY and %LOCALAPPDATA%\L4ZY)."
++
++Var Portable
++Var NoStarter
++Var NoShortcuts
++
++Function .onInit
++    ${GetParameters} $R0
++    StrCpy $Portable "0"
++    StrCpy $NoStarter "0"
++    StrCpy $NoShortcuts "0"
++    ClearErrors
++    ${GetOptions} $R0 "/PORTABLE" $R1
++    ${IfNot} ${Errors}
++        StrCpy $Portable "1"
++    ${EndIf}
++    ClearErrors
++    ${GetOptions} $R0 "/NOSTARTER" $R1
++    ${IfNot} ${Errors}
++        StrCpy $NoStarter "1"
++    ${EndIf}
++    ClearErrors
++    ${GetOptions} $R0 "/NOSHORTCUTS" $R1
++    ${IfNot} ${Errors}
++        StrCpy $NoShortcuts "1"
++        SectionSetFlags 1 0
++    ${EndIf}
++FunctionEnd
++
++; An L4ZY installation: state\installed.json written by the L4ZY setup or
++; updater (product "l4zy"). Older or damaged state: L4ZY.exe next to l4zy.ini.
++; Out: $0 = 1 when $INSTDIR is one.
++!macro _IsL4zyDir UN
++Function ${UN}IsL4zyDir
++    StrCpy $0 0
++    ClearErrors
++    FileOpen $1 "$INSTDIR\state\installed.json" r
++    ${IfNot} ${Errors}
++        ${Do}
++            ClearErrors
++            FileRead $1 $2
++            ${If} ${Errors}
++                ${ExitDo}
++            ${EndIf}
++            !if "${UN}" == "un."
++                ${UnStrStr} $3 $2 '"product": "l4zy"'
++            !else
++                ${StrStr} $3 $2 '"product": "l4zy"'
++            !endif
++            ${If} $3 != ""
++                StrCpy $0 1
++                ${ExitDo}
++            ${EndIf}
++        ${Loop}
++        FileClose $1
++    ${EndIf}
++    ${If} $0 == 0
++    ${AndIf} ${FileExists} "$INSTDIR\L4ZY.exe"
++    ${AndIf} ${FileExists} "$INSTDIR\l4zy.ini"
++        StrCpy $0 1
++    ${EndIf}
++FunctionEnd
++!macroend
++!insertmacro _IsL4zyDir ""
++!insertmacro _IsL4zyDir "un."
++
++; Never empty bin64/data/packages... of a folder that is not an L4ZY
++; installation (Sauerbraten folder, another game, a folder typed by hand).
++; Out: $0 = 1 when the folder may be used, else $0 = 0 and $R9 = what was found.
++!macro _Found ITEM SHOWN
++    ${If} $R9 == ""
++    ${AndIf} ${FileExists} "$INSTDIR\${ITEM}"
++        StrCpy $R9 "${SHOWN}"
++    ${EndIf}
++!macroend
++Function CheckTarget
++    Call IsL4zyDir
++    ${If} $0 == 1
++        Return
++    ${EndIf}
++    StrCpy $R9 ""
++    !insertmacro _Found "bin64\*.*" "bin64"
++    !insertmacro _Found "bin\*.*" "bin"
++    !insertmacro _Found "data\*.*" "data"
++    !insertmacro _Found "packages\*.*" "packages"
++    !insertmacro _Found "runtime\*.*" "runtime"
++    !insertmacro _Found "service\*.*" "service"
++    !insertmacro _Found "docs\*.*" "docs"
++    !insertmacro _Found "state\*.*" "state"
++    !insertmacro _Found "sauerbraten.bat" "sauerbraten.bat"
++    !insertmacro _Found "L4ZY.exe" "L4ZY.exe"
++    !insertmacro _Found "autoexec.cfg" "autoexec.cfg"
++    !insertmacro _Found "traduction.cfg" "traduction.cfg"
++    !insertmacro _Found "config.cfg" "config.cfg"
++    ${If} $R9 == ""
++        StrCpy $0 1
++    ${Else}
++        StrCpy $0 0
++    ${EndIf}
++FunctionEnd
++
++Function DirLeave
++    Call CheckTarget
++    ${If} $0 != 1
++        MessageBox MB_ICONSTOP "$(NotL4zy)"
++        Abort
++    ${EndIf}
++FunctionEnd
++
++; Un dossier dont un element est une jonction ferait ecrire ailleurs : refuse.
++Function CheckReparse
++    StrCpy $R8 "$INSTDIR"
++    loop:
++        ${If} ${FileExists} "$R8\*.*"
++            System::Call 'kernel32::GetFileAttributesW(w "$R8") i .r1'
++            IntOp $2 $1 & 0x400
++            ${If} $1 != -1
++            ${AndIf} $2 != 0
++                StrCpy $R9 "$R8"
++                MessageBox MB_ICONSTOP "$(Junction)" /SD IDOK
++                Abort
++            ${EndIf}
++        ${EndIf}
++        ${GetParent} "$R8" $R7
++        StrCmp $R7 "" done
++        StrCmp $R7 $R8 done
++        StrCpy $R8 $R7
++        Goto loop
++    done:
++    ; Les dossiers remplaces ne doivent pas etre des jonctions non plus :
++    ; RMDir /r viderait leur cible.
++    !macro _NoJunction SUB
++        System::Call 'kernel32::GetFileAttributesW(w "$INSTDIR\${SUB}") i .r1'
++        IntOp $2 $1 & 0x400
++        ${If} $1 != -1
++        ${AndIf} $2 != 0
++            StrCpy $R9 "$INSTDIR\${SUB}"
++            MessageBox MB_ICONSTOP "$(Junction)" /SD IDOK
++            Abort
++        ${EndIf}
++    !macroend
++    !insertmacro _NoJunction "bin64"
++    !insertmacro _NoJunction "data"
++    !insertmacro _NoJunction "packages"
++    !insertmacro _NoJunction "runtime"
++    !insertmacro _NoJunction "service"
++    !insertmacro _NoJunction "docs"
++    !insertmacro _NoJunction "state"
++FunctionEnd
++
++Section "!$(SecGame)" SecMain
++    SectionIn RO
++    ; Verrou de l'installation (tenu par L4ZY.exe pendant le jeu).
++    ${If} ${FileExists} "$INSTDIR\state\install.lock"
++        System::Call 'kernel32::CreateFileW(w "$INSTDIR\state\install.lock", i 0xC0000000, i 0, p 0, i 3, i 0x80, p 0) p .r1'
++        ${If} $1 == -1
++            MessageBox MB_ICONSTOP "$(Running)" /SD IDOK
++            Abort
++        ${EndIf}
++        System::Call 'kernel32::CloseHandle(p r1)'
++    ${EndIf}
++    Call CheckReparse
++    ; Silent installs skip the directory page: same check here.
++    Call CheckTarget
++    ${If} $0 != 1
++        MessageBox MB_ICONSTOP "$(NotL4zy)" /SD IDOK
++        SetErrorLevel 3
++        Quit
++    ${EndIf}
++
++    ; Reinstallation : on remplace les fichiers distribues, pas les donnees.
++    RMDir /r "$INSTDIR\bin64"
++    RMDir /r "$INSTDIR\data"
++    RMDir /r "$INSTDIR\packages"
++    RMDir /r "$INSTDIR\runtime"
++    RMDir /r "$INSTDIR\service"
++    RMDir /r "$INSTDIR\docs"
++    RMDir /r "$INSTDIR\state\update"
++    Delete "$INSTDIR\L4ZY.exe"
++    Delete "$INSTDIR\autoexec.cfg"
++    Delete "$INSTDIR\traduction.cfg"
++
++    SetOutPath "$INSTDIR"
++    File /r "${TREE}\*.*"
++    SetOutPath "$INSTDIR\state"
++    File "${STATE}\installed.json"
++    File "${STATE}\installed.ini"
++
++    ; Reglages d'installation : ecrits une fois, jamais remplaces ensuite.
++    ${IfNot} ${FileExists} "$INSTDIR\l4zy.ini"
++        FileOpen $0 "$INSTDIR\l4zy.ini" w
++        FileWrite $0 "; Reglages de cette installation L4ZY (conserves par les mises a jour).$\r$\n"
++        FileWrite $0 "[install]$\r$\nchannel = ${CHANNEL}$\r$\n; channel_url = (vide = adresse du canal fournie par la version)$\r$\n"
++        FileWrite $0 "[paths]$\r$\nportable = $Portable$\r$\n; profile = (vide = Documents\My Games\L4ZY)$\r$\n; userdata = (vide = %LOCALAPPDATA%\L4ZY)$\r$\n"
++        ; Aucun modele telecharge automatiquement : le joueur choisit dans le
++        ; jeu (Chat Translation -> Model), avec taille et progression.
++        FileWrite $0 "[translation]$\r$\nstarter_model =$\r$\n"
++        FileClose $0
++    ${EndIf}
++
++    WriteUninstaller "$INSTDIR\Uninstall-L4ZY.exe"
++    ${If} $NoShortcuts == "0"
++        CreateDirectory "$SMPROGRAMS\L4ZY"
++        CreateShortcut "$SMPROGRAMS\L4ZY\L4ZY.lnk" "$INSTDIR\L4ZY.exe"
++        CreateShortcut "$SMPROGRAMS\L4ZY\$(Rollback).lnk" "$INSTDIR\L4ZY.exe" "--rollback"
++        CreateShortcut "$SMPROGRAMS\L4ZY\Uninstall L4ZY.lnk" "$INSTDIR\Uninstall-L4ZY.exe"
++        WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\L4ZY" "DisplayName" "L4ZY"
++        WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\L4ZY" "DisplayVersion" "${VERSION}"
++        WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\L4ZY" "DisplayIcon" "$INSTDIR\L4ZY.exe"
++        WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\L4ZY" "InstallLocation" "$INSTDIR"
++        WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\L4ZY" "UninstallString" '"$INSTDIR\Uninstall-L4ZY.exe"'
++        WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\L4ZY" "NoModify" 1
++        WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\L4ZY" "NoRepair" 1
++    ${EndIf}
++SectionEnd
++
++Section "$(SecDesk)" SecDesk
++    ${If} $NoShortcuts == "0"
++        CreateShortcut "$DESKTOP\L4ZY.lnk" "$INSTDIR\L4ZY.exe"
++    ${EndIf}
++SectionEnd
++
++Section "Uninstall"
++    ${If} ${FileExists} "$INSTDIR\state\install.lock"
++        System::Call 'kernel32::CreateFileW(w "$INSTDIR\state\install.lock", i 0xC0000000, i 0, p 0, i 3, i 0x80, p 0) p .r1'
++        ${If} $1 == -1
++            MessageBox MB_ICONSTOP "$(Running)" /SD IDOK
++            Abort
++        ${EndIf}
++        System::Call 'kernel32::CloseHandle(p r1)'
++    ${EndIf}
++    !insertmacro _NoJunction "bin64"
++    !insertmacro _NoJunction "data"
++    !insertmacro _NoJunction "packages"
++    !insertmacro _NoJunction "runtime"
++    !insertmacro _NoJunction "service"
++    !insertmacro _NoJunction "docs"
++    !insertmacro _NoJunction "state"
++    Call un.IsL4zyDir
++    ${If} $0 != 1
++        MessageBox MB_ICONSTOP "$(UnNotL4zy)" /SD IDOK
++        SetErrorLevel 3
++        Quit
++    ${EndIf}
++    RMDir /r "$INSTDIR\bin64"
++    RMDir /r "$INSTDIR\data"
++    RMDir /r "$INSTDIR\packages"
++    RMDir /r "$INSTDIR\runtime"
++    RMDir /r "$INSTDIR\service"
++    RMDir /r "$INSTDIR\docs"
++    RMDir /r "$INSTDIR\state"
++    Delete "$INSTDIR\L4ZY.exe"
++    Delete "$INSTDIR\autoexec.cfg"
++    Delete "$INSTDIR\traduction.cfg"
++    Delete "$INSTDIR\l4zy.ini"
++    Delete "$INSTDIR\Uninstall-L4ZY.exe"
++    RMDir "$INSTDIR"
++    Delete "$DESKTOP\L4ZY.lnk"
++    RMDir /r "$SMPROGRAMS\L4ZY"
++    DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\L4ZY"
++    MessageBox MB_ICONINFORMATION "$(KeepData)" /SD IDOK
++SectionEnd
+diff --git a/distrib/launcher/build.bat b/distrib/launcher/build.bat
+new file mode 100644
+index 0000000000000000000000000000000000000000..5690927c68b4bc79019cdd7ee1bfc287bb20b621
+--- /dev/null
++++ b/distrib/launcher/build.bat
+@@ -0,0 +1,10 @@
++@echo off
++rem Construit L4ZY.exe (lanceur). Requiert w64devkit (g++ MinGW).
++setlocal
++if "%W64DEVKIT%"=="" set "W64DEVKIT=%LOCALAPPDATA%\w64devkit\w64devkit\bin"
++set "PATH=%W64DEVKIT%;%PATH%"
++cd /d "%~dp0"
++if "%1"=="" (set "OUT=L4ZY.exe") else (set "OUT=%~1")
++windres launcher.rc -O coff -o launcher.res || exit /b 1
++g++ -O2 -s -Wl,--no-insert-timestamp -municode -mwindows -static -static-libgcc -static-libstdc++ -Wall -o "%OUT%" launcher.cpp launcher.res -lws2_32 -lbcrypt -lshell32 -lole32 -luuid -luser32 || exit /b 1
++echo OK: %OUT%
+diff --git a/distrib/launcher/l4zy.ico b/distrib/launcher/l4zy.ico
+new file mode 100644
+index 0000000000000000000000000000000000000000..50ae952a1503b5566699e224e551e14c4e613cfe
+GIT binary patch
+literal 9662
+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
+Vx$fV~>lFP%N7(2j`dcS{{$Fs;NB#f+
+
+literal 0
+HcmV?d00001
+
+diff --git a/distrib/launcher/launcher.cpp b/distrib/launcher/launcher.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..7f863b5ade5850651034996522528a08723aca06
+--- /dev/null
++++ b/distrib/launcher/launcher.cpp
+@@ -0,0 +1,1557 @@
++// L4ZY.exe : point d'entree unique d'une installation L4ZY.
++//
++// Mode normal : verrou de l'installation, lance le jeu, puis (jeu initialise)
++// le service prive (Python embarque + traduction + mises a jour) dans un job
++// Windows. A la fermeture du jeu : arret du service, du llama-server de CETTE
++// installation (job), rien d'autre. Si une mise a jour a ete preparee et
++// demandee depuis le jeu, une copie du lanceur placee dans state\update\helper
++// l'applique une fois que plus rien de l'installation ne tourne.
++//
++// Modes internes (copie helper) :
++//   --apply    applique state\update\stage\plan.txt (sauvegarde + retour arriere)
++//   --recover  termine ou annule une application interrompue (journal)
++//   --rollback revient a la version precedente (derniere sauvegarde)
++//
++// Normal mode options:
++//   --import-only         settings import only, the game is not started
++//   --import-from <dir>   imports the settings of another client (config.cfg,
++//                         servers.cfg, friends.cfg; previous ones kept as *.before-import.bak)
++//
++// Aucun Python, aucune DLL de l'installation n'est necessaire pour appliquer :
++// le helper est un binaire statique qui vit hors des fichiers remplaces.
++
++#define WIN32_LEAN_AND_MEAN
++#ifndef UNICODE
++#define UNICODE
++#endif
++#ifndef _UNICODE
++#define _UNICODE
++#endif
++#include <winsock2.h>
++#include <ws2tcpip.h>
++#include <windows.h>
++#include <shlobj.h>
++#include <shellapi.h>
++#include <knownfolders.h>
++#include <bcrypt.h>
++#include <string>
++#include <vector>
++#include <map>
++#include <cstdio>
++#include <cstdarg>
++
++using std::wstring;
++using std::string;
++using std::vector;
++
++static const int LAUNCHER_API = 1;
++static wstring g_root, g_state, g_logpath;
++static bool g_importonly = false;
++static wstring g_importfrom;
++
++// ---------------------------------------------------------------- utilitaires
++
++static wstring widen(const string &s)
++{
++    if(s.empty()) return wstring();
++    int n = MultiByteToWideChar(CP_UTF8, 0, s.data(), (int)s.size(), NULL, 0);
++    wstring w(n, 0);
++    MultiByteToWideChar(CP_UTF8, 0, s.data(), (int)s.size(), &w[0], n);
++    return w;
++}
++
++static string narrow(const wstring &w)
++{
++    if(w.empty()) return string();
++    int n = WideCharToMultiByte(CP_UTF8, 0, w.data(), (int)w.size(), NULL, 0, NULL, NULL);
++    string s(n, 0);
++    WideCharToMultiByte(CP_UTF8, 0, w.data(), (int)w.size(), &s[0], n, NULL, NULL);
++    return s;
++}
++
++static wstring join(const wstring &a, const wstring &b)
++{
++    if(a.empty()) return b;
++    wchar_t last = a[a.size()-1];
++    if(last == L'\\' || last == L'/') return a + b;
++    return a + L"\\" + b;
++}
++
++static wstring relwin(const string &rel)
++{
++    wstring w = widen(rel);
++    for(size_t i = 0; i < w.size(); i++) if(w[i] == L'/') w[i] = L'\\';
++    return w;
++}
++
++static bool exists(const wstring &p) { return GetFileAttributesW(p.c_str()) != INVALID_FILE_ATTRIBUTES; }
++static bool isdir(const wstring &p)
++{
++    DWORD a = GetFileAttributesW(p.c_str());
++    return a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY);
++}
++
++static wstring parentdir(const wstring &p)
++{
++    size_t s = p.find_last_of(L"\\/");
++    return s == wstring::npos ? wstring() : p.substr(0, s);
++}
++
++static void mkdirs(const wstring &p)
++{
++    if(p.empty() || isdir(p)) return;
++    mkdirs(parentdir(p));
++    CreateDirectoryW(p.c_str(), NULL);
++}
++
++static void logf(const char *fmt, ...)
++{
++    char buf[2048];
++    va_list ap;
++    va_start(ap, fmt);
++    vsnprintf(buf, sizeof(buf), fmt, ap);
++    va_end(ap);
++    if(g_logpath.empty()) return;
++    FILE *f = _wfopen(g_logpath.c_str(), L"ab");
++    if(!f) return;
++    SYSTEMTIME st;
++    GetLocalTime(&st);
++    fprintf(f, "%04d-%02d-%02d %02d:%02d:%02d [%lu] %s\r\n", st.wYear, st.wMonth, st.wDay,
++        st.wHour, st.wMinute, st.wSecond, GetCurrentProcessId(), buf);
++    fclose(f);
++}
++
++static bool readfile(const wstring &p, string &out)
++{
++    out.clear();
++    FILE *f = _wfopen(p.c_str(), L"rb");
++    if(!f) return false;
++    char buf[65536];
++    size_t n;
++    while((n = fread(buf, 1, sizeof(buf), f)) > 0) out.append(buf, n);
++    fclose(f);
++    return true;
++}
++
++static bool writefile_durable(const wstring &p, const string &data)
++{
++    wstring tmp = p + L".tmp";
++    HANDLE h = CreateFileW(tmp.c_str(), GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
++    if(h == INVALID_HANDLE_VALUE) return false;
++    DWORD w = 0;
++    bool ok = WriteFile(h, data.data(), (DWORD)data.size(), &w, NULL) && w == data.size();
++    FlushFileBuffers(h);
++    CloseHandle(h);
++    if(!ok) return false;
++    return MoveFileExW(tmp.c_str(), p.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
++}
++
++static bool appendline_durable(const wstring &p, const string &line)
++{
++    HANDLE h = CreateFileW(p.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
++    if(h == INVALID_HANDLE_VALUE) return false;
++    string l = line + "\n";
++    DWORD w = 0;
++    bool ok = WriteFile(h, l.data(), (DWORD)l.size(), &w, NULL) && w == l.size();
++    FlushFileBuffers(h);
++    CloseHandle(h);
++    return ok;
++}
++
++static vector<string> splitlines(const string &s)
++{
++    vector<string> out;
++    size_t i = 0;
++    while(i <= s.size())
++    {
++        size_t j = s.find('\n', i);
++        if(j == string::npos) j = s.size();
++        string l = s.substr(i, j - i);
++        if(!l.empty() && l[l.size()-1] == '\r') l.erase(l.size()-1);
++        out.push_back(l);
++        i = j + 1;
++    }
++    return out;
++}
++
++static string trim(const string &s)
++{
++    size_t a = 0, b = s.size();
++    while(a < b && (unsigned char)s[a] <= ' ') a++;
++    while(b > a && (unsigned char)s[b-1] <= ' ') b--;
++    return s.substr(a, b - a);
++}
++
++// INI UTF-8 minimal : [section] cle = valeur ; # et ; commentaires.
++typedef std::map<string, string> inimap;
++static inimap readini(const wstring &p)
++{
++    inimap m;
++    string data;
++    if(!readfile(p, data)) return m;
++    if(data.size() >= 3 && (unsigned char)data[0] == 0xEF) data = data.substr(3);
++    string section;
++    vector<string> lines = splitlines(data);
++    for(size_t i = 0; i < lines.size(); i++)
++    {
++        string l = trim(lines[i]);
++        if(l.empty() || l[0] == '#' || l[0] == ';') continue;
++        if(l[0] == '[') { section = trim(l.substr(1, l.find(']') - 1)); continue; }
++        size_t eq = l.find('=');
++        if(eq == string::npos) continue;
++        string k = trim(l.substr(0, eq)), v = trim(l.substr(eq + 1));
++        m[section.empty() ? k : section + "." + k] = v;
++    }
++    return m;
++}
++
++static string iniget(const inimap &m, const string &k, const string &def = "")
++{
++    inimap::const_iterator it = m.find(k);
++    return it == m.end() ? def : it->second;
++}
++
++static void message(const wchar_t *text, UINT icon = MB_ICONINFORMATION)
++{
++    logf("message: %s", narrow(text).c_str());
++    // Essais automatises : aucune fenetre bloquante, tout est dans le journal.
++    const char *quiet = getenv("L4ZY_NO_DIALOGS");
++    if(quiet && quiet[0] == '1') return;
++    MessageBoxW(NULL, text, L"L4ZY", MB_OK | icon | MB_SETFOREGROUND);
++}
++
++static wstring knownfolder(REFKNOWNFOLDERID id)
++{
++    PWSTR p = NULL;
++    wstring out;
++    if(SUCCEEDED(SHGetKnownFolderPath(id, 0, NULL, &p)) && p) out = p;
++    if(p) CoTaskMemFree(p);
++    return out;
++}
++
++static string sha256file(const wstring &p, long long &size)
++{
++    size = -1;
++    HANDLE f = CreateFileW(p.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, NULL);
++    if(f == INVALID_HANDLE_VALUE) return "";
++    BCRYPT_ALG_HANDLE alg = NULL;
++    BCRYPT_HASH_HANDLE hh = NULL;
++    string out;
++    if(BCryptOpenAlgorithmProvider(&alg, BCRYPT_SHA256_ALGORITHM, NULL, 0) == 0 &&
++       BCryptCreateHash(alg, &hh, NULL, 0, NULL, 0, 0) == 0)
++    {
++        static unsigned char buf[1 << 20];
++        DWORD n = 0;
++        long long total = 0;
++        bool ok = true;
++        while(ReadFile(f, buf, sizeof(buf), &n, NULL) && n > 0)
++        {
++            if(BCryptHashData(hh, buf, n, 0) != 0) { ok = false; break; }
++            total += n;
++        }
++        unsigned char dig[32];
++        if(ok && BCryptFinishHash(hh, dig, 32, 0) == 0)
++        {
++            static const char *hex = "0123456789abcdef";
++            for(int i = 0; i < 32; i++) { out += hex[dig[i] >> 4]; out += hex[dig[i] & 15]; }
++            size = total;
++        }
++    }
++    if(hh) BCryptDestroyHash(hh);
++    if(alg) BCryptCloseAlgorithmProvider(alg, 0);
++    CloseHandle(f);
++    return out;
++}
++
++static string randomhex(int bytes)
++{
++    vector<unsigned char> b(bytes);
++    BCryptGenRandom(NULL, &b[0], bytes, BCRYPT_USE_SYSTEM_PREFERRED_RNG);
++    static const char *hex = "0123456789abcdef";
++    string out;
++    for(int i = 0; i < bytes; i++) { out += hex[b[i] >> 4]; out += hex[b[i] & 15]; }
++    return out;
++}
++
++static wstring quotearg(const wstring &a)
++{
++    if(!a.empty() && a.find_first_of(L" \t\"") == wstring::npos) return a;
++    wstring out = L"\"";
++    int bs = 0;
++    for(size_t i = 0; i < a.size(); i++)
++    {
++        if(a[i] == L'\\') { bs++; continue; }
++        if(a[i] == L'"') { out.append(bs * 2 + 1, L'\\'); out += L'"'; bs = 0; continue; }
++        out.append(bs, L'\\'); bs = 0;
++        out += a[i];
++    }
++    out.append(bs * 2, L'\\');
++    out += L"\"";
++    return out;
++}
++
++static wstring cmdline(const vector<wstring> &args)
++{
++    wstring c;
++    for(size_t i = 0; i < args.size(); i++) { if(i) c += L" "; c += quotearg(args[i]); }
++    return c;
++}
++
++// Le jeu recoit ses arguments en page de code ANSI. Un chemin qui ne s'y
++// represente pas (profil sous un nom exotique) passe en nom court 8.3.
++static wstring ansisafe(const wstring &p)
++{
++    BOOL lossy = FALSE;
++    WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, p.c_str(), -1, NULL, 0, NULL, &lossy);
++    if(!lossy) return p;
++    mkdirs(p);
++    wchar_t buf[MAX_PATH * 2];
++    DWORD n = GetShortPathNameW(p.c_str(), buf, MAX_PATH * 2);
++    if(n > 0 && n < MAX_PATH * 2) return wstring(buf, n);
++    return p;
++}
++
++// ------------------------------------------------------------ verrou unique
++
++static HANDLE g_lock = INVALID_HANDLE_VALUE;
++
++static bool takelock(int waitms)
++{
++    wstring p = join(g_state, L"install.lock");
++    mkdirs(g_state);
++    DWORD start = GetTickCount();
++    for(;;)
++    {
++        g_lock = CreateFileW(p.c_str(), GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
++        if(g_lock != INVALID_HANDLE_VALUE) return true;
++        if((int)(GetTickCount() - start) >= waitms) return false;
++        Sleep(250);
++    }
++}
++
++static void droplock()
++{
++    if(g_lock != INVALID_HANDLE_VALUE) CloseHandle(g_lock);
++    g_lock = INVALID_HANDLE_VALUE;
++}
++
++// ------------------------------------------------ application d'une mise a jour
++
++struct planop { bool put; string rel; long long size; string sha; };
++
++static bool relok(const string &rel)
++{
++    static const char *tops[] = { "bin64", "data", "packages", "runtime", "service", "docs", NULL };
++    static const char *rootfiles[] = { "L4ZY.exe", "autoexec.cfg", "traduction.cfg", "LISEZMOI.txt", "README.txt", NULL };
++    if(rel.empty() || rel.size() > 240 || rel[0] == '/') return false;
++    if(rel.find('\\') != string::npos || rel.find(':') != string::npos) return false;
++    vector<string> parts;
++    size_t i = 0;
++    while(i <= rel.size())
++    {
++        size_t j = rel.find('/', i);
++        if(j == string::npos) j = rel.size();
++        parts.push_back(rel.substr(i, j - i));
++        i = j + 1;
++    }
++    for(size_t k = 0; k < parts.size(); k++)
++    {
++        const string &p = parts[k];
++        if(p.empty() || p == "." || p == ".." || p[p.size()-1] == '.' || p[p.size()-1] == ' ') return false;
++        for(size_t c = 0; c < p.size(); c++) if((unsigned char)p[c] < 32 || strchr("<>\"|?*", p[c])) return false;
++    }
++    if(parts.size() == 1)
++    {
++        for(int k = 0; rootfiles[k]; k++) if(parts[0] == rootfiles[k]) return true;
++        return false;
++    }
++    for(int k = 0; tops[k]; k++) if(parts[0] == tops[k]) return true;
++    return false;
++}
++
++// Refuse d'ecrire a travers une jonction ou un lien, meme deja present.
++static bool noreparse(const wstring &root, const string &rel)
++{
++    wstring cur = root;
++    wstring w = relwin(rel);
++    size_t i = 0;
++    while(i <= w.size())
++    {
++        size_t j = w.find(L'\\', i);
++        if(j == wstring::npos) j = w.size();
++        cur = join(cur, w.substr(i, j - i));
++        DWORD a = GetFileAttributesW(cur.c_str());
++        if(a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_REPARSE_POINT)) return false;
++        i = j + 1;
++    }
++    return true;
++}
++
++static bool readplan(const wstring &dir, string &version, vector<planop> &ops, string &err, string *from = NULL)
++{
++    string data;
++    if(!readfile(join(dir, L"plan.txt"), data)) { err = "plan missing"; return false; }
++    vector<string> lines = splitlines(data);
++    if(lines.empty() || lines[0] != "l4zy-plan 1") { err = "unknown plan format"; return false; }
++    bool ended = false;
++    for(size_t i = 1; i < lines.size(); i++)
++    {
++        const string &l = lines[i];
++        if(l.empty()) continue;
++        if(l == "END") { ended = true; break; }
++        if(l.compare(0, 8, "version ") == 0) { version = l.substr(8); continue; }
++        if(l.compare(0, 5, "from ") == 0) { if(from) *from = l.substr(5); continue; }
++        vector<string> f;
++        size_t a = 0;
++        while(a <= l.size())
++        {
++            size_t b = l.find('\t', a);
++            if(b == string::npos) b = l.size();
++            f.push_back(l.substr(a, b - a));
++            a = b + 1;
++        }
++        planop op;
++        if(f[0] == "PUT" && f.size() == 4) { op.put = true; op.rel = f[1]; op.size = _atoi64(f[2].c_str()); op.sha = f[3]; }
++        else if(f[0] == "DEL" && f.size() == 2) { op.put = false; op.rel = f[1]; op.size = 0; }
++        else { err = "bad plan line"; return false; }
++        if(!relok(op.rel)) { err = "plan path refused: " + op.rel; return false; }
++        if(!noreparse(g_root, op.rel)) { err = "junction or link in the way: " + op.rel; return false; }
++        ops.push_back(op);
++    }
++    if(!ended) { err = "plan truncated"; return false; }
++    return true;
++}
++
++static bool movefile(const wstring &from, const wstring &to)
++{
++    mkdirs(parentdir(to));
++    for(int tries = 0; tries < 20; tries++)
++    {
++        if(MoveFileExW(from.c_str(), to.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) return true;
++        DWORD e = GetLastError();
++        if(e != ERROR_SHARING_VIOLATION && e != ERROR_ACCESS_DENIED && e != ERROR_LOCK_VIOLATION) return false;
++        Sleep(250); // antivirus ou indexeur qui lit le fichier un instant
++    }
++    return false;
++}
++
++static const wchar_t *STATEFILES[] = { L"installed.json", L"installed.ini", NULL };
++
++// Remet l'installation dans l'etat d'avant, uniquement d'apres le disque :
++// sauvegarde presente = restaurer ; fichier place sans sauvegarde = il etait
++// nouveau, on le range. Rejouable autant de fois que necessaire.
++static bool rollbackdir(const wstring &dir, const vector<planop> &ops)
++{
++    bool ok = true;
++    wstring files = join(dir, L"files"), backup = join(dir, L"backup");
++    for(size_t k = ops.size(); k-- > 0;)
++    {
++        const planop &op = ops[k];
++        wstring w = relwin(op.rel);
++        wstring tgt = join(g_root, w), bak = join(backup, w), src = join(files, w);
++        if(op.put)
++        {
++            if(exists(bak))
++            {
++                if(exists(tgt))
++                {
++                    if(!exists(src)) movefile(tgt, src); else DeleteFileW(tgt.c_str());
++                }
++                if(!movefile(bak, tgt)) { ok = false; logf("rollback: cannot restore %s (%lu)", op.rel.c_str(), GetLastError()); }
++            }
++            else if(exists(tgt) && !exists(src))
++            {
++                if(!movefile(tgt, src)) { ok = false; logf("rollback: cannot remove new %s", op.rel.c_str()); }
++            }
++        }
++        else if(exists(bak) && !exists(tgt))
++        {
++            if(!movefile(bak, tgt)) { ok = false; logf("rollback: cannot restore deleted %s", op.rel.c_str()); }
++        }
++    }
++    for(int i = 0; STATEFILES[i]; i++)
++    {
++        wstring bak = join(join(dir, L"backup-state"), STATEFILES[i]);
++        if(exists(bak) && !movefile(bak, join(g_state, STATEFILES[i]))) ok = false;
++    }
++    return ok;
++}
++
++static void deltree(const wstring &dir)
++{
++    WIN32_FIND_DATAW fd;
++    HANDLE h = FindFirstFileW(join(dir, L"*").c_str(), &fd);
++    if(h != INVALID_HANDLE_VALUE)
++    {
++        do
++        {
++            wstring n = fd.cFileName;
++            if(n == L"." || n == L"..") continue;
++            wstring p = join(dir, n);
++            if((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && !(fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) deltree(p);
++            else if(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) RemoveDirectoryW(p.c_str());
++            else { SetFileAttributesW(p.c_str(), FILE_ATTRIBUTE_NORMAL); DeleteFileW(p.c_str()); }
++        } while(FindNextFileW(h, &fd));
++        FindClose(h);
++    }
++    RemoveDirectoryW(dir.c_str());
++}
++
++static void writeresult(bool ok, const string &version, const string &msg)
++{
++    string s = string("ok=") + (ok ? "1" : "0") + "\nversion=" + version + "\nmessage=" + msg + "\n";
++    writefile_durable(join(join(g_state, L"update"), L"last-result.txt"), s);
++    logf("result: ok=%d version=%s %s", ok ? 1 : 0, version.c_str(), msg.c_str());
++}
++
++// Apres COMMIT : la sauvegarde devient le point de retour arriere.
++static void finalize(const wstring &stage)
++{
++    wstring upd = join(g_state, L"update");
++    wstring rb = join(upd, L"rollback");
++    if(exists(rb)) deltree(rb);
++    deltree(join(stage, L"files"));
++    DeleteFileW(join(stage, L"READY").c_str());
++    DeleteFileW(join(stage, L"APPLY").c_str());
++    DeleteFileW(join(stage, L"installed.json.new").c_str());
++    DeleteFileW(join(stage, L"installed.ini.new").c_str());
++    if(!MoveFileExW(stage.c_str(), rb.c_str(), MOVEFILE_WRITE_THROUGH)) deltree(stage);
++    DeleteFileW(join(upd, L"journal.txt").c_str());
++}
++
++static bool applyplan(string &version, string &err)
++{
++    wstring upd = join(g_state, L"update");
++    wstring stage = join(upd, L"stage");
++    wstring journal = join(upd, L"journal.txt");
++    vector<planop> ops;
++    string from;
++    if(!readplan(stage, version, ops, err, &from)) return false;
++    // A plan only fits the version it was prepared from: after "go back to
++    // the previous version" (or a reinstall), an older staged update would
++    // leave a mix of two versions recorded as up to date.
++    string cur = iniget(readini(join(g_state, L"installed.ini")), "version", "");
++    if(from.empty() || from != cur)
++    {
++        err = "prepared update was made for version " + (from.empty() ? string("?") : from) +
++              ", installed is " + (cur.empty() ? string("?") : cur) + "; it was discarded, check for updates again";
++        logf("apply refused: %s", err.c_str());
++        deltree(stage);
++        return false;
++    }
++    string ready;
++    readfile(join(stage, L"READY"), ready);
++    if(trim(ready) != version) { err = "staged update is not complete"; return false; }
++    wstring files = join(stage, L"files"), backup = join(stage, L"backup");
++
++    // Avant de toucher quoi que ce soit : chaque fichier prepare est la.
++    for(size_t k = 0; k < ops.size(); k++)
++    {
++        if(!ops[k].put) continue;
++        WIN32_FILE_ATTRIBUTE_DATA fa;
++        wstring src = join(files, relwin(ops[k].rel));
++        if(!GetFileAttributesExW(src.c_str(), GetFileExInfoStandard, &fa) ||
++           ((long long)fa.nFileSizeHigh << 32 | fa.nFileSizeLow) != ops[k].size)
++        { err = "prepared file missing: " + ops[k].rel; return false; }
++    }
++    for(int i = 0; STATEFILES[i]; i++)
++        if(!exists(join(stage, wstring(STATEFILES[i]) + L".new"))) { err = "prepared state missing"; return false; }
++
++    if(!writefile_durable(journal, "BEGIN " + version + "\n")) { err = "cannot write journal"; return false; }
++    logf("apply %s: %d operations", version.c_str(), (int)ops.size());
++
++    // Essai de coupure : arret brutal apres N operations (simulation de
++    // panne de courant). Sans cette variable, aucun effet.
++    const char *crash = getenv("L4ZY_TEST_CRASH_AFTER");
++    int crashafter = crash ? atoi(crash) : -1;
++    bool ok = true;
++    for(size_t k = 0; k < ops.size() && ok; k++)
++    {
++        if(crashafter >= 0 && (int)k == crashafter) { logf("TEST: simulated crash after %d operations", crashafter); ExitProcess(99); }
++        const planop &op = ops[k];
++        wstring w = relwin(op.rel);
++        wstring tgt = join(g_root, w), bak = join(backup, w);
++        if(exists(tgt) && !exists(bak))
++        {
++            if(!movefile(tgt, bak)) { ok = false; err = "file in use or protected: " + op.rel; break; }
++        }
++        if(op.put && !movefile(join(files, w), tgt)) { ok = false; err = "cannot place " + op.rel; }
++    }
++    if(ok)
++    {
++        for(size_t k = 0; k < ops.size() && ok; k++)
++        {
++            if(!ops[k].put) continue;
++            long long sz;
++            string sha = sha256file(join(g_root, relwin(ops[k].rel)), sz);
++            if(sha != ops[k].sha || sz != ops[k].size) { ok = false; err = "verification failed: " + ops[k].rel; }
++        }
++    }
++    if(ok)
++    {
++        wstring bs = join(stage, L"backup-state");
++        mkdirs(bs);
++        for(int i = 0; STATEFILES[i] && ok; i++)
++        {
++            wstring cur = join(g_state, STATEFILES[i]);
++            if(exists(cur) && !exists(join(bs, STATEFILES[i])) && !movefile(cur, join(bs, STATEFILES[i]))) ok = false;
++            if(ok && !movefile(join(stage, wstring(STATEFILES[i]) + L".new"), cur)) ok = false;
++            if(!ok) err = "cannot record the installed version";
++        }
++    }
++    if(!ok)
++    {
++        logf("apply failed: %s -> rollback", err.c_str());
++        bool rb = rollbackdir(stage, ops);
++        DeleteFileW(journal.c_str());
++        DeleteFileW(join(stage, L"APPLY").c_str());
++        if(!rb) err += " (restore incomplete, see state\\logs\\launcher.log)";
++        return false;
++    }
++    appendline_durable(journal, "COMMIT");
++    finalize(stage);
++    return true;
++}
++
++static bool recoverjournal(string &version, string &err, bool &committed)
++{
++    wstring upd = join(g_state, L"update");
++    wstring stage = join(upd, L"stage");
++    wstring journal = join(upd, L"journal.txt");
++    string j;
++    committed = false;
++    if(!readfile(journal, j)) return true;
++    committed = j.find("COMMIT") != string::npos;
++    vector<string> lines = splitlines(j);
++    if(!lines.empty() && lines[0].compare(0, 6, "BEGIN ") == 0) version = lines[0].substr(6);
++    if(committed) { finalize(stage); return true; }
++    vector<planop> ops;
++    string v2;
++    if(!readplan(stage, v2, ops, err)) { err = "interrupted update, plan unreadable: " + err; return false; }
++    bool ok = rollbackdir(stage, ops);
++    DeleteFileW(journal.c_str());
++    DeleteFileW(join(stage, L"APPLY").c_str());
++    if(!ok) err = "interrupted update could not be fully undone";
++    return ok;
++}
++
++static bool rollbacklast(string &version, string &err)
++{
++    wstring rb = join(join(g_state, L"update"), L"rollback");
++    vector<planop> ops;
++    if(!exists(join(rb, L"plan.txt"))) { err = "no previous version kept"; return false; }
++    if(!readplan(rb, version, ops, err)) return false;
++    // Les fichiers "nouveaux" sont ranges dans rollback\files puis supprimes.
++    if(!rollbackdir(rb, ops)) { err = "previous version could not be fully restored"; return false; }
++    deltree(rb);
++    // An update prepared for the version just left no longer fits.
++    wstring stage = join(join(g_state, L"update"), L"stage");
++    if(exists(stage)) { deltree(stage); logf("rollback: staged update discarded"); }
++    return true;
++}
++
++static void relaunch()
++{
++    wstring exe = join(g_root, L"L4ZY.exe");
++    vector<wstring> a;
++    a.push_back(exe);
++    a.push_back(L"--after-update");
++    wstring c = cmdline(a);
++    STARTUPINFOW si = { sizeof(si) };
++    PROCESS_INFORMATION pi;
++    if(CreateProcessW(exe.c_str(), &c[0], NULL, NULL, FALSE, 0, NULL, g_root.c_str(), &si, &pi))
++    { CloseHandle(pi.hThread); CloseHandle(pi.hProcess); }
++    else logf("relaunch failed (%lu)", GetLastError());
++}
++
++static int helpermain(const wstring &mode, DWORD waitpid, bool relaunchafter)
++{
++    if(waitpid)
++    {
++        HANDLE p = OpenProcess(SYNCHRONIZE, FALSE, waitpid);
++        if(p) { WaitForSingleObject(p, 120000); CloseHandle(p); }
++    }
++    if(!takelock(90000))
++    {
++        message(L"La mise à jour attend que L4ZY soit fermé. Réessaie en relançant L4ZY.\n\n"
++                L"The update is waiting for L4ZY to close. Start L4ZY again to retry.", MB_ICONWARNING);
++        return 3;
++    }
++    string version, err;
++    bool ok;
++    if(mode == L"--apply")
++    {
++        bool committed = false;
++        string jv;
++        if(exists(join(join(g_state, L"update"), L"journal.txt")) && !recoverjournal(jv, err, committed)) ok = false;
++        else ok = applyplan(version, err);
++        writeresult(ok, version, ok ? "installed" : err);
++    }
++    else if(mode == L"--recover")
++    {
++        bool committed = false;
++        bool had = exists(join(join(g_state, L"update"), L"journal.txt"));
++        ok = recoverjournal(version, err, committed);
++        if(!had) logf("recover: nothing to do");
++        else
++        {
++            writeresult(ok && committed, version, committed ? "installed" : (ok ? "interrupted, previous version restored" : err));
++            if(ok && !committed)
++                message(L"Une mise à jour avait été interrompue : la version précédente a été remise en place.\n\n"
++                        L"An update was interrupted: the previous version was restored.");
++        }
++    }
++    else
++    {
++        ok = rollbacklast(version, err);
++        writeresult(false, version, ok ? "rolled back to the previous version" : err);
++        message(ok ? L"Version précédente restaurée.\n\nPrevious version restored."
++                   : L"Retour arrière impossible (voir state\\logs\\launcher.log).\n\nRollback failed.", ok ? MB_ICONINFORMATION : MB_ICONERROR);
++    }
++    if(!ok && mode == L"--apply")
++    {
++        wstring w = L"La mise à jour n'a pas pu être installée. Ta version actuelle a été conservée.\n\n"
++                    L"The update could not be installed. Your current version was kept.\n\n" + widen(err);
++        message(w.c_str(), MB_ICONWARNING);
++    }
++    droplock();
++    if(relaunchafter) relaunch();
++    return ok ? 0 : 1;
++}
++
++// Copie le lanceur hors des fichiers remplaces et lui confie le travail.
++static bool spawnhelper(const wchar_t *mode, bool relaunchafter)
++{
++    wstring hdir = join(join(g_state, L"update"), L"helper");
++    mkdirs(hdir);
++    wchar_t self[MAX_PATH * 4];
++    GetModuleFileNameW(NULL, self, MAX_PATH * 4);
++    wstring helper = join(hdir, L"L4ZY-update.exe");
++    if(!CopyFileW(self, helper.c_str(), FALSE)) { logf("cannot copy helper (%lu)", GetLastError()); return false; }
++    vector<wstring> a;
++    a.push_back(helper);
++    a.push_back(mode);
++    a.push_back(L"--root");
++    a.push_back(g_root);
++    a.push_back(L"--wait-pid");
++    wchar_t pid[32];
++    swprintf(pid, 32, L"%lu", GetCurrentProcessId());
++    a.push_back(pid);
++    if(relaunchafter) a.push_back(L"--relaunch");
++    wstring c = cmdline(a);
++    STARTUPINFOW si = { sizeof(si) };
++    PROCESS_INFORMATION pi;
++    if(!CreateProcessW(helper.c_str(), &c[0], NULL, NULL, FALSE, 0, NULL, hdir.c_str(), &si, &pi))
++    { logf("cannot start helper (%lu)", GetLastError()); return false; }
++    CloseHandle(pi.hThread);
++    CloseHandle(pi.hProcess);
++    logf("helper %ls started", mode);
++    return true;
++}
++
++// ------------------------------------------------------------- mode normal
++
++static bool portfree(int port)
++{
++    SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
++    if(s == INVALID_SOCKET) return false;
++    BOOL excl = TRUE;
++    setsockopt(s, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, (const char *)&excl, sizeof(excl));
++    sockaddr_in a;
++    memset(&a, 0, sizeof(a));
++    a.sin_family = AF_INET;
++    a.sin_port = htons((u_short)port);
++    a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
++    bool ok = bind(s, (sockaddr *)&a, sizeof(a)) == 0;
++    closesocket(s);
++    return ok;
++}
++
++static int pickport(int preferred)
++{
++    if(preferred > 0 && portfree(preferred)) return preferred;
++    SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
++    sockaddr_in a;
++    memset(&a, 0, sizeof(a));
++    a.sin_family = AF_INET;
++    a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
++    int port = 0;
++    if(bind(s, (sockaddr *)&a, sizeof(a)) == 0)
++    {
++        int len = sizeof(a);
++        getsockname(s, (sockaddr *)&a, &len);
++        port = ntohs(a.sin_port);
++    }
++    closesocket(s);
++    return port;
++}
++
++static void httppost(int port, const string &path, int timeoutms)
++{
++    SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
++    if(s == INVALID_SOCKET) return;
++    DWORD tv = timeoutms;
++    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof(tv));
++    setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, (const char *)&tv, sizeof(tv));
++    sockaddr_in a;
++    memset(&a, 0, sizeof(a));
++    a.sin_family = AF_INET;
++    a.sin_port = htons((u_short)port);
++    a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
++    if(connect(s, (sockaddr *)&a, sizeof(a)) == 0)
++    {
++        string req = "POST " + path + " HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
++        send(s, req.data(), (int)req.size(), 0);
++        char buf[256];
++        recv(s, buf, sizeof(buf), 0);
++    }
++    closesocket(s);
++}
++
++static bool fileshas(const wstring &p, const char *needle)
++{
++    string d;
++    return readfile(p, d) && d.find(needle) != string::npos;
++}
++
++struct findwin { DWORD pid; HWND hwnd; };
++static BOOL CALLBACK findwinproc(HWND h, LPARAM lp)
++{
++    findwin *f = (findwin *)lp;
++    DWORD pid = 0;
++    GetWindowThreadProcessId(h, &pid);
++    if(pid == f->pid && IsWindowVisible(h) && !GetWindow(h, GW_OWNER)) { f->hwnd = h; return FALSE; }
++    return TRUE;
++}
++
++// Met la fenetre du jeu au premier plan (une fois visible).
++static bool bringtofront(DWORD pid)
++{
++    findwin f = { pid, NULL };
++    EnumWindows(findwinproc, (LPARAM)&f);
++    if(!f.hwnd) return false;
++    if(IsIconic(f.hwnd)) ShowWindow(f.hwnd, SW_RESTORE);
++    SetForegroundWindow(f.hwnd);
++    return true;
++}
++
++static HANDLE startgame(const wstring &exe, const vector<wstring> &args, const wstring &env, DWORD &pid)
++{
++    vector<wstring> a;
++    a.push_back(exe);
++    a.insert(a.end(), args.begin(), args.end());
++    wstring c = cmdline(a);
++    STARTUPINFOW si = { sizeof(si) };
++    PROCESS_INFORMATION pi;
++    if(!CreateProcessW(exe.c_str(), &c[0], NULL, NULL, FALSE, CREATE_UNICODE_ENVIRONMENT,
++                       (LPVOID)env.c_str(), g_root.c_str(), &si, &pi))
++    {
++        logf("game start failed (%lu)", GetLastError());
++        return NULL;
++    }
++    CloseHandle(pi.hThread);
++    pid = pi.dwProcessId;
++    return pi.hProcess;
++}
++
++static wstring buildenv(const std::map<wstring, wstring> &set, bool dropython)
++{
++    // Bloc d'environnement trie, sans variables Python heritees : le Python
++    // embarque ne doit jamais lire la configuration d'un Python personnel.
++    std::map<wstring, wstring> env;
++    LPWCH blk = GetEnvironmentStringsW();
++    for(LPWCH p = blk; *p; p += wcslen(p) + 1)
++    {
++        wstring e = p;
++        size_t eq = e.find(L'=', 1);
++        if(eq == wstring::npos) continue;
++        wstring k = e.substr(0, eq);
++        wstring ku = k;
++        for(size_t i = 0; i < ku.size(); i++) ku[i] = towupper(ku[i]);
++        if(dropython && (ku.compare(0, 6, L"PYTHON") == 0 || ku == L"VIRTUAL_ENV" || ku == L"CONDA_PREFIX")) continue;
++        // Variable d'outil de laboratoire : le jeu installe prend toujours
++        // ses propres DLL NGX (bin64/ngx-*), jamais un dossier externe.
++        if(ku == L"SAUER_NGX_DIR") continue;
++        env[k] = e.substr(eq + 1);
++    }
++    FreeEnvironmentStringsW(blk);
++    for(std::map<wstring, wstring>::const_iterator it = set.begin(); it != set.end(); ++it) env[it->first] = it->second;
++    wstring out;
++    for(std::map<wstring, wstring>::iterator it = env.begin(); it != env.end(); ++it)
++    { out += it->first; out += L"="; out += it->second; out += L'\0'; }
++    out += L'\0';
++    return out;
++}
++
++// ------------------------------------------------ reprise des reglages existants
++
++// Documents folder of the player. Empty when Windows cannot give it (broken
++// redirection, offline network share): the caller then says so clearly
++// instead of falling back to a folder inside the installation.
++static wstring documentsdir()
++{
++#ifdef L4ZY_TESTHOOKS
++    // Test builds only: a fake Documents folder, or "-" for "not available".
++    const wchar_t *fake = _wgetenv(L"L4ZY_TEST_DOCUMENTS");
++    if(fake && fake[0]) return wstring(fake) == L"-" ? wstring() : wstring(fake);
++#endif
++    return knownfolder(FOLDERID_Documents);
++}
++
++static bool filetime(const wstring &p, ULONGLONG &t)
++{
++    WIN32_FILE_ATTRIBUTE_DATA fa;
++    if(!GetFileAttributesExW(p.c_str(), GetFileExInfoStandard, &fa)) return false;
++    if(fa.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) return false;
++    t = ((ULONGLONG)fa.ftLastWriteTime.dwHighDateTime << 32) | fa.ftLastWriteTime.dwLowDateTime;
++    return true;
++}
++
++static string timetext(ULONGLONG t)
++{
++    FILETIME ft, lt;
++    ft.dwLowDateTime = (DWORD)t;
++    ft.dwHighDateTime = (DWORD)(t >> 32);
++    SYSTEMTIME st;
++    if(!FileTimeToLocalFileTime(&ft, &lt) || !FileTimeToSystemTime(&lt, &st)) return "?";
++    char buf[32];
++    snprintf(buf, sizeof(buf), "%04d-%02d-%02d %02d:%02d", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute);
++    return buf;
++}
++
++// Identity of a file or folder (volume + file index), whatever the spelling
++// of its path: 8.3 names, other case, trailing slash, junctions and links
++// (they are followed) all give the same identity as the real folder.
++static bool fileident(const wstring &p, DWORD &vol, ULONGLONG &idx)
++{
++    HANDLE h = CreateFileW(p.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
++                           NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
++    if(h == INVALID_HANDLE_VALUE) return false;
++    BY_HANDLE_FILE_INFORMATION bi;
++    bool ok = GetFileInformationByHandle(h, &bi) != 0;
++    CloseHandle(h);
++    if(!ok) return false;
++    vol = bi.dwVolumeSerialNumber;
++    idx = ((ULONGLONG)bi.nFileIndexHigh << 32) | bi.nFileIndexLow;
++    return true;
++}
++
++static wstring fullpathlower(const wstring &p)
++{
++    wchar_t buf[MAX_PATH * 4];
++    DWORD n = GetFullPathNameW(p.c_str(), MAX_PATH * 4, buf, NULL);
++    wstring out = (n > 0 && n < MAX_PATH * 4) ? wstring(buf, n) : p;
++    while(out.size() > 3 && (out[out.size()-1] == L'\\' || out[out.size()-1] == L'/')) out.erase(out.size()-1);
++    for(size_t i = 0; i < out.size(); i++) out[i] = towlower(out[i] == L'/' ? L'\\' : out[i]);
++    return out;
++}
++
++// Same folder? By identity when both exist, else by normalised full path.
++static bool samefolder(const wstring &a, const wstring &b)
++{
++    DWORD va, vb;
++    ULONGLONG ia, ib;
++    bool ha = fileident(a, va, ia), hb = fileident(b, vb, ib);
++    if(ha && hb) return va == vb && ia == ib;
++    if(ha != hb) return false;
++    return fullpathlower(a) == fullpathlower(b);
++}
++
++static bool copytree_missing(const wstring &src, const wstring &dst, int &n)
++{
++    WIN32_FIND_DATAW fd;
++    HANDLE h = FindFirstFileW(join(src, L"*").c_str(), &fd);
++    if(h == INVALID_HANDLE_VALUE) return true;
++    mkdirs(dst);
++    bool ok = true;
++    do
++    {
++        wstring nm = fd.cFileName;
++        if(nm == L"." || nm == L"..") continue;
++        if(fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) continue;
++        wstring s = join(src, nm), d = join(dst, nm);
++        if(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) { if(!copytree_missing(s, d, n)) ok = false; }
++        else if(!exists(d))
++        {
++            if(CopyFileW(s.c_str(), d.c_str(), TRUE)) n++;
++            else ok = false;
++        }
++    } while(FindNextFileW(h, &fd));
++    FindClose(h);
++    return ok;
++}
++
++// Other clients whose settings can be taken. Their folders are only read.
++static const wchar_t *IMPORT_CANDS[] = { L"Sauer-RT", L"Sauerbraten-traduction", L"Sauerbraten", L"p1xbraten", NULL };
++
++struct importcand { wstring name, dir; ULONGLONG t; };
++
++// Candidates that hold a config.cfg and are not the L4ZY profile itself
++// (a junction or another spelling of the same folder is the same folder).
++static vector<importcand> listcandidates(const wstring &games, const wstring &profile, bool verbose)
++{
++    vector<importcand> out;
++    if(games.empty()) return out;
++    for(int i = 0; IMPORT_CANDS[i]; i++)
++    {
++        importcand c;
++        c.name = IMPORT_CANDS[i];
++        c.dir = join(games, IMPORT_CANDS[i]);
++        if(!isdir(c.dir)) continue;
++        if(samefolder(c.dir, profile))
++        {
++            logf("settings import: %s is the L4ZY profile folder itself, skipped", narrow(c.name).c_str());
++            continue;
++        }
++        if(!filetime(join(c.dir, L"config.cfg"), c.t))
++        {
++            if(verbose) logf("settings import: candidate %s has no config.cfg (%s)", narrow(c.name).c_str(), narrow(c.dir).c_str());
++            continue;
++        }
++        if(verbose) logf("settings import: candidate %s, config.cfg of %s (%s)", narrow(c.name).c_str(), timetext(c.t).c_str(), narrow(c.dir).c_str());
++        out.push_back(c);
++    }
++    return out;
++}
++
++// Name of the other client whose folder IS the L4ZY profile (junction,
++// [paths] profile pointing at it...), empty if none. Nothing of the import
++// is then ever written there.
++static wstring profileisotherclient(const wstring &games, const wstring &profile)
++{
++    if(games.empty()) return wstring();
++    for(int i = 0; IMPORT_CANDS[i]; i++)
++    {
++        wstring d = join(games, IMPORT_CANDS[i]);
++        if(isdir(d) && samefolder(d, profile)) return IMPORT_CANDS[i];
++    }
++    return wstring();
++}
++
++#ifdef L4ZY_TESTHOOKS
++// Test builds only: make the copy of one file fail, like a locked file.
++static bool testfailcopy(const wchar_t *name)
++{
++    const wchar_t *v = _wgetenv(L"L4ZY_TEST_IMPORT_FAIL");
++    return v && !lstrcmpiW(v, name);
++}
++#else
++static bool testfailcopy(const wchar_t *) { return false; }
++#endif
++
++// Copies the settings of another client into the profile.
++// replace = the player asked for it (menu, --import-from): config.cfg,
++// servers.cfg and friends.cfg of the profile are replaced, each one first
++// saved as <name>.before-import.bak. Otherwise (first start) only missing
++// files are written. Any failure puts the profile back as it was.
++static bool importfrom(const wstring &src, const wstring &profile, bool replace, int &nfiles, string &err)
++{
++    nfiles = 0;
++    if(!isdir(src)) { err = "folder not found: " + narrow(src); return false; }
++    if(!exists(join(src, L"config.cfg"))) { err = "no config.cfg in " + narrow(src); return false; }
++    if(samefolder(src, profile)) { err = "this is the L4ZY settings folder itself"; return false; }
++    mkdirs(profile);
++
++    static const wchar_t *files[] = { L"config.cfg", L"servers.cfg", L"friends.cfg", L"init.cfg", L"autoexec.cfg", NULL };
++    static const bool replaceable[] = { true, true, true, false, false };
++    struct done { wstring dst, bak; bool created; };
++    vector<done> undo;
++    bool ok = true;
++    for(int i = 0; files[i] && ok; i++)
++    {
++        wstring s = join(src, files[i]), d = join(profile, files[i]);
++        if(!exists(s)) continue;
++        bool had = exists(d);
++        if(had && !(replace && replaceable[i])) continue;
++        done u;
++        u.dst = d;
++        u.created = !had;
++        if(had)
++        {
++            u.bak = d + L".before-import.bak";
++            if(!CopyFileW(d.c_str(), u.bak.c_str(), FALSE))
++            { ok = false; err = "cannot save the current " + narrow(files[i]); break; }
++        }
++        // Copied next to the target, then swapped in: never half a file.
++        wstring tmp = d + L".import-tmp";
++        if(testfailcopy(files[i]) || !CopyFileW(s.c_str(), tmp.c_str(), FALSE))
++        {
++            DeleteFileW(tmp.c_str());
++            ok = false;
++            err = "cannot read " + narrow(s) + " (in use, offline or protected?)";
++            break;
++        }
++        SetFileAttributesW(tmp.c_str(), FILE_ATTRIBUTE_NORMAL);
++        undo.push_back(u);
++        if(!MoveFileExW(tmp.c_str(), d.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
++        {
++            DeleteFileW(tmp.c_str());
++            ok = false;
++            err = "cannot write " + narrow(d);
++            break;
++        }
++        nfiles++;
++    }
++    if(ok && !exists(join(profile, L"config.cfg"))) { ok = false; err = "config.cfg was not copied"; }
++    if(!ok)
++    {
++        // Put back exactly what was there.
++        for(size_t k = undo.size(); k-- > 0;)
++        {
++            if(undo[k].created) DeleteFileW(undo[k].dst.c_str());
++            else if(!CopyFileW(undo[k].bak.c_str(), undo[k].dst.c_str(), FALSE))
++                logf("settings import: could not restore %s (copy kept in %s)", narrow(undo[k].dst).c_str(), narrow(undo[k].bak).c_str());
++        }
++        nfiles = 0;
++        return false;
++    }
++    // The chat translation menu must stay loaded by the player's autoexec.
++    wstring ae = join(profile, L"autoexec.cfg");
++    string aetext;
++    if(readfile(ae, aetext) && aetext.find("traduction.cfg") == string::npos)
++        appendline_durable(ae, "\r\n// L4ZY : menu de traduction du chat\r\nexec \"traduction.cfg\"\r");
++    return true;
++}
++
++static void writeimportlist(const wstring &games, const wstring &profile)
++{
++    vector<importcand> c = listcandidates(games, profile, false);
++    string s = "# Other clients found by L4ZY.exe at start (Options > Import settings).\n";
++    for(size_t i = 0; i < c.size(); i++)
++        s += "source\t" + narrow(c[i].name) + "\t" + timetext(c[i].t) + "\t" + narrow(c[i].dir) + "\n";
++    if(!writefile_durable(join(profile, L"l4zy-import-sources.txt"), s)) logf("settings import: cannot write the list of other clients");
++}
++
++// First start of a profile: takes the settings of the client used most
++// recently (Sauer-RT, older translation client, Sauerbraten, p1xbraten), but
++// only when the profile has no config.cfg yet. Once (marker l4zy-import.txt,
++// written only when the copy succeeded).
++static void importsettings(const wstring &profile, const wstring &games)
++{
++    wstring marker = join(profile, L"l4zy-import.txt");
++    if(exists(marker)) return;
++    if(exists(join(profile, L"config.cfg")))
++    {
++        writefile_durable(marker, "kept the L4ZY settings already there (config.cfg present), nothing imported\n");
++        logf("settings import: profile already has a config.cfg, nothing imported");
++        return;
++    }
++    if(games.empty()) { logf("settings import: Documents folder unknown, nothing imported"); return; }
++    vector<importcand> c = listcandidates(games, profile, true);
++    int best = -1;
++    for(size_t i = 0; i < c.size(); i++) if(best < 0 || c[i].t > c[best].t) best = (int)i;
++    string note = "none found";
++    if(best >= 0)
++    {
++        int n = 0;
++        string err;
++        logf("settings import: chosen %s (most recent config.cfg, %s)", narrow(c[best].name).c_str(), narrow(c[best].dir).c_str());
++        if(!importfrom(c[best].dir, profile, false, n, err))
++        {
++            logf("settings import: FAILED from %s: %s; profile left as it was, will try again next start", narrow(c[best].name).c_str(), err.c_str());
++            return;
++        }
++        int maps = 0;
++        for(size_t i = 0; i < c.size(); i++)
++            if(!copytree_missing(join(c[i].dir, L"packages"), join(profile, L"packages"), maps))
++                logf("settings import: some map files of %s could not be copied", narrow(c[i].name).c_str());
++        note = "from " + narrow(c[best].name) + " (" + std::to_string(n) + " files, " + std::to_string(maps) + " map files) " +
++               timetext(c[best].t) + " " + narrow(c[best].dir);
++    }
++    writefile_durable(marker, "imported settings: " + note + "\n");
++    logf("settings import: %s", note.c_str());
++}
++
++// Import asked by the player: menu (request file left by the game) or
++// --import-from. Replaces the L4ZY settings, keeping the old ones in .bak.
++static bool importexplicit(const wstring &src, const wstring &label, const wstring &profile)
++{
++    int n = 0, maps = 0;
++    string err;
++    logf("settings import: requested from %s (%s)", narrow(label).c_str(), narrow(src).c_str());
++    if(!importfrom(src, profile, true, n, err))
++    {
++        logf("settings import: FAILED: %s; L4ZY settings left as they were", err.c_str());
++        wstring w = L"L'import des réglages a échoué. Tes réglages L4ZY n'ont pas changé.\n\n"
++                    L"Importing settings failed. Your L4ZY settings were not changed.\n\n" + widen(err);
++        message(w.c_str(), MB_ICONWARNING);
++        return false;
++    }
++    if(!copytree_missing(join(src, L"packages"), join(profile, L"packages"), maps))
++        logf("settings import: some map files could not be copied");
++    ULONGLONG t = 0;
++    filetime(join(src, L"config.cfg"), t);
++    string note = "imported settings: from " + narrow(label) + " (" + std::to_string(n) + " files, " + std::to_string(maps) +
++                  " map files) " + timetext(t) + " " + narrow(src) + "; previous L4ZY settings in *.before-import.bak";
++    writefile_durable(join(profile, L"l4zy-import.txt"), note + "\n");
++    logf("settings import: %s", note.c_str());
++    return true;
++}
++
++// Request left by the game (Options > Import settings). Read once, removed
++// before anything is copied, so a bad request never repeats.
++static void importrequest(const wstring &profile, const wstring &games)
++{
++    wstring req = join(profile, L"l4zy-import-request.txt");
++    string data;
++    if(!readfile(req, data)) return;
++    DeleteFileW(req.c_str());
++    if(data.size() >= 3 && (unsigned char)data[0] == 0xEF) data = data.substr(3);
++    vector<string> lines = splitlines(data);
++    string name, folder;
++    bool head = !lines.empty() && trim(lines[0]) == "l4zy-import-request 1", ended = false;
++    for(size_t i = 1; i < lines.size(); i++)
++    {
++        string l = trim(lines[i]);
++        if(l == "end") { ended = true; break; }
++        if(l.compare(0, 5, "name=") == 0) name = l.substr(5);
++        else if(l.compare(0, 7, "folder=") == 0) folder = l.substr(7);
++    }
++    if(!head || !ended || (name.empty() == folder.empty())) { logf("settings import: unreadable request ignored"); return; }
++    if(!name.empty())
++    {
++        for(int i = 0; IMPORT_CANDS[i]; i++)
++            if(narrow(IMPORT_CANDS[i]) == name && !games.empty()) { importexplicit(join(games, IMPORT_CANDS[i]), IMPORT_CANDS[i], profile); return; }
++        logf("settings import: unknown client in request: %s", name.c_str());
++        return;
++    }
++    importexplicit(widen(folder), L"folder", profile);
++}
++static int normalmain(const vector<wstring> &passthrough, DWORD waitpid)
++{
++    // Restart asked by the previous launcher (settings import from the menu).
++    if(waitpid)
++    {
++        HANDLE p = OpenProcess(SYNCHRONIZE, FALSE, waitpid);
++        if(p) { WaitForSingleObject(p, 60000); CloseHandle(p); }
++    }
++    if(!takelock(waitpid ? 15000 : 1500))
++    {
++        message(L"L4ZY est déjà ouvert depuis ce dossier (ou une mise à jour est en cours).\n\n"
++                L"L4ZY is already running from this folder (or an update is being installed).");
++        return 2;
++    }
++    wstring upd = join(g_state, L"update");
++    if(exists(join(upd, L"journal.txt")))
++    {
++        logf("interrupted update found, starting recovery");
++        droplock();
++        if(spawnhelper(L"--recover", true)) return 0;
++        message(L"Impossible de reprendre une mise à jour interrompue.\n\nCannot resume an interrupted update.", MB_ICONERROR);
++        return 1;
++    }
++
++    inimap ini = readini(join(g_root, L"l4zy.ini"));
++    inimap inst = readini(join(g_state, L"installed.ini"));
++    string version = iniget(inst, "version", "?");
++    bool portable = iniget(ini, "paths.portable", "0") == "1";
++    wstring profile = widen(iniget(ini, "paths.profile")), userdata = widen(iniget(ini, "paths.userdata"));
++    wstring docs = documentsdir();
++    wstring games = docs.empty() ? wstring() : join(docs, L"My Games");
++    if(portable)
++    {
++        if(profile.empty()) profile = join(join(g_root, L"userdata"), L"profile");
++        if(userdata.empty()) userdata = join(join(g_root, L"userdata"), L"local");
++    }
++    else
++    {
++        if(profile.empty() && games.empty())
++        {
++            // Never a silent profile inside the installation: the player
++            // would find all settings gone.
++            logf("start: Documents folder not available, not starting");
++            message(L"L4ZY ne trouve pas ton dossier Documents (déplacé, sur un lecteur réseau ou OneDrive hors ligne ?). "
++                    L"Tes réglages y sont rangés : le jeu ne démarre pas sans lui.\n"
++                    L"Rebranche ou reconnecte ce dossier puis relance L4ZY, ou indique un dossier dans l4zy.ini ([paths] profile = ...).\n\n"
++                    L"L4ZY cannot find your Documents folder (moved, on a network drive, or OneDrive offline?). "
++                    L"Your settings are kept there, so the game does not start without it.\n"
++                    L"Reconnect that folder and start L4ZY again, or set a folder in l4zy.ini ([paths] profile = ...).", MB_ICONERROR);
++            droplock();
++            return 1;
++        }
++        if(profile.empty()) profile = join(games, L"L4ZY");
++        if(userdata.empty())
++        {
++            wstring lad = knownfolder(FOLDERID_LocalAppData);
++            if(lad.empty())
++            {
++                logf("start: LocalAppData folder not available, not starting");
++                message(L"L4ZY ne trouve pas le dossier AppData\\Local de Windows. Indique un dossier dans l4zy.ini ([paths] userdata = ...).\n\n"
++                        L"L4ZY cannot find the Windows AppData\\Local folder. Set a folder in l4zy.ini ([paths] userdata = ...).", MB_ICONERROR);
++                droplock();
++                return 1;
++            }
++            userdata = join(lad, L"L4ZY");
++        }
++    }
++    if(profile.size() < 2 || profile[1] != L':') profile = join(g_root, profile);
++    if(userdata.size() < 2 || userdata[1] != L':') userdata = join(g_root, userdata);
++    wstring data = join(userdata, L"translation"), models = join(userdata, L"models");
++    mkdirs(profile); mkdirs(data); mkdirs(models); mkdirs(join(data, L"logs"));
++    logf("start: version %s, profile %s", version.c_str(), narrow(profile).c_str());
++
++    WSADATA wsa;
++    WSAStartup(MAKEWORD(2, 2), &wsa);
++    int port = pickport(8747);
++    string token = randomhex(16);
++    bool envport = iniget(inst, "service_port_env", "0") == "1";
++
++    wstring gameexe = join(join(g_root, L"bin64"), L"sauerbraten.exe");
++    if(!exists(gameexe))
++    {
++        message(L"Fichiers du jeu manquants : réinstalle L4ZY.\n\nGame files are missing: reinstall L4ZY.", MB_ICONERROR);
++        return 1;
++    }
++    // Un -q / -g donne en argument (outil de laboratoire, raccourci perso)
++    // remplace le profil et le journal par defaut, sans doublon.
++    wstring logname = L"log.txt";
++    bool customprofile = false;
++    vector<wstring> extra;
++    for(size_t i = 0; i < passthrough.size(); i++)
++    {
++        const wstring &a = passthrough[i];
++        if(a.size() > 2 && a.compare(0, 2, L"-q") == 0) { profile = a.substr(2); customprofile = true; }
++        else if(a.size() > 2 && a.compare(0, 2, L"-g") == 0) logname = a.substr(2);
++        else extra.push_back(a);
++    }
++    mkdirs(profile);
++    wstring otherclient = profileisotherclient(games, profile);
++    if(!otherclient.empty())
++    {
++        // The profile is another client's folder (junction, [paths] profile):
++        // the import writes nothing there.
++        logf("settings import: WARNING the L4ZY profile is the folder of %s, import disabled", narrow(otherclient).c_str());
++        if(!g_importfrom.empty()) message(L"Le dossier de réglages L4ZY est celui d'un autre client : import refusé.\n\n"
++                                          L"The L4ZY settings folder is another client's folder: import refused.", MB_ICONWARNING);
++    }
++    else
++    {
++        // Asked by the player first; then, if the profile is new, the automatic one.
++        if(!g_importfrom.empty()) importexplicit(g_importfrom, L"folder", profile);
++        importrequest(profile, games);
++        // Profile given on the command line (tools, tests): no automatic import.
++        if(!customprofile) importsettings(profile, games);
++        writeimportlist(games, profile);
++    }
++    if(g_importonly) { droplock(); return 0; }
++    vector<wstring> gargs;
++    gargs.push_back(L"-q" + ansisafe(profile));
++    gargs.push_back(L"-g" + logname);
++    // Ancien client (sans lecture de L4ZY_SERVICE_PORT) : toujours donner le
++    // port, sinon une valeur sauvegardee lors d un lancement precedent resterait.
++    if(!envport)
++    {
++        wchar_t x[64];
++        swprintf(x, 64, L"-xtranslateport %d", port);
++        gargs.push_back(x);
++    }
++    gargs.insert(gargs.end(), extra.begin(), extra.end());
++    std::map<wstring, wstring> genv;
++    wchar_t pbuf[16];
++    swprintf(pbuf, 16, L"%d", port);
++    genv[L"L4ZY_SERVICE_PORT"] = pbuf;
++    genv[L"L4ZY_VERSION"] = widen(version);
++    genv[L"L4ZY_MODELS_DIR"] = ansisafe(models);
++    wstring gameenv = buildenv(genv, false);
++
++    wstring gamelog = join(profile, logname);
++    HANDLE game = NULL;
++    DWORD gamepid = 0;
++    for(int attempt = 0; attempt < 2; attempt++)
++    {
++        DeleteFileW(gamelog.c_str());
++        game = startgame(gameexe, gargs, gameenv, gamepid);
++        if(!game)
++        {
++            message(L"Le jeu n'a pas pu démarrer.\n\nThe game could not start.", MB_ICONERROR);
++            return 1;
++        }
++        // Le modele de traduction ne charge qu'une fois le jeu initialise :
++        // la carte graphique est au jeu pendant sa phase d'allocation.
++        // Le lanceur n'a pas de fenetre : sans cela Windows peut refuser le
++        // premier plan au jeu, et l'image HDR n'est presentee qu'apres une
++        // activation manuelle (touche Windows). On le lui donne explicitement.
++        AllowSetForegroundWindow(gamepid);
++        bool lost = false, focused = false;
++        for(int t = 0; t < 80; t++)
++        {
++            if(WaitForSingleObject(game, 250) == WAIT_OBJECT_0) break;
++            if(!focused) focused = bringtofront(gamepid);
++            if(fileshas(gamelog, "init: mainloop")) { bringtofront(gamepid); break; }
++            if(fileshas(gamelog, "DEVICE_LOST")) { lost = true; break; }
++        }
++        if(!lost) break;
++        Sleep(3000);
++        if(fileshas(gamelog, "init: mainloop")) break;
++        if(WaitForSingleObject(game, 10000) != WAIT_OBJECT_0 || attempt == 1) break;
++        logf("graphics device lost during start, one retry");
++        CloseHandle(game);
++        Sleep(5000);
++    }
++    DWORD code = STILL_ACTIVE;
++    GetExitCodeProcess(game, &code);
++    if(code != STILL_ACTIVE)
++    {
++        logf("game ended during start (code %lu)", code);
++    }
++
++    // Service prive dans un job : fermer le job arrete aussi llama-server.
++    HANDLE job = CreateJobObjectW(NULL, NULL);
++    JOBOBJECT_EXTENDED_LIMIT_INFORMATION li;
++    memset(&li, 0, sizeof(li));
++    li.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
++    SetInformationJobObject(job, JobObjectExtendedLimitInformation, &li, sizeof(li));
++    HANDLE svc = NULL;
++    wstring py = join(g_root, L"runtime\\python\\pythonw.exe");
++    wstring script = join(g_root, L"service\\translate_server.py");
++    if(code == STILL_ACTIVE && exists(py) && exists(script))
++    {
++        vector<wstring> a;
++        a.push_back(py);
++        a.push_back(L"-X"); a.push_back(L"utf8");
++        a.push_back(script);
++        a.push_back(L"--port"); a.push_back(pbuf);
++        a.push_back(L"--data-dir"); a.push_back(data);
++        a.push_back(L"--models-dir"); a.push_back(models);
++        a.push_back(L"--state-dir"); a.push_back(g_state);
++        a.push_back(L"--profile-dir"); a.push_back(profile);
++        a.push_back(L"--log"); a.push_back(join(join(data, L"logs"), L"service.log"));
++        wchar_t mypid[32];
++        swprintf(mypid, 32, L"%lu", GetCurrentProcessId());
++        a.push_back(L"--parent-pid"); a.push_back(mypid);
++        a.push_back(L"--token"); a.push_back(widen(token));
++        string starter = iniget(ini, "translation.starter_model", "");
++        if(!starter.empty()) { a.push_back(L"--starter"); a.push_back(widen(starter)); }
++        wstring c = cmdline(a);
++        std::map<wstring, wstring> senv;
++        senv[L"PYTHONNOUSERSITE"] = L"1";
++        senv[L"PYTHONDONTWRITEBYTECODE"] = L"1";
++        wstring svcenv = buildenv(senv, true);
++        // buildenv retire PYTHON* herites puis remet ces deux-la, voulus.
++        STARTUPINFOW si = { sizeof(si) };
++        PROCESS_INFORMATION pi;
++        wstring svcdir = join(g_root, L"service");
++        if(CreateProcessW(py.c_str(), &c[0], NULL, NULL, FALSE,
++                          CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW,
++                          (LPVOID)svcenv.c_str(), svcdir.c_str(), &si, &pi))
++        {
++            AssignProcessToJobObject(job, pi.hProcess);
++            ResumeThread(pi.hThread);
++            CloseHandle(pi.hThread);
++            svc = pi.hProcess;
++            logf("service started on port %d (pid %lu)", port, pi.dwProcessId);
++        }
++        else logf("service start failed (%lu)", GetLastError());
++    }
++    else if(code == STILL_ACTIVE) logf("service files missing, game runs without translation/updates");
++
++    WaitForSingleObject(game, INFINITE);
++    CloseHandle(game);
++    logf("game closed");
++
++    if(svc)
++    {
++        httppost(port, "/shutdown?token=" + token, 3000);
++        if(WaitForSingleObject(svc, 10000) != WAIT_OBJECT_0) logf("service did not stop in time, job terminated");
++        CloseHandle(svc);
++    }
++    TerminateJobObject(job, 0);
++    CloseHandle(job);
++    WSACleanup();
++
++    wstring stage = join(upd, L"stage");
++    bool importasked = exists(join(profile, L"l4zy-import-request.txt"));
++    if(exists(join(stage, L"READY")) && exists(join(stage, L"APPLY")))
++    {
++        // An import asked at the same time is done at the start that follows.
++        bool restart = fileshas(join(stage, L"APPLY"), "restart=1");
++        logf("update requested, handing over to helper (restart=%d)", restart ? 1 : 0);
++        droplock();
++        if(!spawnhelper(L"--apply", restart))
++            message(L"La mise à jour n'a pas pu démarrer. Ta version actuelle reste en place.\n\n"
++                    L"The update could not start. Your current version is unchanged.", MB_ICONWARNING);
++        return 0;
++    }
++    droplock();
++    if(importasked)
++    {
++        // Settings import asked from the menu: a new launcher does it before
++        // the game starts again (this one has finished with the profile).
++        wchar_t self[MAX_PATH * 4];
++        GetModuleFileNameW(NULL, self, MAX_PATH * 4);
++        vector<wstring> a;
++        a.push_back(self);
++        a.insert(a.end(), passthrough.begin(), passthrough.end());
++        a.push_back(L"--wait-pid");
++        wchar_t pid[32];
++        swprintf(pid, 32, L"%lu", GetCurrentProcessId());
++        a.push_back(pid);
++        wstring c = cmdline(a);
++        STARTUPINFOW si = { sizeof(si) };
++        PROCESS_INFORMATION pi;
++        if(CreateProcessW(self, &c[0], NULL, NULL, FALSE, 0, NULL, g_root.c_str(), &si, &pi))
++        {
++            CloseHandle(pi.hThread);
++            CloseHandle(pi.hProcess);
++            logf("settings import asked: restarting");
++        }
++        else logf("settings import asked, restart failed (%lu): done at next start", GetLastError());
++    }
++    return 0;
++}
++
++int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
++{
++    int argc = 0;
++    LPWSTR *argv = CommandLineToArgvW(GetCommandLineW(), &argc);
++    wchar_t self[MAX_PATH * 4];
++    GetModuleFileNameW(NULL, self, MAX_PATH * 4);
++    g_root = parentdir(self);
++
++    wstring mode;
++    DWORD waitpid = 0;
++    bool relaunchafter = false;
++    vector<wstring> passthrough;
++    for(int i = 1; i < argc; i++)
++    {
++        wstring a = argv[i];
++        if(a == L"--apply" || a == L"--recover" || a == L"--rollback") mode = a;
++        else if(a == L"--root" && i + 1 < argc) g_root = argv[++i];
++        else if(a == L"--wait-pid" && i + 1 < argc) waitpid = wcstoul(argv[++i], NULL, 10);
++        else if(a == L"--relaunch") relaunchafter = true;
++        else if(a == L"--after-update") {}
++        else if(a == L"--import-only") g_importonly = true;
++        else if(a == L"--import-from" && i + 1 < argc) g_importfrom = argv[++i];
++        else if(a == L"--version")
++        {
++            message(L"L4ZY launcher API 1");
++            return 0;
++        }
++        else passthrough.push_back(a);
++    }
++    g_state = join(g_root, L"state");
++    mkdirs(join(g_state, L"logs"));
++    g_logpath = join(join(g_state, L"logs"), L"launcher.log");
++    CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
++
++    int rc;
++    // Deja la copie helper (lancee a la main) : pas de recopie sur soi-meme.
++    wstring helperpath = join(join(join(g_state, L"update"), L"helper"), L"L4ZY-update.exe");
++    bool ishelper = lstrcmpiW(self, helperpath.c_str()) == 0;
++    if(mode == L"--rollback" && waitpid == 0 && !ishelper)
++    {
++        // Demande du joueur (raccourci "revenir a la version precedente") :
++        // on passe par une copie helper, comme pour une mise a jour.
++        if(!takelock(1500))
++        {
++            message(L"Ferme d'abord L4ZY.\n\nClose L4ZY first.", MB_ICONWARNING);
++            return 2;
++        }
++        droplock();
++        rc = spawnhelper(L"--rollback", false) ? 0 : 1;
++    }
++    else if(!mode.empty()) rc = helpermain(mode, waitpid, relaunchafter);
++    else rc = normalmain(passthrough, waitpid);
++    LocalFree(argv);
++    return rc;
++}
+diff --git a/distrib/launcher/launcher.manifest b/distrib/launcher/launcher.manifest
+new file mode 100644
+index 0000000000000000000000000000000000000000..243abf8dd56a4ac9222e26da569a8bf337bf3098
+--- /dev/null
++++ b/distrib/launcher/launcher.manifest
+@@ -0,0 +1,13 @@
++<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
++<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
++  <assemblyIdentity type="win32" name="L4ZY.Launcher" version="1.0.0.0" processorArchitecture="amd64"/>
++  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
++    <security><requestedPrivileges><requestedExecutionLevel level="asInvoker" uiAccess="false"/></requestedPrivileges></security>
++  </trustInfo>
++  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
++    <application><supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/></application>
++  </compatibility>
++  <application xmlns="urn:schemas-microsoft-com:asm.v3">
++    <windowsSettings><dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true</dpiAware></windowsSettings>
++  </application>
++</assembly>
+diff --git a/distrib/launcher/launcher.rc b/distrib/launcher/launcher.rc
+new file mode 100644
+index 0000000000000000000000000000000000000000..3c50f7e6fa80567149dfdd28c9ad7a465ea9de22
+--- /dev/null
++++ b/distrib/launcher/launcher.rc
+@@ -0,0 +1,25 @@
++#include <winver.h>
++1 ICON "l4zy.ico"
++1 24 "launcher.manifest"
++VS_VERSION_INFO VERSIONINFO
++FILEVERSION 1,0,0,0
++PRODUCTVERSION 1,0,0,0
++FILEOS VOS_NT_WINDOWS32
++FILETYPE VFT_APP
++BEGIN
++  BLOCK "StringFileInfo"
++  BEGIN
++    BLOCK "040904b0"
++    BEGIN
++      VALUE "FileDescription", "L4ZY"
++      VALUE "ProductName", "L4ZY"
++      VALUE "FileVersion", "1.0.0.0"
++      VALUE "InternalName", "L4ZY"
++      VALUE "OriginalFilename", "L4ZY.exe"
++    END
++  END
++  BLOCK "VarFileInfo"
++  BEGIN
++    VALUE "Translation", 0x409, 1200
++  END
++END
+diff --git a/distrib/service/updater.py b/distrib/service/updater.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..854b8632a3bd4078b8f42088a6f7078b3e44b4b4
+--- /dev/null
++++ b/distrib/service/updater.py
+@@ -0,0 +1,876 @@
++"""Mises a jour L4ZY : recherche, telechargement, verification, preparation.
++
++Ce module ne remplace JAMAIS un fichier de l'installation active. Il prepare
++tout dans state/update/stage (fichiers verifies + plan.txt), puis le lanceur,
++une fois le jeu ferme, confie le plan a une copie de lui-meme qui l'applique
++avec sauvegarde et retour arriere (launcher.cpp, mode --apply).
++
++Canal : un pointeur latest.json (HTTPS) -> manifeste d'une version
++(empreinte verifiee) -> archives de composants (empreinte + taille verifiees,
++nommees par leur contenu, donc immuables). Seuls les composants dont
++l'identifiant change sont telecharges : un correctif du jeu ne retelecharge ni
++les cartes ni les modeles (les modeles ne font d'ailleurs partie d'aucun
++composant : ce sont des donnees du joueur).
++
++Protocole jeu (GET/POST /update), lignes cle=valeur ASCII :
++  state avail progress msg ver remote installed size channel restart
++avail : 0 rien, 1 disponible, 2 telechargement, 3 pret (redemarrer).
++Compatible avec les anciens clients (1.2) qui n'envoient pas d'action.
++"""
++
++from __future__ import annotations
++
++import hashlib
++import http.client
++import json
++import os
++import re
++import shutil
++import ssl
++import threading
++import time
++import urllib.error
++import urllib.request
++import zipfile
++from pathlib import Path, PurePosixPath
++from urllib.parse import urljoin, urlparse
++
++import sauerrt_paths as paths
++
++PRODUCT = "l4zy"
++PLATFORM = "windows-x64"
++FORMAT = 1
++PLAN_FORMAT = 1
++USER_AGENT = "l4zy-updater/1"
++MAX_POINTER = 64 * 1024
++MAX_MANIFEST = 32 * 1024 * 1024
++MAX_ARCHIVE = 3 * 1024 * 1024 * 1024
++CHECK_EVERY = 30 * 60
++DISK_MARGIN = 200 * 1024 * 1024
++
++# Ce qu'un composant a le droit d'ecrire dans l'installation. Tout le reste
++# (state/, userdata/, l4zy.ini, fichiers inconnus) est hors d'atteinte.
++ALLOWED_TOP_DIRS = {"bin64", "data", "packages", "runtime", "service", "docs"}
++ALLOWED_ROOT_FILES = {"L4ZY.exe", "autoexec.cfg", "traduction.cfg", "LISEZMOI.txt", "README.txt"}
++RESERVED = re.compile(r"^(con|prn|aux|nul|com[0-9]|lpt[0-9]|conin\$|conout\$)(\..*)?$", re.I)
++VERSION_RE = re.compile(r"^\d{1,6}(\.\d{1,6}){1,4}$")
++SHA_RE = re.compile(r"^[0-9a-f]{64}$")
++
++_lock = threading.RLock()
++_st = {
++    "state": "idle",      # idle checking uptodate available downloading ready error
++    "msg": "",
++    "progress": 0,
++    "remote": "",
++    "size": 0,
++    "checked": 0.0,
++    "restart": False,
++}
++_manifest = None
++_pointer = None
++_worker = None
++LOG_MAX = 512 * 1024
++UNCHANGED = "Your game is unchanged."
++
++
++class PortalError(RuntimeError):
++    """The network answered with a web page (hotel/school sign-in page)."""
++
++
++# --------------------------------------------------------------------------
++# journal (state/logs/updater.log, next to launcher.log)
++
++def log(text):
++    """One dated line per event; errors carry their technical detail."""
++    try:
++        path = state_dir() / "logs" / "updater.log"
++        path.parent.mkdir(parents=True, exist_ok=True)
++        if path.is_file() and path.stat().st_size > LOG_MAX:
++            os.replace(path, path.with_name("updater.old.log"))
++        line = time.strftime("%Y-%m-%d %H:%M:%S ") + str(text).replace("\r", " ").replace("\n", " | ")
++        with open(path, "a", encoding="utf-8") as fh:
++            fh.write(line + "\n")
++    except OSError:
++        pass
++
++
++def _detail(exc):
++    """Technical description for the journal (never shown in the game)."""
++    parts = [type(exc).__name__]
++    reason = getattr(exc, "reason", None)
++    if reason is not None:
++        parts.append(f"reason={type(reason).__name__}: {reason}")
++    code = getattr(exc, "code", None)
++    if code is not None:
++        parts.append(f"code={code}")
++    parts.append(str(exc)[:400])
++    return " ".join(parts)
++
++
++# --------------------------------------------------------------------------
++# chemins et etat installe
++
++def state_dir():
++    paths.ensure()
++    return paths.STATE
++
++
++def upd_dir():
++    return state_dir() / "update"
++
++
++def stage_dir():
++    return upd_dir() / "stage"
++
++
++def dl_dir():
++    return upd_dir() / "downloads"
++
++
++def read_json(path, default=None):
++    try:
++        return json.loads(Path(path).read_text(encoding="utf-8-sig"))
++    except (OSError, ValueError):
++        return default
++
++
++def write_atomic(path, text):
++    path = Path(path)
++    path.parent.mkdir(parents=True, exist_ok=True)
++    tmp = path.with_name(path.name + ".tmp")
++    with open(tmp, "w", encoding="utf-8", newline="\n") as fh:
++        fh.write(text)
++        fh.flush()
++        os.fsync(fh.fileno())
++    os.replace(tmp, path)
++
++
++def installed():
++    data = read_json(state_dir() / "installed.json", {}) or {}
++    if not isinstance(data, dict):
++        data = {}
++    return data
++
++
++def installed_version():
++    return str(installed().get("version") or "0")
++
++
++def product_info():
++    return read_json(paths.CODE / "product.json", {}) or {}
++
++
++def channel():
++    ini = paths.read_ini()
++    ch = ini.get("install", "channel", fallback="").strip()
++    return ch or str(installed().get("channel") or product_info().get("default_channel") or "stable")
++
++
++def channel_url():
++    env = (os.environ.get("L4ZY_UPDATE_URL") or "").strip()
++    if env:
++        return env
++    ini = paths.read_ini()
++    url = ini.get("install", "channel_url", fallback="").strip()
++    if url:
++        return url
++    return str((product_info().get("channels") or {}).get(channel()) or "")
++
++
++# --------------------------------------------------------------------------
++# versions, chemins, validation
++
++def parse_version(text):
++    text = str(text or "").strip()
++    if not VERSION_RE.match(text):
++        return None
++    return tuple(int(x) for x in text.split("."))
++
++
++def is_newer(remote, local):
++    a, b = parse_version(remote), parse_version(local) or (0,)
++    if a is None:
++        return False
++    n = max(len(a), len(b))
++    return a + (0,) * (n - len(a)) > b + (0,) * (n - len(b))
++
++
++def check_rel(rel):
++    """Chemin relatif d'un fichier distribue. Refuse tout ce qui sort du cadre."""
++    if not isinstance(rel, str) or not rel or len(rel) > 240:
++        raise ValueError(f"bad path {rel!r}")
++    if "\\" in rel or ":" in rel or rel.startswith("/") or "\x00" in rel:
++        raise ValueError(f"bad path {rel!r}")
++    parts = rel.split("/")
++    for part in parts:
++        if part in ("", ".", "..") or part != part.rstrip(" .") or RESERVED.match(part):
++            raise ValueError(f"bad path {rel!r}")
++        if any(ord(c) < 32 for c in part) or any(c in '<>"|?*' for c in part):
++            raise ValueError(f"bad path {rel!r}")
++    if len(parts) == 1:
++        if parts[0] not in ALLOWED_ROOT_FILES:
++            raise ValueError(f"file not allowed at install root: {rel}")
++    elif parts[0] not in ALLOWED_TOP_DIRS:
++        raise ValueError(f"folder not allowed: {rel}")
++    return rel
++
++
++def _is_reparse(path: Path):
++    try:
++        st = os.lstat(path)
++    except FileNotFoundError:
++        return False
++    attrs = getattr(st, "st_file_attributes", 0)
++    return bool(attrs & 0x400) or os.path.islink(path)
++
++
++def safe_target(root: Path, rel):
++    """ROOT/rel, en refusant les jonctions/liens sur le chemin (pas de sortie
++    du dossier d'installation par une jonction, meme preexistante)."""
++    check_rel(rel)
++    root = Path(root)
++    cur = root
++    for part in rel.split("/"):
++        cur = cur / part
++        if _is_reparse(cur):
++            raise ValueError(f"refusing to write through a junction or link: {rel}")
++    real_root = os.path.realpath(root)
++    real = os.path.realpath(cur)
++    if os.path.commonpath([real_root.lower(), real.lower()]) != real_root.lower():
++        raise ValueError(f"path leaves the install folder: {rel}")
++    return cur
++
++
++def validate_manifest(man, expect_version=None):
++    if not isinstance(man, dict):
++        raise ValueError("manifest is not an object")
++    if man.get("product") != PRODUCT:
++        raise ValueError("manifest is not for L4ZY")
++    if man.get("platform") != PLATFORM:
++        raise ValueError("manifest is not for Windows x64")
++    if int(man.get("format") or 0) != FORMAT:
++        raise ValueError("unsupported manifest format, reinstall from the website")
++    ver = str(man.get("version") or "")
++    if parse_version(ver) is None:
++        raise ValueError("manifest has a bad version")
++    if expect_version and ver != expect_version:
++        raise ValueError("manifest version does not match the channel")
++    comps = man.get("components")
++    if not isinstance(comps, dict) or not comps:
++        raise ValueError("manifest has no components")
++    seen = {}
++    for name, comp in comps.items():
++        if not re.match(r"^[a-z0-9][a-z0-9._-]{0,63}$", str(name)):
++            raise ValueError(f"bad component name {name!r}")
++        if not isinstance(comp, dict):
++            raise ValueError(f"bad component {name}")
++        if not SHA_RE.match(str(comp.get("id") or "")) or not SHA_RE.match(str(comp.get("archive_sha256") or "")):
++            raise ValueError(f"component {name} has no valid hash")
++        size = int(comp.get("archive_size") or 0)
++        if size <= 0 or size > MAX_ARCHIVE:
++            raise ValueError(f"component {name} has a bad size")
++        if not str(comp.get("url") or ""):
++            raise ValueError(f"component {name} has no url")
++        files = comp.get("files")
++        if not isinstance(files, dict) or not files:
++            raise ValueError(f"component {name} lists no files")
++        for rel, meta in files.items():
++            check_rel(rel)
++            if not (isinstance(meta, list) and len(meta) == 2 and int(meta[0]) >= 0 and SHA_RE.match(str(meta[1]))):
++                raise ValueError(f"bad file entry {rel}")
++            key = rel.lower()
++            if key in seen:
++                raise ValueError(f"file {rel} appears twice ({seen[key]}, {name})")
++            seen[key] = name
++    return man
++
++
++# --------------------------------------------------------------------------
++# reseau
++
++def _ssl_context():
++    return ssl.create_default_context()
++
++
++def _check_url(url):
++    p = urlparse(url)
++    if p.scheme == "https":
++        return
++    # Tests locaux uniquement : http vers cette machine, sur demande explicite.
++    if (p.scheme == "http" and p.hostname in ("127.0.0.1", "localhost")
++            and os.environ.get("L4ZY_TEST_ALLOW_LOCAL_HTTP") == "1"):
++        return
++    raise RuntimeError("update address must use https")
++
++
++def _is_html(resp, head=b""):
++    ctype = ""
++    if resp is not None:
++        try:
++            ctype = (resp.headers.get("Content-Type") or "").lower()
++        except AttributeError:
++            pass
++    start = head.lstrip()[:15].lower()
++    return "text/html" in ctype or start.startswith(b"<!doctype html") or start.startswith(b"<html")
++
++
++def _open(url, headers=None, timeout=30):
++    _check_url(url)
++    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, **(headers or {})})
++    resp = urllib.request.urlopen(req, timeout=timeout, context=_ssl_context()) \
++        if url.startswith("https") else urllib.request.urlopen(req, timeout=timeout)
++    final = resp.geturl()
++    try:
++        _check_url(final)  # une redirection ne doit pas quitter https
++    except RuntimeError:
++        resp.close()
++        # Typical of a hotel/school network sending every request to its sign-in page.
++        raise PortalError(f"redirected to a non-secure page: {final[:120]}")
++    if _is_html(resp):
++        resp.close()
++        raise PortalError(f"got a web page (text/html) instead of an update file from {url[:120]}")
++    return resp
++
++
++def fetch_small(url, limit):
++    with _open(url, timeout=20) as resp:
++        data = resp.read(limit + 1)
++    if len(data) > limit:
++        raise RuntimeError("update file too large")
++    if _is_html(None, data[:64]):
++        raise PortalError(f"got a web page instead of an update file from {url[:120]}")
++    return data
++
++
++def _friendly(exc):
++    """Short English sentence for the Updates menu (ASCII, one line)."""
++    text = str(exc)
++    if isinstance(exc, PortalError):
++        return "The network showed a web page instead of the update (hotel/school wifi sign-in page?)."
++    if isinstance(exc, urllib.error.HTTPError):
++        return f"The update server answered with an error (HTTP {exc.code}). Try again later."
++    reason = getattr(exc, "reason", None)
++    if isinstance(exc, ssl.SSLError) or isinstance(reason, ssl.SSLError) or "CERTIFICATE" in text.upper():
++        return ("Secure connection to the update server failed (a hotel/school network or an antivirus "
++                "may be intercepting it).")
++    if isinstance(exc, (urllib.error.URLError, TimeoutError, ConnectionError)) or "timed out" in text:
++        return "Could not reach the update server (no internet, or a hotel/school network blocks it)."
++    if isinstance(exc, ValueError) and "JSON" in type(exc).__name__ + text:
++        return "The update server sent something unreadable (hotel/school network?)."
++    if "not enough disk space" in text:
++        return "Not enough disk space for the update (" + text.split(": ", 1)[-1][:60] + "). Free some space and try again."
++    if "hash mismatch" in text or "corrupted" in text or "failed verification" in text:
++        return "A downloaded file was damaged (checksum mismatch) and was deleted. Try again."
++    if "incomplete" in text:
++        return "The download was interrupted. Click again to resume where it stopped."
++    return "Update failed: " + text[:120] + "."
++
++
++def _fail(what, exc, **kw):
++    msg = f"{_friendly(exc)} {UNCHANGED}"
++    log(f"ERROR {what}: {_detail(exc)}")
++    log(f"  shown: {msg}")
++    _set(state="error", msg=msg, **kw)
++
++
++# --------------------------------------------------------------------------
++# etat affiche
++
++def _set(**kw):
++    with _lock:
++        _st.update(kw)
++
++
++def _ascii(text, limit=220):
++    out = "".join(c for c in str(text or "") if 32 <= ord(c) < 127)
++    return out[:limit].strip()
++
++
++def human_size(n):
++    n = float(n or 0)
++    for unit in ("B", "KB", "MB", "GB"):
++        if n < 1024 or unit == "GB":
++            return f"{n:.0f} {unit}" if unit in ("B", "KB") else f"{n:.1f} {unit}"
++        n /= 1024.0
++    return f"{n:.1f} GB"
++
++
++# --------------------------------------------------------------------------
++# recherche
++
++def _changed_components(man):
++    inst = installed().get("components") or {}
++    out = []
++    for name, comp in man["components"].items():
++        cur = inst.get(name) or {}
++        if cur.get("id") != comp["id"]:
++            out.append(name)
++    return out
++
++
++def check(force=False):
++    """Interroge le canal. Ne telecharge que le pointeur et le manifeste."""
++    global _manifest, _pointer
++    with _lock:
++        if _st["state"] in ("downloading", "ready", "checking"):
++            return
++        if not force and _st["checked"] and time.time() - _st["checked"] < CHECK_EVERY:
++            return
++        _st.update(state="checking", msg="checking for updates...", progress=0)
++    url = channel_url()
++    local = installed_version()
++    log(f"check: installed {local}, channel {url or '(none)'}")
++    if not url:
++        # Copie de travail (atelier) : pas de canal, rien a chercher.
++        _set(state="uptodate", remote="", size=0, checked=time.time(),
++             msg="workshop copy: no update channel (versions are published from here)")
++        return
++    try:
++        pointer = json.loads(fetch_small(url, MAX_POINTER).decode("utf-8-sig"))
++        if not isinstance(pointer, dict) or pointer.get("product") != PRODUCT or pointer.get("platform") != PLATFORM:
++            raise RuntimeError("the channel is not a L4ZY channel")
++        remote = str(pointer.get("version") or "")
++        if parse_version(remote) is None:
++            raise RuntimeError("the channel has a bad version")
++        if not is_newer(remote, local):
++            _manifest = None
++            _set(state="uptodate", remote=remote, size=0, checked=time.time(),
++                 msg=f"L4ZY {local} is up to date (checked {time.strftime('%H:%M')})")
++            log(f"check: up to date (channel has {remote})")
++            return
++        murl = urljoin(url, str(pointer.get("manifest") or ""))
++        msha = str(pointer.get("manifest_sha256") or "").lower()
++        if not SHA_RE.match(msha):
++            raise RuntimeError("the channel has no manifest hash")
++        raw = fetch_small(murl, MAX_MANIFEST)
++        if hashlib.sha256(raw).hexdigest() != msha:
++            raise RuntimeError("manifest hash mismatch")
++        man = validate_manifest(json.loads(raw.decode("utf-8-sig")), expect_version=remote)
++        man["_url"] = murl
++        man["_raw_sha"] = msha
++        _manifest, _pointer = man, pointer
++        changed = _changed_components(man)
++        size = sum(int(man["components"][n]["archive_size"]) for n in changed)
++        notes = _ascii(man.get("notes") or "", 120)
++        msg = f"L4ZY {remote} is available ({human_size(size)} to download)"
++        if notes:
++            msg += f" - {notes}"
++        _set(state="available", remote=remote, size=size, checked=time.time(), msg=msg)
++        log(f"check: {remote} available, {len(changed)} components changed ({', '.join(changed)}), {human_size(size)}")
++        # Intention deja donnee (telechargement interrompu par une fermeture) :
++        # on reprend tout seul.
++        if (stage_dir() / "APPLY").is_file() and not (stage_dir() / "READY").is_file():
++            log("check: a download was interrupted earlier, resuming it")
++            start_download(restart=_read_apply().get("restart", False))
++    except Exception as exc:  # noqa: BLE001
++        _fail("check failed", exc, checked=time.time())
++
++
++# --------------------------------------------------------------------------
++# telechargement et preparation
++
++def _download_archive(url, dest: Path, size, sha, progress):
++    """Reprise (.part + Range), puis controle taille + SHA-256."""
++    dest.parent.mkdir(parents=True, exist_ok=True)
++    if dest.is_file():
++        if dest.stat().st_size == size and _sha256(dest) == sha:
++            progress(size)
++            return
++        dest.unlink()
++    part = dest.with_name(dest.name + ".part")
++    have = part.stat().st_size if part.is_file() else 0
++    if have > size:
++        part.unlink()
++        have = 0
++    headers = {"Range": f"bytes={have}-"} if have else {}
++    try:
++        resp = _open(url, headers=headers, timeout=60)
++    except urllib.error.HTTPError as exc:
++        if have and exc.code == 416:
++            part.unlink(missing_ok=True)
++            have = 0
++            resp = _open(url, timeout=60)
++        else:
++            raise
++    with resp:
++        status = getattr(resp, "status", 200)
++        if have:
++            log(f"download: resuming {dest.name} at {have} bytes (server status {status})")
++        if have and status != 206:
++            have = 0  # le serveur ignore Range : on repart de zero
++        mode = "ab" if have else "wb"
++        written = have
++        progress(written)
++        with open(part, mode) as fh:
++            while True:
++                try:
++                    chunk = resp.read(1024 * 1024)
++                except (OSError, http.client.HTTPException) as exc:
++                    # Connection lost mid-file: what arrived stays in .part
++                    # and the next attempt resumes from there.
++                    fh.flush()
++                    raise RuntimeError(f"download incomplete (network interrupted?): {type(exc).__name__} "
++                                       f"after {written} of {size} bytes") from exc
++                if not chunk:
++                    break
++                written += len(chunk)
++                if written > size:
++                    raise RuntimeError("download larger than announced")
++                fh.write(chunk)
++                progress(written)
++    if part.stat().st_size != size:
++        raise RuntimeError(f"download incomplete (network interrupted?): {part.stat().st_size} of {size} bytes")
++    if _sha256(part) != sha:
++        part.unlink(missing_ok=True)
++        raise RuntimeError(f"downloaded file is corrupted (hash mismatch), deleted: {dest.name}")
++    os.replace(part, dest)
++
++
++def _sha256(path):
++    h = hashlib.sha256()
++    with open(path, "rb") as fh:
++        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
++            h.update(chunk)
++    return h.hexdigest()
++
++
++def _extract_component(zpath: Path, comp, files_dir: Path):
++    expected = {rel: (int(m[0]), m[1]) for rel, m in comp["files"].items()}
++    got = set()
++    with zipfile.ZipFile(zpath) as zf:
++        for info in zf.infolist():
++            if info.is_dir():
++                continue
++            rel = info.filename
++            if rel not in expected:
++                raise RuntimeError(f"archive contains an unexpected file: {_ascii(rel, 80)}")
++            if rel in got:
++                raise RuntimeError(f"archive repeats {rel}")
++            size, sha = expected[rel]
++            if info.file_size != size:
++                raise RuntimeError(f"archive size mismatch for {rel}")
++            target = files_dir / rel
++            target.parent.mkdir(parents=True, exist_ok=True)
++            h = hashlib.sha256()
++            n = 0
++            with zf.open(info) as src, open(target, "wb") as out:
++                while True:
++                    chunk = src.read(1024 * 1024)
++                    if not chunk:
++                        break
++                    n += len(chunk)
++                    if n > size:
++                        raise RuntimeError(f"archive entry too large: {rel}")
++                    h.update(chunk)
++                    out.write(chunk)
++            if n != size or h.hexdigest() != sha:
++                raise RuntimeError(f"file {rel} failed verification")
++            got.add(rel)
++    missing = set(expected) - got
++    if missing:
++        raise RuntimeError(f"archive is incomplete ({len(missing)} files missing)")
++
++
++def _read_apply():
++    out = {}
++    try:
++        for line in (stage_dir() / "APPLY").read_text(encoding="utf-8").splitlines():
++            k, _, v = line.partition("=")
++            out[k.strip()] = v.strip()
++    except OSError:
++        pass
++    out["restart"] = out.get("restart") == "1"
++    return out
++
++
++def _write_apply(restart):
++    stage_dir().mkdir(parents=True, exist_ok=True)
++    write_atomic(stage_dir() / "APPLY", f"restart={'1' if restart else '0'}\nrequested={int(time.time())}\n")
++
++
++def _game_env_port(man):
++    return "1" if (man.get("features") or {}).get("service_port_env") else "0"
++
++
++def _prepare(man, restart):
++    root = paths.ROOT
++    stage = stage_dir()
++    version = man["version"]
++    changed = _changed_components(man)
++    comps = man["components"]
++    inst = installed()
++    inst_comps = inst.get("components") or {}
++
++    # Nouveau depart propre si un ancien staging traine pour une autre version.
++    # Also when it was prepared from another installed version.
++    old_ready = (stage / "READY")
++    if old_ready.is_file() and (old_ready.read_text(encoding="utf-8").strip() != version
++                                or _plan_from(stage) != installed_version()):
++        log("prepare: discarding an old staged update")
++        shutil.rmtree(stage, ignore_errors=True)
++    apply_intent = (stage / "APPLY").is_file()
++    shutil.rmtree(stage / "files", ignore_errors=True)
++    (stage / "READY").unlink(missing_ok=True)
++    stage.mkdir(parents=True, exist_ok=True)
++    if apply_intent or restart is not None:
++        _write_apply(bool(restart))
++
++    total = sum(int(comps[n]["archive_size"]) for n in changed)
++    unpacked = sum(int(m[0]) for n in changed for m in comps[n]["files"].values())
++    free = shutil.disk_usage(state_dir()).free
++    if os.environ.get("L4ZY_TEST_FREE_BYTES", "").isdigit() and os.environ.get("L4ZY_TEST_ALLOW_LOCAL_HTTP") == "1":
++        free = int(os.environ["L4ZY_TEST_FREE_BYTES"])  # local tests only, like local http
++    log(f"prepare: {version} from {installed_version()}, download {human_size(total)}, free {human_size(free)}")
++    if free < total + unpacked + DISK_MARGIN:
++        raise RuntimeError(f"not enough disk space: need {human_size(total + unpacked + DISK_MARGIN)}, "
++                           f"{human_size(free)} free")
++
++    # Cibles sures avant d'ecrire quoi que ce soit.
++    for n in changed:
++        for rel in comps[n]["files"]:
++            safe_target(root, rel)
++
++    done = [0]
++    base_done = 0
++
++    for n in changed:
++        comp = comps[n]
++        size = int(comp["archive_size"])
++        zpath = dl_dir() / f"{comp['archive_sha256']}.zip"
++
++        def prog(w, base=base_done):
++            pct = int(90.0 * (base + w) / total) if total else 90
++            _set(progress=max(1, min(90, pct)),
++                 msg=f"downloading {human_size(base + w)} / {human_size(total)}")
++
++        _download_archive(urljoin(man["_url"], comp["url"]), zpath, size, comp["archive_sha256"], prog)
++        base_done += size
++
++    _set(progress=92, msg="verifying files...")
++    files_dir = stage / "files"
++    for n in changed:
++        comp = comps[n]
++        _extract_component(dl_dir() / f"{comp['archive_sha256']}.zip", comp, files_dir)
++
++    # Plan : fichiers des composants changes, suppression de ceux qui
++    # disparaissent. Les composants inchanges ne sont pas touches.
++    inst_files = {}
++    for cur in inst_comps.values():
++        inst_files.update(cur.get("files") or {})
++    new_files = {}
++    for n in changed:
++        for rel, meta in comps[n]["files"].items():
++            old = inst_files.get(rel)
++            tgt = root / rel
++            # Fichier identique deja en place : on ne le reecrit pas.
++            if old and list(old) == list(meta) and tgt.is_file() and tgt.stat().st_size == int(meta[0]):
++                continue
++            new_files[rel] = meta
++    all_new = {rel.lower() for c in comps.values() for rel in c["files"]}
++    dels = []
++    for n, cur in inst_comps.items():
++        if n in comps and n not in changed:
++            continue
++        for rel in (cur.get("files") or {}):
++            if rel.lower() not in all_new:
++                try:
++                    safe_target(root, rel)
++                except ValueError:
++                    continue
++                dels.append(rel)
++
++    lines = [f"l4zy-plan {PLAN_FORMAT}", f"version {version}", f"from {installed_version()}"]
++    # Le lanceur est remplace en dernier : si l'application s'arrete avant,
++    # l'ancien lanceur (qui sait reprendre) est encore en place.
++    order = sorted(new_files, key=lambda r: (r == "L4ZY.exe", r))
++    for rel in order:
++        size, sha = new_files[rel]
++        lines.append(f"PUT\t{rel}\t{int(size)}\t{sha}")
++    for rel in sorted(dels):
++        lines.append(f"DEL\t{rel}")
++    lines.append("END")
++
++    new_inst = {
++        "format": FORMAT,
++        "product": PRODUCT,
++        "platform": PLATFORM,
++        "version": version,
++        "channel": man.get("channel") or channel(),
++        "label": man.get("label") or "",
++        "manifest_sha256": man.get("_raw_sha"),
++        "installed_from": "update",
++        "components": {n: {"id": c["id"], "files": c["files"]} for n, c in comps.items()},
++    }
++    write_atomic(stage / "installed.json.new", json.dumps(new_inst, indent=1, sort_keys=True))
++    write_atomic(stage / "installed.ini.new",
++                 f"version={version}\nchannel={new_inst['channel']}\nservice_port_env={_game_env_port(man)}\n")
++    write_atomic(stage / "manifest.json", json.dumps({k: v for k, v in man.items() if not k.startswith("_")}, sort_keys=True))
++    write_atomic(stage / "plan.txt", "\n".join(lines) + "\n")
++    write_atomic(stage / "READY", version + "\n")
++
++
++def _download_worker(man, restart):
++    global _worker
++    try:
++        _prepare(man, restart)
++        _set(state="ready", progress=100, restart=_read_apply().get("restart", False),
++             msg=f"L4ZY {man['version']} is ready: restart the game to install it")
++        log(f"prepare: {man['version']} ready to install")
++    except Exception as exc:  # noqa: BLE001
++        _fail("download failed", exc, progress=0)
++    finally:
++        with _lock:
++            _worker = None
++
++
++def start_download(restart=True):
++    global _worker
++    with _lock:
++        if _st["state"] == "ready":
++            if restart:
++                _write_apply(True)
++                _st["restart"] = True
++            return
++        if _worker is not None:
++            return
++        man = _manifest
++        if man is None or _st["state"] not in ("available", "error"):
++            raise RuntimeError("no update waiting")
++        if not is_newer(man["version"], installed_version()):
++            raise RuntimeError("no update waiting")
++        _st.update(state="downloading", progress=1, msg="starting download...")
++        log(f"download: starting {man['version']} (restart={'1' if restart else '0'})")
++        _worker = threading.Thread(target=_download_worker, args=(man, restart), daemon=True)
++        _worker.start()
++
++
++def request_restart():
++    """Le joueur a clique "redemarrer" : le lanceur appliquera a la fermeture."""
++    with _lock:
++        if _st["state"] != "ready":
++            raise RuntimeError("update is not ready yet")
++        _write_apply(True)
++        _st["restart"] = True
++        _st["msg"] = "closing the game to install the update..."
++        log("restart requested: the launcher installs the update when the game closes")
++
++
++# --------------------------------------------------------------------------
++# demarrage : reprendre ce qui existe sur le disque
++
++def _last_result():
++    path = upd_dir() / "last-result.txt"
++    if not path.is_file():
++        return None
++    data = {}
++    try:
++        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
++            k, _, v = line.partition("=")
++            data[k.strip()] = v.strip()
++    except OSError:
++        return None
++    try:
++        path.replace(path.with_name("last-result.seen.txt"))
++    except OSError:
++        pass
++    return data
++
++
++def _plan_from(stage):
++    """Version a staged plan was prepared from ("" if unknown)."""
++    try:
++        for line in (Path(stage) / "plan.txt").read_text(encoding="utf-8").splitlines():
++            if line.startswith("from "):
++                return line[5:].strip()
++    except OSError:
++        pass
++    return ""
++
++
++def startup():
++    local = installed_version()
++    res = _last_result()
++    stage = stage_dir()
++    ready = (stage / "READY")
++    log(f"service start: installed {local}")
++    if ready.is_file():
++        ver = ready.read_text(encoding="utf-8").strip()
++        src = _plan_from(stage)
++        if is_newer(ver, local) and src == local:
++            _set(state="ready", remote=ver, progress=100, restart=_read_apply().get("restart", False),
++                 msg=f"L4ZY {ver} is ready: restart the game to install it")
++            log(f"startup: {ver} is staged and ready")
++        else:
++            # Prepared for another installed version (go back to the previous
++            # version, reinstall): never applied, downloaded again if needed.
++            log(f"startup: staged update {ver} (prepared from {src or '?'}) does not fit installed {local}, discarded")
++            shutil.rmtree(stage, ignore_errors=True)
++    elif (stage / "APPLY").is_file():
++        log("startup: an earlier download was interrupted; it resumes after the next check")
++    if res:
++        if res.get("ok") == "1":
++            _set(msg=f"updated to L4ZY {res.get('version', local)}")
++            log(f"startup: last update installed ({res.get('version', local)})")
++            shutil.rmtree(dl_dir(), ignore_errors=True)
++        elif "rolled back" in res.get("message", ""):
++            log(f"startup: went back to the previous version ({local})")
++            _set(msg=f"Back to the previous version (L4ZY {local}).")
++        else:
++            log(f"startup: last update result: {res.get('message', '?')}")
++            _set(state="error" if _st["state"] != "ready" else "ready",
++                 msg=_ascii(f"The last update could not be installed ({res.get('message', '?')}). "
++                            f"Your previous version was kept.", 220))
++    threading.Thread(target=check, daemon=True).start()
++
++
++# --------------------------------------------------------------------------
++# reponses au jeu
++
++def snapshot():
++    with _lock:
++        st = dict(_st)
++    state = st["state"]
++    avail = {"available": 1, "downloading": 2, "ready": 3}.get(state, 0)
++    if state == "error" and _manifest is not None and _worker is None:
++        avail = 1  # on peut reessayer
++    lines = [
++        "ok=1",
++        "proto=2",
++        f"state={state}",
++        f"avail={avail}",
++        f"installed={installed_version()}",
++        f"local={installed_version()}",
++        f"channel={_ascii(channel(), 16)}",
++        f"remote={st['remote']}",
++        f"ver={st['remote']}",
++        f"size={human_size(st['size']) if st['size'] else ''}",
++        f"progress={st['progress']}",
++        f"restart={'1' if st['restart'] else '0'}",
++        f"msg={_ascii(st['msg'])}",
++    ]
++    return "\n".join(lines) + "\n"
++
++
++def handle_get(params):
++    check(force=False)
++    return snapshot()
++
++
++def handle_post(params):
++    action = (params.get("action", [""])[0] or "").strip().lower()
++    if action == "check":
++        with _lock:
++            busy = _st["state"] in ("downloading", "ready")
++        if not busy:
++            check(force=True)
++        return snapshot()
++    if action == "restart":
++        request_restart()
++        return snapshot()
++    if action in ("download", ""):
++        # Ancien client (sans action) : son menu dit "Quit to Finish Update",
++        # donc le clic vaut telechargement + installation au prochain quit.
++        check(force=False)
++        start_download(restart=True)
++        return snapshot()
++    raise ValueError("unknown update action")
+diff --git a/src/engine/main.cpp b/src/engine/main.cpp
+index 7bb352c5d880d35330199501a09c20fda0158bc5..1aa0e0fcc8a5a97940f5b932031852d9c2eb99c1 100644
+--- a/src/engine/main.cpp
++++ b/src/engine/main.cpp
+@@ -1800,6 +1800,160 @@ int getclockmillis()
+ 
+ VAR(numcpus, 1, 1, 16);
+ 
++// One-time settings migrations, in the spirit of p1xbraten: every persistent
++// setting is saved in config.cfg, so a changed default never reaches players
++// who already have the old value saved. l4zymigration (saved too) is the last
++// step applied; each step runs once, right after config.cfg is read and
++// before autoexec.cfg, and never again, so a choice made later is kept.
++// A fresh profile only records the latest step.
++enum { L4ZY_MIGRATION_LATEST = 4 };
++VARP(l4zymigration, 0, 0, 1000);
++
++static void applyl4zymigrations()
++{
++    if(l4zymigration < 1)
++    {
++        // 1: display output Automatic -> SDR (frozen/black screen at startup
++        // suspected with Automatic, under investigation). 0 and 1 untouched.
++        extern int hdroutpref;
++        if(hdroutpref == -1)
++        {
++            hdroutpref = 0;
++            logoutf("l4zymigration 1: hdroutpref -1 (Automatic) -> 0 (SDR)");
++        }
++    }
++    if(l4zymigration < 2)
++    {
++        // 2: RT sky rays 4 -> 1 (old default -> new default; 2 and 3 were
++        // chosen by the player and are kept; the Sauer filter still traces at
++        // least 4, see hwrtskyrayseffective), and DLAA/DLSS mip bias 1 -> 0
++        // (hwrtdlssmipbias is not saved, so this only catches a config.cfg
++        // line written by hand).
++        extern int hwrtskyrays, hwrtdlssmipbias;
++        if(hwrtskyrays == 4)
++        {
++            hwrtskyrays = 1;
++            logoutf("l4zymigration 2: hwrtskyrays 4 -> 1");
++        }
++        if(hwrtdlssmipbias == 1)
++        {
++            hwrtdlssmipbias = 0;
++            logoutf("l4zymigration 2: hwrtdlssmipbias 1 -> 0");
++        }
++    }
++    if(l4zymigration < 3)
++    {
++        // 3: Temporal AA left the menu: it moved the picture by a fraction of a
++        // pixel every frame, even in pause, and FXAA was not drawn while it
++        // was on. Players who had it on go back to the default once; looktaa
++        // stays a console setting.
++        extern int looktaa;
++        if(looktaa)
++        {
++            looktaa = 0;
++            logoutf("l4zymigration 3: looktaa 1 -> 0");
++        }
++    }
++    if(l4zymigration < 4)
++    {
++        // 4: display output Automatic left the menu (it followed the Windows
++        // HDR state read at start-up, which could differ from one start to
++        // the next). Players who chose it again after step 1 go to SDR once
++        // and are told how to get native HDR back. 0 and 1 untouched.
++        extern int hdroutpref;
++        if(hdroutpref == -1)
++        {
++            hdroutpref = 0;
++            logoutf("l4zymigration 4: hdroutpref -1 (Automatic) -> 0 (SDR)");
++            conoutf("Display output: Automatic was removed, the game now uses SDR. For HDR, choose Native HDR in Options > Graphics.");
++        }
++    }
++    if(l4zymigration < L4ZY_MIGRATION_LATEST) l4zymigration = L4ZY_MIGRATION_LATEST;
++}
++
++// Import settings from another client (Options > Import settings...).
++// L4ZY.exe lists the other clients it finds in l4zy-import-sources.txt (in
++// the profile folder) at each start. The game never copies settings itself:
++// it leaves l4zy-import-request.txt, and L4ZY.exe carries it out before the
++// game starts again, so a running game never rewrites the imported config.cfg.
++struct importsource { string name, label, folder; };
++static vector<importsource> importsources;
++static string importlast = "";
++
++static void importsrcrefresh()
++{
++    importsources.setsize(0);
++    importlast[0] = 0;
++    char *buf = loadfile("l4zy-import-sources.txt", NULL);
++    if(buf)
++    {
++        // source <TAB> name <TAB> date of its config.cfg <TAB> folder
++        for(char *line = buf; line && *line; )
++        {
++            char *next = strpbrk(line, "\r\n");
++            if(next) { *next++ = 0; while(*next == '\r' || *next == '\n') next++; }
++            char *f[4] = { line, NULL, NULL, NULL };
++            loopi(3) { if(!f[i]) break; char *t = strchr(f[i], '\t'); if(t) { *t = 0; f[i+1] = t + 1; } }
++            if(!strcmp(f[0], "source") && f[1] && f[2] && f[3] && f[1][0] && importsources.length() < 16)
++            {
++                importsource &s = importsources.add();
++                copystring(s.name, f[1]);
++                formatstring(s.label, "%s   (config.cfg %s)", f[1], f[2]);
++                copystring(s.folder, f[3]);
++            }
++            line = next;
++        }
++        delete[] buf;
++    }
++    buf = loadfile("l4zy-import.txt", NULL);
++    if(buf)
++    {
++        char *end = strpbrk(buf, "\r\n");
++        if(end) *end = 0;
++        copystring(importlast, buf);
++        delete[] buf;
++    }
++}
++COMMAND(importsrcrefresh, "");
++ICOMMAND(importsrccount, "", (), intret(importsources.length()));
++ICOMMAND(importsrclabel, "i", (int *i), result(importsources.inrange(*i) ? importsources[*i].label : ""));
++ICOMMAND(importsrcfolder, "i", (int *i), result(importsources.inrange(*i) ? importsources[*i].folder : ""));
++ICOMMAND(importlastresult, "", (), result(importlast));
++// Started by L4ZY.exe (it passes the service port): it can restart the game.
++static bool importrestartable() { const char *p = getenv("L4ZY_SERVICE_PORT"); return p && p[0]; }
++ICOMMAND(importrestartable, "", (), intret(importrestartable() ? 1 : 0));
++ICOMMAND(importsettingsmenu, "", (), showgui("importsettings"));
++
++// which: index in the list, or -1 for the folder typed by the player.
++static void importsettingsfrom(int *which, char *folder)
++{
++    string line;
++    if(importsources.inrange(*which)) formatstring(line, "name=%s", importsources[*which].name);
++    else if(*which == -1)
++    {
++        char *dir = folder;
++        while(*dir == ' ' || *dir == '"') dir++;
++        string clean;
++        copystring(clean, dir);
++        for(int n = (int)strlen(clean); n > 0 && (clean[n-1] == ' ' || clean[n-1] == '"'); n--) clean[n-1] = 0;
++        if(!clean[0]) { conoutf(CON_ERROR, "import: type the folder that holds the other client's config.cfg"); return; }
++        formatstring(line, "folder=%s", clean);
++    }
++    else { conoutf(CON_ERROR, "import: pick a client first"); return; }
++    stream *f = openutf8file("l4zy-import-request.txt", "w");
++    if(!f) { conoutf(CON_ERROR, "import: could not write the request in the profile folder"); return; }
++    f->printf("l4zy-import-request 1\n%s\nend\n", line);
++    delete f;
++    logoutf("import: request written (%s)", line);
++    if(importrestartable())
++    {
++        conoutf("\f0Importing settings: the game restarts now");
++        quit();
++    }
++    else conoutf("\f0Settings will be imported the next time you start L4ZY.exe");
++}
++COMMAND(importsettingsfrom, "is");
++
+ int main(int argc, char **argv)
+ {
+     #ifdef WIN32
+@@ -1973,6 +2127,7 @@ int main(int argc, char **argv)
+         execfile(game::defaultconfig());
+         writecfg(game::restoreconfig());
+     }
++    applyl4zymigrations();
+     execfile(game::autoexec(), false);
+ 
+     identflags &= ~IDF_PERSIST;

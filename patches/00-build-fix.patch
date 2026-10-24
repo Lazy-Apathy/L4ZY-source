@@ -1,0 +1,121 @@
+L4ZY 2026.10.16.1: Build fix for current MinGW-w64
+
+Apply on the Cube 2: Sauerbraten 2020 Edition source (2020_11_29).
+From the root of the source tree: git apply 00-build-fix.patch
+Notes: 00-build-fix.md
+
+diff --git a/src/Makefile b/src/Makefile
+index 45db46d38184c4caff32bbf24dec72b0cc4f6cb9..a4816d83673a102c619a2923c118db154d6eb05d 100644
+--- a/src/Makefile
++++ b/src/Makefile
+@@ -29,6 +29,7 @@ WINLIB=lib64
+ WINBIN=../bin64
+ override CXX+= -m64
+ override WINDRES+= -F pe-x86-64
++override CXXFLAGS+= -DWIN32 -std=gnu++14 -fpermissive
+ else
+ ifneq (,$(findstring CROSS,$(PLATFORM)))
+   CXX=i686-w64-mingw32-g++
+@@ -44,7 +45,7 @@ override WINDRES+= -F pe-i386
+ endif
+ CLIENT_INCLUDES= $(INCLUDES) -Iinclude
+ STD_LIBS= -static-libgcc -static-libstdc++
+-CLIENT_LIBS= -mwindows $(STD_LIBS) -L$(WINBIN) -L$(WINLIB) -lSDL2 -lSDL2_image -lSDL2_mixer -lzlib1 -lopengl32 -lenet -lws2_32 -lwinmm
++CLIENT_LIBS= -mwindows $(STD_LIBS) -Lenet -L$(WINBIN) -lSDL2 -lSDL2_image -lSDL2_mixer -lzlib1 -lopengl32 -lenet -lws2_32 -lwinmm -luser32 -lgdi32 -lshell32 -lole32 -loleaut32 -luuid -lmfplat -lmfreadwrite -lmfuuid -ld3d11 -ldxgi
+ else
+ ifneq (,$(findstring DARWIN,$(PLATFORM)))
+ ifneq (,$(findstring CROSS,$(PLATFORM)))
+@@ -180,6 +181,7 @@ $(filter-out shared/%,$(CLIENT_PCH)): $(filter shared/%,$(CLIENT_PCH))
+ 	$(CXX) $(CXXFLAGS) -c -o $@ $<
+ 
+ $(CLIENT_OBJS): CXXFLAGS += $(CLIENT_INCLUDES)
++$(CLIENT_PCH): CXXFLAGS += $(CLIENT_INCLUDES)
+ $(filter shared/%,$(CLIENT_OBJS)): $(filter shared/%,$(CLIENT_PCH))
+ $(filter engine/%,$(CLIENT_OBJS)): $(filter engine/%,$(CLIENT_PCH))
+ $(filter fpsgame/%,$(CLIENT_OBJS)): $(filter fpsgame/%,$(CLIENT_PCH))
+diff --git a/src/build-client.bat b/src/build-client.bat
+new file mode 100644
+index 0000000000000000000000000000000000000000..29fa1809014dc107056c098c888f86f7575e09fb
+--- /dev/null
++++ b/src/build-client.bat
+@@ -0,0 +1,25 @@
++@echo off
++rem Rebuild the daily Sauer-RT client (x64). Requires w64devkit.
++rem Output: ..\bin64\sauerbraten.exe
++rem Uses the public NGX Vulkan gateway (dlaa-ngx.o / HWRT_NGX_GATEWAY).
++rem Does not rebuild bin64\ngx-sr or bin64\nrd DLLs.
++setlocal
++set "PATH=%LOCALAPPDATA%\w64devkit\w64devkit\bin;%PATH%"
++cd /d "%~dp0"
++where g++ >nul 2>&1
++if errorlevel 1 (
++    echo g++ introuvable. Installe w64devkit dans %%LOCALAPPDATA%%\w64devkit
++    exit /b 1
++)
++if not exist "enet\libenet.a" (
++    echo Building enet...
++    pushd enet
++    gcc -O3 -Iinclude -c callbacks.c compress.c host.c list.c packet.c peer.c protocol.c unix.c win32.c
++    ar rcs libenet.a callbacks.o compress.o host.o list.o packet.o peer.o protocol.o unix.o win32.o
++    popd
++)
++make -j8 PLATFORM=MINGW64 client
++if errorlevel 1 exit /b 1
++strip ..\bin64\sauerbraten.exe
++echo OK: ..\bin64\sauerbraten.exe
++endlocal
+diff --git a/src/shared/cube.h b/src/shared/cube.h
+index f3dcb274323a1ed6e0c009f5544ec59e5ab98fbc..b4196ada511e5579e4452897263cb0c4441196ae 100644
+--- a/src/shared/cube.h
++++ b/src/shared/cube.h
+@@ -22,7 +22,7 @@
+   #ifdef _WIN32_WINNT
+   #undef _WIN32_WINNT
+   #endif
+-  #define _WIN32_WINNT 0x0500
++  #define _WIN32_WINNT 0x0601
+   #include "windows.h"
+   #ifndef _WINDOWS
+     #define _WINDOWS
+diff --git a/src/shared/tools.h b/src/shared/tools.h
+index e75b51f701cbe9745bf93fe558dc39a924924348..12393a0a913e5d67f7a48ac022f2db82b782fa75 100644
+--- a/src/shared/tools.h
++++ b/src/shared/tools.h
+@@ -36,10 +36,12 @@ typedef unsigned long long int ullong;
+ 
+ void *operator new(size_t, bool);
+ void *operator new[](size_t, bool);
++#if !defined(_NEW) && !defined(_GLIBCXX_NEW) && !defined(_LIBCPP_NEW)
+ inline void *operator new(size_t, void *p) { return p; }
+ inline void *operator new[](size_t, void *p) { return p; }
+ inline void operator delete(void *, void *) {}
+ inline void operator delete[](void *, void *) {}
++#endif
+ 
+ #ifdef swap
+ #undef swap
+diff --git a/src/vcpp/sauerbraten.vcxproj b/src/vcpp/sauerbraten.vcxproj
+index c74c80b9360fd2184da107e93f6e19f9e8209a95..41b620c113a15c5bea678ab5aaa093870df65f2e 100644
+--- a/src/vcpp/sauerbraten.vcxproj
++++ b/src/vcpp/sauerbraten.vcxproj
+@@ -1050,6 +1050,20 @@
+       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)%(Filename)1.obj</ObjectFileName>
+       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)%(Filename)1.obj</ObjectFileName>
+     </ClCompile>
++    <ClCompile Include="..\fpsgame\translate.cpp">
++      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">game.h</PrecompiledHeaderFile>
++      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">game.h</PrecompiledHeaderFile>
++      <PrecompiledHeaderOutputFile Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)game.pch</PrecompiledHeaderOutputFile>
++      <PrecompiledHeaderOutputFile Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)game.pch</PrecompiledHeaderOutputFile>
++      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Profile|Win32'">game.h</PrecompiledHeaderFile>
++      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Profile|x64'">game.h</PrecompiledHeaderFile>
++      <PrecompiledHeaderOutputFile Condition="'$(Configuration)|$(Platform)'=='Profile|Win32'">$(IntDir)game.pch</PrecompiledHeaderOutputFile>
++      <PrecompiledHeaderOutputFile Condition="'$(Configuration)|$(Platform)'=='Profile|x64'">$(IntDir)game.pch</PrecompiledHeaderOutputFile>
++      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">game.h</PrecompiledHeaderFile>
++      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Release|x64'">game.h</PrecompiledHeaderFile>
++      <PrecompiledHeaderOutputFile Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)game.pch</PrecompiledHeaderOutputFile>
++      <PrecompiledHeaderOutputFile Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)game.pch</PrecompiledHeaderOutputFile>
++    </ClCompile>
+     <ClCompile Include="..\fpsgame\entities.cpp">
+       <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">game.h</PrecompiledHeaderFile>
+       <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">game.h</PrecompiledHeaderFile>

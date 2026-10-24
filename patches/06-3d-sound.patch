@@ -1,0 +1,1883 @@
+L4ZY 2026.10.16.1: 3D sound (Steam Audio)
+
+Apply after: 00-build-fix to 05-sound-mix (in order)
+From the root of the source tree: git apply 06-3d-sound.patch
+Notes: 06-3d-sound.md
+
+diff --git a/distrib/docs/licenses/steam-audio/LICENSE.txt b/distrib/docs/licenses/steam-audio/LICENSE.txt
+new file mode 100644
+index 0000000000000000000000000000000000000000..75b52484ea471f882c29e02693b4f02dba175b5e
+--- /dev/null
++++ b/distrib/docs/licenses/steam-audio/LICENSE.txt
+@@ -0,0 +1,202 @@
++
++                                 Apache License
++                           Version 2.0, January 2004
++                        http://www.apache.org/licenses/
++
++   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
++
++   1. Definitions.
++
++      "License" shall mean the terms and conditions for use, reproduction,
++      and distribution as defined by Sections 1 through 9 of this document.
++
++      "Licensor" shall mean the copyright owner or entity authorized by
++      the copyright owner that is granting the License.
++
++      "Legal Entity" shall mean the union of the acting entity and all
++      other entities that control, are controlled by, or are under common
++      control with that entity. For the purposes of this definition,
++      "control" means (i) the power, direct or indirect, to cause the
++      direction or management of such entity, whether by contract or
++      otherwise, or (ii) ownership of fifty percent (50%) or more of the
++      outstanding shares, or (iii) beneficial ownership of such entity.
++
++      "You" (or "Your") shall mean an individual or Legal Entity
++      exercising permissions granted by this License.
++
++      "Source" form shall mean the preferred form for making modifications,
++      including but not limited to software source code, documentation
++      source, and configuration files.
++
++      "Object" form shall mean any form resulting from mechanical
++      transformation or translation of a Source form, including but
++      not limited to compiled object code, generated documentation,
++      and conversions to other media types.
++
++      "Work" shall mean the work of authorship, whether in Source or
++      Object form, made available under the License, as indicated by a
++      copyright notice that is included in or attached to the work
++      (an example is provided in the Appendix below).
++
++      "Derivative Works" shall mean any work, whether in Source or Object
++      form, that is based on (or derived from) the Work and for which the
++      editorial revisions, annotations, elaborations, or other modifications
++      represent, as a whole, an original work of authorship. For the purposes
++      of this License, Derivative Works shall not include works that remain
++      separable from, or merely link (or bind by name) to the interfaces of,
++      the Work and Derivative Works thereof.
++
++      "Contribution" shall mean any work of authorship, including
++      the original version of the Work and any modifications or additions
++      to that Work or Derivative Works thereof, that is intentionally
++      submitted to Licensor for inclusion in the Work by the copyright owner
++      or by an individual or Legal Entity authorized to submit on behalf of
++      the copyright owner. For the purposes of this definition, "submitted"
++      means any form of electronic, verbal, or written communication sent
++      to the Licensor or its representatives, including but not limited to
++      communication on electronic mailing lists, source code control systems,
++      and issue tracking systems that are managed by, or on behalf of, the
++      Licensor for the purpose of discussing and improving the Work, but
++      excluding communication that is conspicuously marked or otherwise
++      designated in writing by the copyright owner as "Not a Contribution."
++
++      "Contributor" shall mean Licensor and any individual or Legal Entity
++      on behalf of whom a Contribution has been received by Licensor and
++      subsequently incorporated within the Work.
++
++   2. Grant of Copyright License. Subject to the terms and conditions of
++      this License, each Contributor hereby grants to You a perpetual,
++      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
++      copyright license to reproduce, prepare Derivative Works of,
++      publicly display, publicly perform, sublicense, and distribute the
++      Work and such Derivative Works in Source or Object form.
++
++   3. Grant of Patent License. Subject to the terms and conditions of
++      this License, each Contributor hereby grants to You a perpetual,
++      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
++      (except as stated in this section) patent license to make, have made,
++      use, offer to sell, sell, import, and otherwise transfer the Work,
++      where such license applies only to those patent claims licensable
++      by such Contributor that are necessarily infringed by their
++      Contribution(s) alone or by combination of their Contribution(s)
++      with the Work to which such Contribution(s) was submitted. If You
++      institute patent litigation against any entity (including a
++      cross-claim or counterclaim in a lawsuit) alleging that the Work
++      or a Contribution incorporated within the Work constitutes direct
++      or contributory patent infringement, then any patent licenses
++      granted to You under this License for that Work shall terminate
++      as of the date such litigation is filed.
++
++   4. Redistribution. You may reproduce and distribute copies of the
++      Work or Derivative Works thereof in any medium, with or without
++      modifications, and in Source or Object form, provided that You
++      meet the following conditions:
++
++      (a) You must give any other recipients of the Work or
++          Derivative Works a copy of this License; and
++
++      (b) You must cause any modified files to carry prominent notices
++          stating that You changed the files; and
++
++      (c) You must retain, in the Source form of any Derivative Works
++          that You distribute, all copyright, patent, trademark, and
++          attribution notices from the Source form of the Work,
++          excluding those notices that do not pertain to any part of
++          the Derivative Works; and
++
++      (d) If the Work includes a "NOTICE" text file as part of its
++          distribution, then any Derivative Works that You distribute must
++          include a readable copy of the attribution notices contained
++          within such NOTICE file, excluding those notices that do not
++          pertain to any part of the Derivative Works, in at least one
++          of the following places: within a NOTICE text file distributed
++          as part of the Derivative Works; within the Source form or
++          documentation, if provided along with the Derivative Works; or,
++          within a display generated by the Derivative Works, if and
++          wherever such third-party notices normally appear. The contents
++          of the NOTICE file are for informational purposes only and
++          do not modify the License. You may add Your own attribution
++          notices within Derivative Works that You distribute, alongside
++          or as an addendum to the NOTICE text from the Work, provided
++          that such additional attribution notices cannot be construed
++          as modifying the License.
++
++      You may add Your own copyright statement to Your modifications and
++      may provide additional or different license terms and conditions
++      for use, reproduction, or distribution of Your modifications, or
++      for any such Derivative Works as a whole, provided Your use,
++      reproduction, and distribution of the Work otherwise complies with
++      the conditions stated in this License.
++
++   5. Submission of Contributions. Unless You explicitly state otherwise,
++      any Contribution intentionally submitted for inclusion in the Work
++      by You to the Licensor shall be under the terms and conditions of
++      this License, without any additional terms or conditions.
++      Notwithstanding the above, nothing herein shall supersede or modify
++      the terms of any separate license agreement you may have executed
++      with Licensor regarding such Contributions.
++
++   6. Trademarks. This License does not grant permission to use the trade
++      names, trademarks, service marks, or product names of the Licensor,
++      except as required for reasonable and customary use in describing the
++      origin of the Work and reproducing the content of the NOTICE file.
++
++   7. Disclaimer of Warranty. Unless required by applicable law or
++      agreed to in writing, Licensor provides the Work (and each
++      Contributor provides its Contributions) on an "AS IS" BASIS,
++      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
++      implied, including, without limitation, any warranties or conditions
++      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
++      PARTICULAR PURPOSE. You are solely responsible for determining the
++      appropriateness of using or redistributing the Work and assume any
++      risks associated with Your exercise of permissions under this License.
++
++   8. Limitation of Liability. In no event and under no legal theory,
++      whether in tort (including negligence), contract, or otherwise,
++      unless required by applicable law (such as deliberate and grossly
++      negligent acts) or agreed to in writing, shall any Contributor be
++      liable to You for damages, including any direct, indirect, special,
++      incidental, or consequential damages of any character arising as a
++      result of this License or out of the use or inability to use the
++      Work (including but not limited to damages for loss of goodwill,
++      work stoppage, computer failure or malfunction, or any and all
++      other commercial damages or losses), even if such Contributor
++      has been advised of the possibility of such damages.
++
++   9. Accepting Warranty or Additional Liability. While redistributing
++      the Work or Derivative Works thereof, You may choose to offer,
++      and charge a fee for, acceptance of support, warranty, indemnity,
++      or other liability obligations and/or rights consistent with this
++      License. However, in accepting such obligations, You may act only
++      on Your own behalf and on Your sole responsibility, not on behalf
++      of any other Contributor, and only if You agree to indemnify,
++      defend, and hold each Contributor harmless for any liability
++      incurred by, or claims asserted against, such Contributor by reason
++      of your accepting any such warranty or additional liability.
++
++   END OF TERMS AND CONDITIONS
++
++   APPENDIX: How to apply the Apache License to your work.
++
++      To apply the Apache License to your work, attach the following
++      boilerplate notice, with the fields enclosed by brackets "[]"
++      replaced with your own identifying information. (Don't include
++      the brackets!)  The text should be enclosed in the appropriate
++      comment syntax for the file format. We also recommend that a
++      file or class name and description of purpose be included on the
++      same "printed page" as the copyright notice for easier
++      identification within third-party archives.
++
++   Copyright [yyyy] [name of copyright owner]
++
++   Licensed under the Apache License, Version 2.0 (the "License");
++   you may not use this file except in compliance with the License.
++   You may obtain a copy of the License at
++
++       http://www.apache.org/licenses/LICENSE-2.0
++
++   Unless required by applicable law or agreed to in writing, software
++   distributed under the License is distributed on an "AS IS" BASIS,
++   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++   See the License for the specific language governing permissions and
++   limitations under the License.
+diff --git a/distrib/docs/licenses/steam-audio/THIRDPARTY.md b/distrib/docs/licenses/steam-audio/THIRDPARTY.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..1acbadd1585d28f9e26ff3e032b312bcb5b54ab7
+--- /dev/null
++++ b/distrib/docs/licenses/steam-audio/THIRDPARTY.md
+@@ -0,0 +1,628 @@
++# Steam Audio Third-Party Licenses
++
++## Intel Integrated Performance Primitives (IPP)
++
++Intel Simplified Software License (Version October 2022)
++
++Use and Redistribution.  You may use and redistribute the software, which is provided in binary form only, (the “Software”), without modification, provided the following conditions are met:
++
++Redistributions must reproduce the above copyright notice and these terms of use in the Software and in the documentation and/or other materials provided with the distribution.
++Neither the name of Intel nor the names of its suppliers may be used to endorse or promote products derived from this Software without specific prior written permission.
++No reverse engineering, decompilation, or disassembly of the Software is permitted, nor any modification or alteration of the Software or its operation at any time, including during execution.
++No other licenses.  Except as provided in the preceding section, Intel grants no licenses or other rights by implication, estoppel or otherwise to, patent, copyright, trademark, trade name, service mark or other intellectual property licenses or rights of Intel.
++
++Third party software.  “Third Party Software” means the files (if any) listed in the “third-party-software.txt” or other similarly-named text file that may be included with the Software. Third Party Software, even if included with the distribution of the Software, may be governed by separate license terms, including without limitation, third party license terms, open source software notices and terms, and/or other Intel software license terms. These separate license terms solely govern Your use of the Third Party Software.
++
++DISCLAIMER.  THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT ARE DISCLAIMED. THIS SOFTWARE IS NOT INTENDED FOR USE IN SYSTEMS OR APPLICATIONS WHERE FAILURE OF THE SOFTWARE MAY CAUSE PERSONAL INJURY OR DEATH AND YOU AGREE THAT YOU ARE FULLY RESPONSIBLE FOR ANY CLAIMS, COSTS, DAMAGES, EXPENSES, AND ATTORNEYS’ FEES ARISING OUT OF ANY SUCH USE, EVEN IF ANY CLAIM ALLEGES THAT INTEL WAS NEGLIGENT REGARDING THE DESIGN OR MANUFACTURE OF THE SOFTWARE.
++
++LIMITATION OF LIABILITY. IN NO EVENT WILL INTEL BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++No support.  Intel may make changes to the Software, at any time without notice, and is not obligated to support, update or provide training for the Software.
++
++Termination. Your right to use the Software is terminated in the event of your breach of this license.
++
++Feedback.  Should you provide Intel with comments, modifications, corrections, enhancements or other input (“Feedback”) related to the Software, Intel will be free to use, disclose, reproduce, license or otherwise distribute or exploit the Feedback in its sole discretion without any obligations or restrictions of any kind, including without limitation, intellectual property rights or licensing obligations.
++
++Compliance with laws.  You agree to comply with all relevant laws and regulations governing your use, transfer, import or export (or prohibition thereof) of the Software.
++
++Governing law.  All disputes will be governed by the laws of the United States of America and the State of Delaware without reference to conflict of law principles and subject to the exclusive jurisdiction of the state or federal courts sitting in the State of Delaware, and each party agrees that it submits to the personal jurisdiction and venue of those courts and waives any objections. THE UNITED NATIONS CONVENTION ON CONTRACTS FOR THE INTERNATIONAL SALE OF GOODS (1980) IS SPECIFICALLY EXCLUDED AND WILL NOT APPLY TO THE SOFTWARE.
++
++## FFTS
++
++This file is part of FFTS -- The Fastest Fourier Transform in the South
++
++Copyright (c) 2012, 2013 Anthony M. Blake <amb@anthonix.com>
++
++All rights reserved.
++
++Redistribution and use in source and binary forms, with or without
++modification, are permitted provided that the following conditions are met:
++
++* Redistributions of source code must retain the above copyright
++    notice, this list of conditions and the following disclaimer.
++* Redistributions in binary form must reproduce the above copyright
++    notice, this list of conditions and the following disclaimer in the
++    documentation and/or other materials provided with the distribution.
++* Neither the name of the organization nor the
++    names of its contributors may be used to endorse or promote products
++    derived from this software without specific prior written permission.
++
++THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
++ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
++WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
++DISCLAIMED. IN NO EVENT SHALL ANTHONY M. BLAKE BE LIABLE FOR ANY
++DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
++(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
++LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
++ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
++SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++## PFFFT
++
++Copyright (c) 2020  Dario Mambro ( dario.mambro@gmail.com )
++Copyright (c) 2019  Hayati Ayguen ( h_ayguen@web.de )
++Copyright (c) 2013  Julien Pommier ( pommier@modartt.com )
++
++Copyright (c) 2004 the University Corporation for Atmospheric
++Research ("UCAR"). All rights reserved. Developed by NCAR's
++Computational and Information Systems Laboratory, UCAR,
++www.cisl.ucar.edu.
++
++Redistribution and use of the Software in source and binary forms,
++with or without modification, is permitted provided that the
++following conditions are met:
++
++- Neither the names of NCAR's Computational and Information Systems
++Laboratory, the University Corporation for Atmospheric Research,
++nor the names of its sponsors or contributors may be used to
++endorse or promote products derived from this Software without
++specific prior written permission.
++
++- Redistributions of source code must retain the above copyright
++notices, this list of conditions, and the disclaimer below.
++
++- Redistributions in binary form must reproduce the above copyright
++notice, this list of conditions, and the disclaimer below in the
++documentation and/or other materials provided with the
++distribution.
++
++THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
++EXPRESS OR IMPLIED, INCLUDING, BUT NOT LIMITED TO THE WARRANTIES OF
++MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
++NONINFRINGEMENT. IN NO EVENT SHALL THE CONTRIBUTORS OR COPYRIGHT
++HOLDERS BE LIABLE FOR ANY CLAIM, INDIRECT, INCIDENTAL, SPECIAL,
++EXEMPLARY, OR CONSEQUENTIAL DAMAGES OR OTHER LIABILITY, WHETHER IN AN
++ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
++CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS WITH THE
++SOFTWARE.
++
++## MySOFA
++
++Copyright (c) 2016-2017, Symonics GmbH, Christian Hoene
++All rights reserved.
++
++Redistribution and use in source and binary forms, with or without
++modification, are permitted provided that the following conditions are
++met:
++
++    (1) Redistributions of source code must retain the above copyright
++    notice, this list of conditions and the following disclaimer.
++
++    (2) Redistributions in binary form must reproduce the above copyright
++    notice, this list of conditions and the following disclaimer in
++    the documentation and/or other materials provided with the
++    distribution.
++
++    (3)The name of the author may not be used to
++    endorse or promote products derived from this software without
++    specific prior written permission.
++
++THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
++IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
++WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
++DISCLAIMED. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT,
++INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
++(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
++SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
++HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
++STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING
++IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++POSSIBILITY OF SUCH DAMAGE.
++
++## Intel Embree
++
++
++                                 Apache License
++                           Version 2.0, January 2004
++                        http://www.apache.org/licenses/
++
++   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
++
++   1. Definitions.
++
++      "License" shall mean the terms and conditions for use, reproduction,
++      and distribution as defined by Sections 1 through 9 of this document.
++
++      "Licensor" shall mean the copyright owner or entity authorized by
++      the copyright owner that is granting the License.
++
++      "Legal Entity" shall mean the union of the acting entity and all
++      other entities that control, are controlled by, or are under common
++      control with that entity. For the purposes of this definition,
++      "control" means (i) the power, direct or indirect, to cause the
++      direction or management of such entity, whether by contract or
++      otherwise, or (ii) ownership of fifty percent (50%) or more of the
++      outstanding shares, or (iii) beneficial ownership of such entity.
++
++      "You" (or "Your") shall mean an individual or Legal Entity
++      exercising permissions granted by this License.
++
++      "Source" form shall mean the preferred form for making modifications,
++      including but not limited to software source code, documentation
++      source, and configuration files.
++
++      "Object" form shall mean any form resulting from mechanical
++      transformation or translation of a Source form, including but
++      not limited to compiled object code, generated documentation,
++      and conversions to other media types.
++
++      "Work" shall mean the work of authorship, whether in Source or
++      Object form, made available under the License, as indicated by a
++      copyright notice that is included in or attached to the work
++      (an example is provided in the Appendix below).
++
++      "Derivative Works" shall mean any work, whether in Source or Object
++      form, that is based on (or derived from) the Work and for which the
++      editorial revisions, annotations, elaborations, or other modifications
++      represent, as a whole, an original work of authorship. For the purposes
++      of this License, Derivative Works shall not include works that remain
++      separable from, or merely link (or bind by name) to the interfaces of,
++      the Work and Derivative Works thereof.
++
++      "Contribution" shall mean any work of authorship, including
++      the original version of the Work and any modifications or additions
++      to that Work or Derivative Works thereof, that is intentionally
++      submitted to Licensor for inclusion in the Work by the copyright owner
++      or by an individual or Legal Entity authorized to submit on behalf of
++      the copyright owner. For the purposes of this definition, "submitted"
++      means any form of electronic, verbal, or written communication sent
++      to the Licensor or its representatives, including but not limited to
++      communication on electronic mailing lists, source code control systems,
++      and issue tracking systems that are managed by, or on behalf of, the
++      Licensor for the purpose of discussing and improving the Work, but
++      excluding communication that is conspicuously marked or otherwise
++      designated in writing by the copyright owner as "Not a Contribution."
++
++      "Contributor" shall mean Licensor and any individual or Legal Entity
++      on behalf of whom a Contribution has been received by Licensor and
++      subsequently incorporated within the Work.
++
++   2. Grant of Copyright License. Subject to the terms and conditions of
++      this License, each Contributor hereby grants to You a perpetual,
++      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
++      copyright license to reproduce, prepare Derivative Works of,
++      publicly display, publicly perform, sublicense, and distribute the
++      Work and such Derivative Works in Source or Object form.
++
++   3. Grant of Patent License. Subject to the terms and conditions of
++      this License, each Contributor hereby grants to You a perpetual,
++      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
++      (except as stated in this section) patent license to make, have made,
++      use, offer to sell, sell, import, and otherwise transfer the Work,
++      where such license applies only to those patent claims licensable
++      by such Contributor that are necessarily infringed by their
++      Contribution(s) alone or by combination of their Contribution(s)
++      with the Work to which such Contribution(s) was submitted. If You
++      institute patent litigation against any entity (including a
++      cross-claim or counterclaim in a lawsuit) alleging that the Work
++      or a Contribution incorporated within the Work constitutes direct
++      or contributory patent infringement, then any patent licenses
++      granted to You under this License for that Work shall terminate
++      as of the date such litigation is filed.
++
++   4. Redistribution. You may reproduce and distribute copies of the
++      Work or Derivative Works thereof in any medium, with or without
++      modifications, and in Source or Object form, provided that You
++      meet the following conditions:
++
++      (a) You must give any other recipients of the Work or
++          Derivative Works a copy of this License; and
++
++      (b) You must cause any modified files to carry prominent notices
++          stating that You changed the files; and
++
++      (c) You must retain, in the Source form of any Derivative Works
++          that You distribute, all copyright, patent, trademark, and
++          attribution notices from the Source form of the Work,
++          excluding those notices that do not pertain to any part of
++          the Derivative Works; and
++
++      (d) If the Work includes a "NOTICE" text file as part of its
++          distribution, then any Derivative Works that You distribute must
++          include a readable copy of the attribution notices contained
++          within such NOTICE file, excluding those notices that do not
++          pertain to any part of the Derivative Works, in at least one
++          of the following places: within a NOTICE text file distributed
++          as part of the Derivative Works; within the Source form or
++          documentation, if provided along with the Derivative Works; or,
++          within a display generated by the Derivative Works, if and
++          wherever such third-party notices normally appear. The contents
++          of the NOTICE file are for informational purposes only and
++          do not modify the License. You may add Your own attribution
++          notices within Derivative Works that You distribute, alongside
++          or as an addendum to the NOTICE text from the Work, provided
++          that such additional attribution notices cannot be construed
++          as modifying the License.
++
++      You may add Your own copyright statement to Your modifications and
++      may provide additional or different license terms and conditions
++      for use, reproduction, or distribution of Your modifications, or
++      for any such Derivative Works as a whole, provided Your use,
++      reproduction, and distribution of the Work otherwise complies with
++      the conditions stated in this License.
++
++   5. Submission of Contributions. Unless You explicitly state otherwise,
++      any Contribution intentionally submitted for inclusion in the Work
++      by You to the Licensor shall be under the terms and conditions of
++      this License, without any additional terms or conditions.
++      Notwithstanding the above, nothing herein shall supersede or modify
++      the terms of any separate license agreement you may have executed
++      with Licensor regarding such Contributions.
++
++   6. Trademarks. This License does not grant permission to use the trade
++      names, trademarks, service marks, or product names of the Licensor,
++      except as required for reasonable and customary use in describing the
++      origin of the Work and reproducing the content of the NOTICE file.
++
++   7. Disclaimer of Warranty. Unless required by applicable law or
++      agreed to in writing, Licensor provides the Work (and each
++      Contributor provides its Contributions) on an "AS IS" BASIS,
++      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
++      implied, including, without limitation, any warranties or conditions
++      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
++      PARTICULAR PURPOSE. You are solely responsible for determining the
++      appropriateness of using or redistributing the Work and assume any
++      risks associated with Your exercise of permissions under this License.
++
++   8. Limitation of Liability. In no event and under no legal theory,
++      whether in tort (including negligence), contract, or otherwise,
++      unless required by applicable law (such as deliberate and grossly
++      negligent acts) or agreed to in writing, shall any Contributor be
++      liable to You for damages, including any direct, indirect, special,
++      incidental, or consequential damages of any character arising as a
++      result of this License or out of the use or inability to use the
++      Work (including but not limited to damages for loss of goodwill,
++      work stoppage, computer failure or malfunction, or any and all
++      other commercial damages or losses), even if such Contributor
++      has been advised of the possibility of such damages.
++
++   9. Accepting Warranty or Additional Liability. While redistributing
++      the Work or Derivative Works thereof, You may choose to offer,
++      and charge a fee for, acceptance of support, warranty, indemnity,
++      or other liability obligations and/or rights consistent with this
++      License. However, in accepting such obligations, You may act only
++      on Your own behalf and on Your sole responsibility, not on behalf
++      of any other Contributor, and only if You agree to indemnify,
++      defend, and hold each Contributor harmless for any liability
++      incurred by, or claims asserted against, such Contributor by reason
++      of your accepting any such warranty or additional liability.
++
++   END OF TERMS AND CONDITIONS
++
++   APPENDIX: How to apply the Apache License to your work.
++
++      To apply the Apache License to your work, attach the following
++      boilerplate notice, with the fields enclosed by brackets "[]"
++      replaced with your own identifying information. (Don't include
++      the brackets!)  The text should be enclosed in the appropriate
++      comment syntax for the file format. We also recommend that a
++      file or class name and description of purpose be included on the
++      same "printed page" as the copyright notice for easier
++      identification within third-party archives.
++
++   Copyright [yyyy] [name of copyright owner]
++
++   Licensed under the Apache License, Version 2.0 (the "License");
++   you may not use this file except in compliance with the License.
++   You may obtain a copy of the License at
++
++       http://www.apache.org/licenses/LICENSE-2.0
++
++   Unless required by applicable law or agreed to in writing, software
++   distributed under the License is distributed on an "AS IS" BASIS,
++   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++   See the License for the specific language governing permissions and
++   limitations under the License.
++
++## AMD RadeonRays
++
++Copyright (c) 2016 Advanced Micro Devices, Inc. All rights reserved.
++
++Permission is hereby granted, free of charge, to any person obtaining a copy
++of this software and associated documentation files (the "Software"), to deal
++in the Software without restriction, including without limitation the rights
++to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++copies of the Software, and to permit persons to whom the Software is
++furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in
++all copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
++AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
++THE SOFTWARE.
++
++## AMD TrueAudio Next
++
++MIT license
++
++Copyright (c) 2019 Advanced Micro Devices, Inc. All rights reserved.
++
++Permission is hereby granted, free of charge, to any person obtaining a copy
++of this software and associated documentation files (the "Software"), to deal
++in the Software without restriction, including without limitation the rights
++to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++copies of the Software, and to permit persons to whom the Software is
++furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in
++all copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
++AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
++THE SOFTWARE.
++
++## CIPIC HRTF Database
++
++Sponsorship
++
++  This work was supported by the National Science Foundation under Grants
++  IRI-9619339 and ITR-0086075. Any opinions, findings and conclusions or
++  recommendations expressed in this material are those of the authors, and
++  do not necessarily reflect the views of the National Science Foundation.
++
++Copyright
++
++Copyright (c) 2001 The Regents of the University of California. All Rights Reserved
++
++Disclaimer
++
++THE REGENTS OF THE UNIVERSITY OF CALIFORNIA MAKE NO REPRESENTATION OR
++WARRANTIES WITH RESPECT TO THE CONTENTS HEREOF AND SPECIFICALLY DISCLAIM ANY
++IMPLIED WARRANTIES OR MERCHANTABILITY OR FITNESS FOR ANY PARTICULAR PURPOSE.
++
++Further, the Regents of the University of California reserve the right to
++revise this software and/or documentation and to make changes from time to
++time in the content hereof without obligation of the Regents of the University
++of California to notify any person of such revision or change.
++
++Use of Materials
++
++The Regents of the University of California hereby grant users permission to
++reproduce and/or use materials available therein for any purpose- educational,
++research or commercial. However, each reproduction of any part of the
++materials must include the copyright notice, if it is present.
++
++In addition, as a courtesy, if these materials are used in published research,
++this use should be acknowledged in the publication. If these materials are
++used in the development of commercial products, the Regents of the University
++of California request that written acknowledgment of such use be sent to:
++
++     CIPIC- Center for Image Processing and Integrated Computing
++     University of California
++     1 Shields Avenue
++     Davis, CA 95616-8553
++
++## Google Spherical Harmonics Library
++
++
++                                 Apache License
++                           Version 2.0, January 2004
++                        http://www.apache.org/licenses/
++
++   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
++
++   1. Definitions.
++
++      "License" shall mean the terms and conditions for use, reproduction,
++      and distribution as defined by Sections 1 through 9 of this document.
++
++      "Licensor" shall mean the copyright owner or entity authorized by
++      the copyright owner that is granting the License.
++
++      "Legal Entity" shall mean the union of the acting entity and all
++      other entities that control, are controlled by, or are under common
++      control with that entity. For the purposes of this definition,
++      "control" means (i) the power, direct or indirect, to cause the
++      direction or management of such entity, whether by contract or
++      otherwise, or (ii) ownership of fifty percent (50%) or more of the
++      outstanding shares, or (iii) beneficial ownership of such entity.
++
++      "You" (or "Your") shall mean an individual or Legal Entity
++      exercising permissions granted by this License.
++
++      "Source" form shall mean the preferred form for making modifications,
++      including but not limited to software source code, documentation
++      source, and configuration files.
++
++      "Object" form shall mean any form resulting from mechanical
++      transformation or translation of a Source form, including but
++      not limited to compiled object code, generated documentation,
++      and conversions to other media types.
++
++      "Work" shall mean the work of authorship, whether in Source or
++      Object form, made available under the License, as indicated by a
++      copyright notice that is included in or attached to the work
++      (an example is provided in the Appendix below).
++
++      "Derivative Works" shall mean any work, whether in Source or Object
++      form, that is based on (or derived from) the Work and for which the
++      editorial revisions, annotations, elaborations, or other modifications
++      represent, as a whole, an original work of authorship. For the purposes
++      of this License, Derivative Works shall not include works that remain
++      separable from, or merely link (or bind by name) to the interfaces of,
++      the Work and Derivative Works thereof.
++
++      "Contribution" shall mean any work of authorship, including
++      the original version of the Work and any modifications or additions
++      to that Work or Derivative Works thereof, that is intentionally
++      submitted to Licensor for inclusion in the Work by the copyright owner
++      or by an individual or Legal Entity authorized to submit on behalf of
++      the copyright owner. For the purposes of this definition, "submitted"
++      means any form of electronic, verbal, or written communication sent
++      to the Licensor or its representatives, including but not limited to
++      communication on electronic mailing lists, source code control systems,
++      and issue tracking systems that are managed by, or on behalf of, the
++      Licensor for the purpose of discussing and improving the Work, but
++      excluding communication that is conspicuously marked or otherwise
++      designated in writing by the copyright owner as "Not a Contribution."
++
++      "Contributor" shall mean Licensor and any individual or Legal Entity
++      on behalf of whom a Contribution has been received by Licensor and
++      subsequently incorporated within the Work.
++
++   2. Grant of Copyright License. Subject to the terms and conditions of
++      this License, each Contributor hereby grants to You a perpetual,
++      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
++      copyright license to reproduce, prepare Derivative Works of,
++      publicly display, publicly perform, sublicense, and distribute the
++      Work and such Derivative Works in Source or Object form.
++
++   3. Grant of Patent License. Subject to the terms and conditions of
++      this License, each Contributor hereby grants to You a perpetual,
++      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
++      (except as stated in this section) patent license to make, have made,
++      use, offer to sell, sell, import, and otherwise transfer the Work,
++      where such license applies only to those patent claims licensable
++      by such Contributor that are necessarily infringed by their
++      Contribution(s) alone or by combination of their Contribution(s)
++      with the Work to which such Contribution(s) was submitted. If You
++      institute patent litigation against any entity (including a
++      cross-claim or counterclaim in a lawsuit) alleging that the Work
++      or a Contribution incorporated within the Work constitutes direct
++      or contributory patent infringement, then any patent licenses
++      granted to You under this License for that Work shall terminate
++      as of the date such litigation is filed.
++
++   4. Redistribution. You may reproduce and distribute copies of the
++      Work or Derivative Works thereof in any medium, with or without
++      modifications, and in Source or Object form, provided that You
++      meet the following conditions:
++
++      (a) You must give any other recipients of the Work or
++          Derivative Works a copy of this License; and
++
++      (b) You must cause any modified files to carry prominent notices
++          stating that You changed the files; and
++
++      (c) You must retain, in the Source form of any Derivative Works
++          that You distribute, all copyright, patent, trademark, and
++          attribution notices from the Source form of the Work,
++          excluding those notices that do not pertain to any part of
++          the Derivative Works; and
++
++      (d) If the Work includes a "NOTICE" text file as part of its
++          distribution, then any Derivative Works that You distribute must
++          include a readable copy of the attribution notices contained
++          within such NOTICE file, excluding those notices that do not
++          pertain to any part of the Derivative Works, in at least one
++          of the following places: within a NOTICE text file distributed
++          as part of the Derivative Works; within the Source form or
++          documentation, if provided along with the Derivative Works; or,
++          within a display generated by the Derivative Works, if and
++          wherever such third-party notices normally appear. The contents
++          of the NOTICE file are for informational purposes only and
++          do not modify the License. You may add Your own attribution
++          notices within Derivative Works that You distribute, alongside
++          or as an addendum to the NOTICE text from the Work, provided
++          that such additional attribution notices cannot be construed
++          as modifying the License.
++
++      You may add Your own copyright statement to Your modifications and
++      may provide additional or different license terms and conditions
++      for use, reproduction, or distribution of Your modifications, or
++      for any such Derivative Works as a whole, provided Your use,
++      reproduction, and distribution of the Work otherwise complies with
++      the conditions stated in this License.
++
++   5. Submission of Contributions. Unless You explicitly state otherwise,
++      any Contribution intentionally submitted for inclusion in the Work
++      by You to the Licensor shall be under the terms and conditions of
++      this License, without any additional terms or conditions.
++      Notwithstanding the above, nothing herein shall supersede or modify
++      the terms of any separate license agreement you may have executed
++      with Licensor regarding such Contributions.
++
++   6. Trademarks. This License does not grant permission to use the trade
++      names, trademarks, service marks, or product names of the Licensor,
++      except as required for reasonable and customary use in describing the
++      origin of the Work and reproducing the content of the NOTICE file.
++
++   7. Disclaimer of Warranty. Unless required by applicable law or
++      agreed to in writing, Licensor provides the Work (and each
++      Contributor provides its Contributions) on an "AS IS" BASIS,
++      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
++      implied, including, without limitation, any warranties or conditions
++      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
++      PARTICULAR PURPOSE. You are solely responsible for determining the
++      appropriateness of using or redistributing the Work and assume any
++      risks associated with Your exercise of permissions under this License.
++
++   8. Limitation of Liability. In no event and under no legal theory,
++      whether in tort (including negligence), contract, or otherwise,
++      unless required by applicable law (such as deliberate and grossly
++      negligent acts) or agreed to in writing, shall any Contributor be
++      liable to You for damages, including any direct, indirect, special,
++      incidental, or consequential damages of any character arising as a
++      result of this License or out of the use or inability to use the
++      Work (including but not limited to damages for loss of goodwill,
++      work stoppage, computer failure or malfunction, or any and all
++      other commercial damages or losses), even if such Contributor
++      has been advised of the possibility of such damages.
++
++   9. Accepting Warranty or Additional Liability. While redistributing
++      the Work or Derivative Works thereof, You may choose to offer,
++      and charge a fee for, acceptance of support, warranty, indemnity,
++      or other liability obligations and/or rights consistent with this
++      License. However, in accepting such obligations, You may act only
++      on Your own behalf and on Your sole responsibility, not on behalf
++      of any other Contributor, and only if You agree to indemnify,
++      defend, and hold each Contributor harmless for any liability
++      incurred by, or claims asserted against, such Contributor by reason
++      of your accepting any such warranty or additional liability.
++
++   END OF TERMS AND CONDITIONS
++
++   APPENDIX: How to apply the Apache License to your work.
++
++      To apply the Apache License to your work, attach the following
++      boilerplate notice, with the fields enclosed by brackets "[]"
++      replaced with your own identifying information. (Don't include
++      the brackets!)  The text should be enclosed in the appropriate
++      comment syntax for the file format. We also recommend that a
++      file or class name and description of purpose be included on the
++      same "printed page" as the copyright notice for easier
++      identification within third-party archives.
++
++   Copyright [yyyy] [name of copyright owner]
++
++   Licensed under the Apache License, Version 2.0 (the "License");
++   you may not use this file except in compliance with the License.
++   You may obtain a copy of the License at
++
++       http://www.apache.org/licenses/LICENSE-2.0
++
++   Unless required by applicable law or agreed to in writing, software
++   distributed under the License is distributed on an "AS IS" BASIS,
++   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++   See the License for the specific language governing permissions and
++   limitations under the License.
+diff --git a/src/Makefile b/src/Makefile
+index 82fb79832b2de0b76656d8fe8242eebd9be0a917..30c66fda95ae35ebc953ce1a2bdfd50a7e5a7d33 100644
+--- a/src/Makefile
++++ b/src/Makefile
+@@ -119,6 +119,8 @@ CLIENT_OBJS= \
+ 	engine/shader.o \
+ 	engine/shadowmap.o \
+ 	engine/sound.o \
++	engine/son3d.o \
++	engine/son3d_dsp.o \
+ 	engine/texture.o \
+ 	engine/water.o \
+ 	engine/world.o \
+@@ -441,7 +443,9 @@ engine/sound.o: engine/engine.h shared/cube.h shared/tools.h shared/geom.h
+ engine/sound.o: shared/ents.h shared/command.h shared/glexts.h shared/glemu.h
+ engine/sound.o: shared/iengine.h shared/igame.h engine/world.h engine/octa.h
+ engine/sound.o: engine/lightmap.h engine/bih.h engine/texture.h
+-engine/sound.o: engine/model.h
++engine/sound.o: engine/model.h engine/son3d.h engine/son3d_dsp.h
++engine/son3d.o: engine/engine.h engine/son3d.h engine/son3d_dsp.h
++engine/son3d_dsp.o: engine/son3d_dsp.h
+ engine/texture.o: engine/engine.h shared/cube.h shared/tools.h shared/geom.h
+ engine/texture.o: shared/ents.h shared/command.h shared/glexts.h
+ engine/texture.o: shared/glemu.h shared/iengine.h shared/igame.h
+diff --git a/src/engine/son3d.cpp b/src/engine/son3d.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..5ef1a8558973202cfeca724160a7b3da1738f705
+--- /dev/null
++++ b/src/engine/son3d.cpp
+@@ -0,0 +1,274 @@
++// son3d.cpp: optional 3D sound with Steam Audio (Valve, Apache 2.0) for positional sounds.
++//
++// son3d 0 (default): sound.cpp behaves exactly as before, phonon.dll is never loaded and no
++//   effect is registered with SDL_mixer.
++// son3d 1, headphones: HRTF binaural rendering replaces the stereo pan of positional sounds, so
++//   ahead/behind and above/below can be heard. The built-in HRTF only exists at 24000, 44100 and
++//   48000 Hz: the mixer is switched to 44100 Hz when needed.
++// son3d 2, speakers: the stereo pan of the game is kept, only occlusion is added.
++// son3docclusion: rays against the map geometry (raycube) from the listener to a few points
++//   around the source; no precomputation, so any map, online or in a demo. Blocked sounds are
++//   muffled (low 0.55, mid 0.25, high 0.12 through a wall), not muted.
++// No reverb: it would blur the position of shots and jumps (readability first).
++// The distance attenuation stays the one of sound.cpp (channel volume). Sounds without a
++// position (menus, announcements, music, the player's own sounds) are not touched.
++
++#include "engine.h"
++#include "SDL_mixer.h"
++#include "son3d.h"
++
++extern bool nosound;
++extern int soundfreq, soundbufferlen, maxchannels;
++extern void resetsound();
++extern vec hitsurface;
++
++int son3deffectif = SON3D_OFF;
++static string son3derreur = "";
++static bool son3dapplying = false;
++
++void son3dapply();
++VARFP(son3d, 0, 0, 2, son3dapply());
++VARFP(son3docclusion, 0, 1, 1, son3dapply());
++VAR(son3drayms, 10, 50, 1000);       // occlusion rays of one source at most every son3drayms
++VAR(son3dvolumesource, 0, 6, 32);    // radius of the sampled source volume (world units)
++
++ICOMMAND(son3deffectif, "", (), intret(son3deffectif));
++ICOMMAND(son3derreur, "", (), result(son3derreur));
++
++static void phononpath(char *dst, size_t len)
++{
++#ifdef WIN32
++    char exe[MAX_PATH] = "";
++    GetModuleFileNameA(NULL, exe, sizeof(exe));
++    char *slash = strrchr(exe, '\\');
++    if(slash) slash[1] = '\0'; else exe[0] = '\0';
++    copystring(dst, exe, len);
++    concatstring(dst, "phonon.dll", len);
++#else
++    copystring(dst, "libphonon.so", len);
++#endif
++}
++
++// why 3D sound cannot be chosen, "" when it can (menu settinglock)
++ICOMMAND(son3draison, "", (),
++{
++    if(son3derreur[0] && !son3d_dsp_loaded()) { result(son3derreur); return; }
++    string path;
++    phononpath(path, sizeof(path));
++    stream *f = openrawfile(path, "rb");
++    if(!f) { result("phonon.dll (Steam Audio) is missing"); return; }
++    delete f;
++    result("");
++});
++
++void son3dapply()
++{
++    son3deffectif = SON3D_OFF;
++    son3derreur[0] = '\0';
++    if(!son3d || nosound) return;
++    char err[256] = "";
++    if(!son3d_dsp_loaded())
++    {
++        string path;
++        phononpath(path, sizeof(path));
++        if(!son3d_dsp_load(path, err, sizeof(err)))
++        {
++            copystring(son3derreur, err);
++            conoutf(CON_ERROR, "3D sound unavailable: %s", err);
++            return;
++        }
++    }
++    int freq = 0, chans = 0;
++    Uint16 fmt = 0;
++    if(!Mix_QuerySpec(&freq, &fmt, &chans)) return;
++    if(fmt != AUDIO_S16SYS || chans != 2)
++    {
++        copystring(son3derreur, "unsupported audio format");
++        conoutf(CON_ERROR, "3D sound unavailable: %s", son3derreur);
++        return;
++    }
++    if(son3d == SON3D_CASQUE && freq != 24000 && freq != 44100 && freq != 48000)
++    {
++        if(son3dapplying) { copystring(son3derreur, "needs a sound frequency of 44100 Hz"); return; }
++        conoutf("\f23D sound (headphones): sound frequency set to 44100 Hz, required by the HRTF");
++        soundfreq = 44100;
++        son3dapplying = true;
++        resetsound(); // initsound -> son3daudioopen -> son3dapply at 44100 Hz
++        son3dapplying = false;
++        return;
++    }
++    if(!son3d_dsp_isopen() || son3d_dsp_freq() != freq)
++    {
++        // SDL_mixer calls the effects with at most one callback (soundbufferlen samples)
++        if(!son3d_dsp_open(freq, max(soundbufferlen, 8192), maxchannels, err, sizeof(err)))
++        {
++            copystring(son3derreur, err);
++            conoutf(CON_ERROR, "3D sound unavailable: %s", err);
++            return;
++        }
++    }
++    if(son3d == SON3D_CASQUE && !son3d_dsp_hashrtf())
++    {
++        copystring(son3derreur, "no HRTF at this sound frequency");
++        conoutf(CON_ERROR, "3D sound unavailable: %s", son3derreur);
++        return;
++    }
++    son3deffectif = son3d;
++}
++
++// Diagnostics: son3dmesure 1, play a while, then son3drapport (audio and main thread cost).
++static long long mainticks = 0, raycount = 0, updates = 0;
++static Uint64 statsstart = 0;
++void son3dstatschanged();
++VARF(son3dmesure, 0, 0, 1, son3dstatschanged());
++
++void son3dstatschanged()
++{
++    if(nosound) return;
++    Mix_UnregisterEffect(MIX_CHANNEL_POST, son3d_dsp_postmix);
++    son3d_dsp_resetstats();
++    mainticks = raycount = updates = 0;
++    statsstart = SDL_GetPerformanceCounter();
++    if(son3dmesure) Mix_RegisterEffect(MIX_CHANNEL_POST, son3d_dsp_postmix, NULL, NULL);
++}
++
++void son3drapport()
++{
++    son3dstats s;
++    son3d_dsp_getstats(s);
++    double f = double(s.freq > 0 ? s.freq : 1), secs = double(SDL_GetPerformanceCounter() - statsstart)/f;
++    int freq = 0, chans = 0;
++    Uint16 fmt = 0;
++    Mix_QuerySpec(&freq, &fmt, &chans);
++    double period = freq > 0 ? 1000.0*soundbufferlen/freq : 0;
++    double mean = s.callbacks ? 1000.0*s.cbticks/f/s.callbacks : 0, mx = 1000.0*s.cbmax/f;
++    conoutf("son3d rapport: mode %d occlusion %d, %.1f s, %d Hz tampon %d (%.1f ms), rappels %lld",
++        son3deffectif, son3docclusion, secs, freq, soundbufferlen, period, s.callbacks);
++    conoutf("son3d rapport: fil audio moyenne %.3f ms max %.3f ms (%.2f%% / %.2f%% du tampon), >10%%: %lld, voies max %d, appels %lld, trames %lld, genou %lld",
++        mean, mx, period > 0 ? 100*mean/period : 0, period > 0 ? 100*mx/period : 0, s.cbover10, s.maxactive, s.calls, s.frames, s.clipped);
++    conoutf("son3d rapport: fil principal %.3f ms/s (%.1f us par mise a jour, %lld mises a jour), %lld rayons (%.2f us/rayon compris)",
++        secs > 0 ? 1000.0*mainticks/f/secs : 0, updates ? 1e6*mainticks/f/updates : 0, updates, raycount, raycount ? 1e6*mainticks/f/raycount : 0);
++}
++COMMAND(son3drapport, "");
++
++static bool clearpath(const vec &from, const vec &to)
++{
++    vec dir = vec(to).sub(from);
++    float dist = dir.magnitude();
++    if(dist < 2) return true;
++    dir.div(dist);
++    raycount++;
++    // mode 0: world geometry only; clip (invisible walls) and glass let the sound through
++    return raycube(from, dir, dist, 0) >= dist - 1.5f;
++}
++
++static const vec son3doffsets[6] = { vec(1, 0, 0), vec(-1, 0, 0), vec(0, 1, 0), vec(0, -1, 0), vec(0, 0, 1), vec(0, 0, -1) };
++
++// fraction of the source volume the listener can see, 1 = clear
++static float occlusion(const vec &listener, const vec &src)
++{
++    // very close, or outside the map (nothing to hide behind there): no occlusion
++    if(listener.dist(src) < 16 || !insideworld(src) || !insideworld(listener)) return 1;
++    vec savedhit = hitsurface; // raycube writes the global hit normal
++    float result = 1;
++    // a spectator or an editor inside the geometry hears everything as before
++    if(raycube(listener, vec(0, 0, 1), 1, 0) > 0 || raycube(listener, vec(0, 0, -1), 1, 0) > 0)
++    {
++        // The centre ray decides first: a source in plain sight is never muffled by more than 40%
++        // (its feet behind a railing, a ledge), a source behind a wall keeps at most 60% when
++        // part of it shows around the edge. The six points around the source smooth the change.
++        bool centre = clearpath(listener, src);
++        int valid = 0, clear = 0;
++        if(son3dvolumesource > 0) loopi(6)
++        {
++            vec p = vec(son3doffsets[i]).mul(son3dvolumesource).add(src);
++            if(!clearpath(src, p)) continue; // inside a wall or the floor: not part of the source
++            valid++;
++            if(clearpath(listener, p)) clear++;
++        }
++        float around = valid ? float(clear)/valid : (centre ? 1.0f : 0.0f);
++        result = centre ? 0.6f + 0.4f*around : 0.6f*around;
++    }
++    hitsurface = savedhit;
++    return result;
++}
++
++int son3dupdate(int chanid, son3dchan &s, const vec *loc)
++{
++    if(!son3deffectif || !loc) return SON3D_OFF;
++    int mode = son3deffectif;
++    bool occl = son3docclusion != 0;
++    if((mode == SON3D_ENCEINTES && !occl) || chanid >= son3d_dsp_numchans()) return SON3D_OFF;
++    Uint64 t0 = SDL_GetPerformanceCounter();
++
++    son3dparams p;
++    vec d = vec(*loc).sub(camera1->o);
++    float dist = d.magnitude();
++    if(dist > 1e-3f)
++    {
++        // Sauer: x left, y ahead, z up. Steam Audio listener space: +x right, +y up, -z ahead.
++        vec fwd(camera1->yaw*RAD, camera1->pitch*RAD), up(camera1->yaw*RAD, (camera1->pitch+90)*RAD), left;
++        left.cross(fwd, up);
++        d.div(dist);
++        p.dir[0] = -d.dot(left);
++        p.dir[1] = d.dot(up);
++        p.dir[2] = -d.dot(fwd);
++    }
++    else { p.dir[0] = p.dir[1] = 0; p.dir[2] = -1; }
++    // a source on the listener has no direction: centred, then fully spatialised from 10 units
++    p.blend = clamp((dist - 2)/8, 0.0f, 1.0f);
++
++    if(occl)
++    {
++        if(s.raymillis < 0 || totalmillis - s.raymillis >= son3drayms)
++        {
++            s.occltarget = occlusion(camera1->o, *loc);
++            if(s.raymillis < 0) s.occl = s.occltarget;
++            s.raymillis = totalmillis;
++        }
++        if(s.lastmillis >= 0) s.occl += (s.occltarget - s.occl)*clamp((totalmillis - s.lastmillis)/60.0f, 0.0f, 1.0f);
++        p.occlusion = s.occl;
++    }
++    else p.occlusion = 1;
++    s.lastmillis = totalmillis;
++    s.p = p;
++    if(s.mode == mode) son3d_dsp_update(chanid, p);
++
++    mainticks += SDL_GetPerformanceCounter() - t0;
++    updates++;
++    return mode;
++}
++
++void son3dstart(int chanid, son3dchan &s)
++{
++    if(son3d_dsp_attached(chanid)) Mix_UnregisterEffect(chanid, son3d_dsp_effect);
++    son3d_dsp_prepare(chanid, s.mode, s.looping, son3docclusion != 0, s.p);
++    if(!Mix_RegisterEffect(chanid, son3d_dsp_effect, son3d_dsp_done, NULL)) son3d_dsp_setattached(chanid, false);
++}
++
++void son3dsync(int chanid, son3dchan &s, int pan)
++{
++    int cur = son3d_dsp_mode(chanid);
++    if(s.mode != cur)
++    {
++        if(cur) Mix_UnregisterEffect(chanid, son3d_dsp_effect);
++        if(s.mode)
++        {
++            if(s.mode == SON3D_CASQUE) Mix_SetPanning(chanid, 255, 255); // the HRTF replaces the pan
++            son3dstart(chanid, s);
++        }
++    }
++    if(s.mode != SON3D_CASQUE) Mix_SetPanning(chanid, 255-pan, pan);
++}
++
++void son3daudioopen()
++{
++    if(son3d) son3dapply();
++    if(son3dmesure) son3dstatschanged();
++}
++
++void son3daudioclose()
++{
++    son3d_dsp_close();
++    son3deffectif = SON3D_OFF;
++}
+diff --git a/src/engine/son3d.h b/src/engine/son3d.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..44b5ed16431496949b18a028e6c6c34a1119684f
+--- /dev/null
++++ b/src/engine/son3d.h
+@@ -0,0 +1,33 @@
++// son3d.h: optional 3D sound (Steam Audio) for positional sounds, see son3d.cpp.
++
++#ifndef SON3D_H
++#define SON3D_H
++
++#include "son3d_dsp.h"
++
++// Per sound channel state, kept in soundchannel (sound.cpp).
++struct son3dchan
++{
++    int mode;            // mode applied to the channel, SON3D_OFF when it is not processed
++    bool looping;        // the sound loops (SDL_mixer splits it at the loop point)
++    int raymillis;       // last occlusion rays, -1 before the first
++    int lastmillis;      // last update (smoothing)
++    float occl, occltarget;
++    son3dparams p;       // last parameters sent to the audio thread
++
++    void reset() { mode = SON3D_OFF; looping = false; raymillis = lastmillis = -1; occl = occltarget = 1; }
++};
++
++extern int son3deffectif; // effective mode for the whole game, SON3D_OFF when 3D sound is off or unavailable
++
++// Main thread. Returns the mode of this channel for this frame (SON3D_OFF without a position).
++extern int son3dupdate(int chanid, son3dchan &s, const vec *loc);
++// Before Mix_PlayChannel: registers the effect on the still silent channel.
++extern void son3dstart(int chanid, son3dchan &s);
++// Replaces Mix_SetPanning in syncchannel when the channel is or was processed.
++extern void son3dsync(int chanid, son3dchan &s, int pan);
++// Mixer opened (end of initsound) / closed (after Mix_CloseAudio).
++extern void son3daudioopen();
++extern void son3daudioclose();
++
++#endif
+diff --git a/src/engine/son3d_dsp.cpp b/src/engine/son3d_dsp.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..6df5ee1ace153fb66911f1ad20376eff3087ddbe
+--- /dev/null
++++ b/src/engine/son3d_dsp.cpp
+@@ -0,0 +1,468 @@
++// son3d_dsp.cpp: Steam Audio (phonon.dll) processing of one SDL_mixer channel.
++//
++// phonon.dll is loaded at runtime from an explicit path, only when 3D sound is switched on:
++// with 3D sound off the game never loads it and never registers an effect.
++//
++// SDL_mixer hands every channel to its effects in the device format (16-bit stereo) before
++// applying the channel volume, so the distance attenuation of sound.cpp is kept as is and the
++// effect only replaces the stereo panning (headphones) or adds occlusion (speakers).
++//
++// Steam Audio works on fixed frames. A one-shot sound always starts at the beginning of an audio
++// callback and every call but the last covers the whole callback, so frames are processed in
++// place without added delay (the last partial frame is zero padded). A looping sound is split at
++// the loop point by SDL_mixer, so it goes through a FIFO with a constant delay of one frame.
++
++#ifdef WIN32
++#include <windows.h>
++typedef HMODULE libhandle;
++#define LIBLOAD(path) LoadLibraryExA(path, NULL, LOAD_WITH_ALTERED_SEARCH_PATH)
++#define LIBSYM(lib, name) GetProcAddress(lib, name)
++#define LIBFREE(lib) FreeLibrary(lib)
++#else
++#include <dlfcn.h>
++typedef void *libhandle;
++#define LIBLOAD(path) dlopen(path, RTLD_NOW | RTLD_LOCAL)
++#define LIBSYM(lib, name) dlsym(lib, name)
++#define LIBFREE(lib) dlclose(lib)
++#endif
++#include <string.h>
++#include <math.h>
++#include <atomic>
++#include "SDL.h"
++#include "phonon/phonon.h"
++#include "son3d_dsp.h"
++
++#define SON3D_FUNCS \
++    F(iplContextCreate) F(iplContextRelease) \
++    F(iplHRTFCreate) F(iplHRTFRelease) \
++    F(iplBinauralEffectCreate) F(iplBinauralEffectRelease) F(iplBinauralEffectReset) F(iplBinauralEffectApply) \
++    F(iplDirectEffectCreate) F(iplDirectEffectRelease) F(iplDirectEffectReset) F(iplDirectEffectApply)
++
++#define F(name) static decltype(&::name) p_##name = NULL;
++SON3D_FUNCS
++#undef F
++
++enum { MAXFRAME = 512 };
++
++struct chanstate
++{
++    IPLBinauralEffect binaural;
++    IPLDirectEffect directmono, directstereo;
++    int mode;
++    bool looping, occlusion, first;
++    SDL_SpinLock lock;
++    son3dparams next, cur;
++    std::atomic<int> attached;
++    float *inacc[2], *outq[2];
++    int inlen, outlen;
++};
++
++static libhandle phonon = NULL;
++static IPLContext context = NULL;
++static IPLHRTF hrtf = NULL;
++static chanstate *chans = NULL;
++static int samplerate = 0, framesize = 0, maxsamples = 0, numchannels = 0;
++static float *scratch[2] = { NULL, NULL };
++static float frmono[MAXFRAME], frmid[MAXFRAME], frout[2][MAXFRAME];
++static char lastlog[256] = "";
++
++// HRTF make-up gain: same average loudness as the current panning on the 206 game sounds
++// (bench 2c, horizontal directions every 30 degrees, 30/09/2026).
++static std::atomic<float> transmission[3], hrtfgain(0.758f);
++static std::atomic<int> bilinear(1), rampframes(0);
++static int frameoverride = 0;
++
++static std::atomic<long long> st_callbacks(0), st_cbticks(0), st_cbmax(0), st_calls(0), st_frames(0), st_clipped(0), st_cbover10(0);
++static std::atomic<int> st_maxactive(0);
++static long long cbacc = 0; // audio thread only
++static int cbactive = 0;    // audio thread only
++
++static void IPLCALL logfunc(IPLLogLevel level, const char *msg)
++{
++    if(level != IPL_LOGLEVEL_ERROR && level != IPL_LOGLEVEL_WARNING) return;
++    strncpy(lastlog, msg, sizeof(lastlog)-1);
++    lastlog[sizeof(lastlog)-1] = '\0';
++}
++
++const char *son3d_dsp_lastlog() { return lastlog; }
++
++static void seterr(char *err, size_t errlen, const char *msg)
++{
++    if(!err || !errlen) return;
++    strncpy(err, msg, errlen-1);
++    err[errlen-1] = '\0';
++}
++
++bool son3d_dsp_loaded() { return context != NULL; }
++
++bool son3d_dsp_load(const char *dllpath, char *err, size_t errlen)
++{
++    if(context) return true;
++    if(!phonon)
++    {
++        phonon = LIBLOAD(dllpath);
++        if(!phonon) { seterr(err, errlen, "phonon.dll introuvable"); return false; }
++    }
++    bool ok = true;
++#define F(name) if(!(p_##name = (decltype(&::name))LIBSYM(phonon, #name))) ok = false;
++    SON3D_FUNCS
++#undef F
++    if(!ok) { seterr(err, errlen, "phonon.dll incomplet"); son3d_dsp_unload(); return false; }
++
++    IPLContextSettings settings;
++    memset(&settings, 0, sizeof(settings));
++    settings.version = STEAMAUDIO_VERSION;
++    settings.logCallback = logfunc;
++    settings.simdLevel = IPL_SIMDLEVEL_AVX2;
++    if(p_iplContextCreate(&settings, &context) != IPL_STATUS_SUCCESS)
++    {
++        context = NULL;
++        seterr(err, errlen, "version de phonon.dll incompatible");
++        son3d_dsp_unload();
++        return false;
++    }
++    transmission[0] = 0.55f;
++    transmission[1] = 0.25f;
++    transmission[2] = 0.12f;
++    return true;
++}
++
++void son3d_dsp_unload()
++{
++    son3d_dsp_close();
++    if(context) { p_iplContextRelease(&context); context = NULL; }
++    if(phonon) { LIBFREE(phonon); phonon = NULL; }
++#define F(name) p_##name = NULL;
++    SON3D_FUNCS
++#undef F
++}
++
++bool son3d_dsp_isopen() { return chans != NULL; }
++bool son3d_dsp_hashrtf() { return hrtf != NULL; }
++int son3d_dsp_framesize() { return framesize; }
++int son3d_dsp_freq() { return samplerate; }
++int son3d_dsp_numchans() { return numchannels; }
++
++void son3d_dsp_close()
++{
++    if(chans)
++    {
++        for(int i = 0; i < numchannels; i++)
++        {
++            chanstate &c = chans[i];
++            if(c.binaural) p_iplBinauralEffectRelease(&c.binaural);
++            if(c.directmono) p_iplDirectEffectRelease(&c.directmono);
++            if(c.directstereo) p_iplDirectEffectRelease(&c.directstereo);
++            for(int k = 0; k < 2; k++) { delete[] c.inacc[k]; delete[] c.outq[k]; }
++        }
++        delete[] chans;
++        chans = NULL;
++    }
++    for(int k = 0; k < 2; k++) { delete[] scratch[k]; scratch[k] = NULL; }
++    if(hrtf) { p_iplHRTFRelease(&hrtf); hrtf = NULL; }
++    numchannels = framesize = maxsamples = samplerate = 0;
++}
++
++bool son3d_dsp_open(int freq, int buffersamples, int numchans, char *err, size_t errlen)
++{
++    son3d_dsp_close();
++    if(!context) { seterr(err, errlen, "Steam Audio non charge"); return false; }
++    // About 2.9 ms per frame (128 samples at 44100 Hz): direction changes are applied in steps
++    // as fine as the current panning, for about 1.3 ms of HRTF delay (bench, 30/09/2026).
++    // The frame must divide the callback length so that one-shot sounds get no added delay.
++    int deffs = freq >= 32000 ? 128 : 64, fs = frameoverride > 0 ? frameoverride : deffs;
++    while(fs > 16 && buffersamples % fs) fs /= 2;
++    if(buffersamples % fs) fs = deffs;
++    samplerate = freq;
++    framesize = fs;
++    maxsamples = buffersamples;
++
++    IPLAudioSettings audio = { samplerate, framesize };
++    IPLHRTFSettings hs;
++    memset(&hs, 0, sizeof(hs));
++    hs.type = IPL_HRTFTYPE_DEFAULT;
++    hs.volume = 1.0f;
++    hs.normType = IPL_HRTFNORMTYPE_RMS;
++    // The built-in HRTF only exists at 24000, 44100 and 48000 Hz: without it only the
++    // speakers mode (occlusion) is available.
++    if(p_iplHRTFCreate(context, &audio, &hs, &hrtf) != IPL_STATUS_SUCCESS) hrtf = NULL;
++
++    numchannels = numchans;
++    chans = new chanstate[numchannels];
++    bool ok = true;
++    for(int i = 0; i < numchannels; i++)
++    {
++        chanstate &c = chans[i];
++        c.binaural = NULL;
++        c.directmono = c.directstereo = NULL;
++        c.mode = SON3D_OFF;
++        c.looping = c.occlusion = false;
++        c.first = true;
++        c.lock = 0;
++        memset(&c.next, 0, sizeof(c.next));
++        c.cur = c.next;
++        c.attached = 0;
++        c.inlen = c.outlen = 0;
++        for(int k = 0; k < 2; k++)
++        {
++            c.inacc[k] = new float[framesize];
++            c.outq[k] = new float[2*framesize + maxsamples];
++        }
++        IPLBinauralEffectSettings bs = { hrtf };
++        IPLDirectEffectSettings ms = { 1 }, ss = { 2 };
++        if(hrtf && p_iplBinauralEffectCreate(context, &audio, &bs, &c.binaural) != IPL_STATUS_SUCCESS) { c.binaural = NULL; ok = false; }
++        if(p_iplDirectEffectCreate(context, &audio, &ms, &c.directmono) != IPL_STATUS_SUCCESS) { c.directmono = NULL; ok = false; }
++        if(p_iplDirectEffectCreate(context, &audio, &ss, &c.directstereo) != IPL_STATUS_SUCCESS) { c.directstereo = NULL; ok = false; }
++    }
++    for(int k = 0; k < 2; k++) scratch[k] = new float[maxsamples];
++    if(!ok)
++    {
++        seterr(err, errlen, "effets Steam Audio indisponibles");
++        son3d_dsp_close();
++        return false;
++    }
++    return true;
++}
++
++void son3d_dsp_settransmission(float low, float mid, float high)
++{
++    transmission[0] = low;
++    transmission[1] = mid;
++    transmission[2] = high;
++}
++
++void son3d_dsp_sethrtfgain(float gain) { hrtfgain = gain; }
++void son3d_dsp_setbilinear(bool on) { bilinear = on ? 1 : 0; }
++void son3d_dsp_setramp(int frames) { rampframes = frames; }
++void son3d_dsp_setframesize(int frames) { frameoverride = frames > 0 && frames <= MAXFRAME ? frames : 0; }
++
++void son3d_dsp_prepare(int chanid, int mode, bool looping, bool occlusion, const son3dparams &p)
++{
++    if(!chans || chanid < 0 || chanid >= numchannels) return;
++    chanstate &c = chans[chanid];
++    c.mode = mode;
++    c.looping = looping;
++    c.occlusion = occlusion;
++    if(c.binaural) p_iplBinauralEffectReset(c.binaural);
++    if(mode == SON3D_CASQUE && !c.binaural) mode = c.mode = SON3D_ENCEINTES;
++    p_iplDirectEffectReset(c.directmono);
++    p_iplDirectEffectReset(c.directstereo);
++    c.inlen = 0;
++    c.outlen = 0;
++    if(looping)
++    {
++        memset(c.outq[0], 0, framesize*sizeof(float));
++        memset(c.outq[1], 0, framesize*sizeof(float));
++        c.outlen = framesize;
++    }
++    SDL_AtomicLock(&c.lock);
++    c.next = p;
++    SDL_AtomicUnlock(&c.lock);
++    c.cur = p;
++    c.first = true;
++    c.attached = 1;
++}
++
++void son3d_dsp_update(int chanid, const son3dparams &p)
++{
++    if(!chans || chanid < 0 || chanid >= numchannels) return;
++    chanstate &c = chans[chanid];
++    SDL_AtomicLock(&c.lock);
++    c.next = p;
++    SDL_AtomicUnlock(&c.lock);
++}
++
++bool son3d_dsp_attached(int chanid)
++{
++    return chans && chanid >= 0 && chanid < numchannels && chans[chanid].attached;
++}
++
++void son3d_dsp_setattached(int chanid, bool on)
++{
++    if(chans && chanid >= 0 && chanid < numchannels) chans[chanid].attached = on ? 1 : 0;
++}
++
++int son3d_dsp_mode(int chanid)
++{
++    return chans && chanid >= 0 && chanid < numchannels && chans[chanid].attached ? chans[chanid].mode : SON3D_OFF;
++}
++
++void son3d_dsp_done(int chanid, void *udata)
++{
++    son3d_dsp_setattached(chanid, false);
++}
++
++static void lerpparams(const son3dparams &a, const son3dparams &b, float t, son3dparams &o)
++{
++    float d[3], len = 0;
++    for(int k = 0; k < 3; k++) { d[k] = a.dir[k] + (b.dir[k] - a.dir[k])*t; len += d[k]*d[k]; }
++    len = sqrtf(len);
++    if(len > 1e-3f) for(int k = 0; k < 3; k++) o.dir[k] = d[k]/len;
++    else for(int k = 0; k < 3; k++) o.dir[k] = b.dir[k];
++    o.blend = a.blend + (b.blend - a.blend)*t;
++    o.occlusion = a.occlusion + (b.occlusion - a.occlusion)*t;
++}
++
++static void runframe(chanstate &c, const son3dparams &p, const float *inl, const float *inr, float *outl, float *outr)
++{
++    IPLDirectEffectParams dp;
++    memset(&dp, 0, sizeof(dp));
++    dp.flags = (IPLDirectEffectFlags)(IPL_DIRECTEFFECTFLAGS_APPLYOCCLUSION | IPL_DIRECTEFFECTFLAGS_APPLYTRANSMISSION);
++    dp.transmissionType = IPL_TRANSMISSIONTYPE_FREQDEPENDENT;
++    dp.distanceAttenuation = 1;
++    dp.directivity = 1;
++    dp.occlusion = p.occlusion;
++    for(int k = 0; k < 3; k++) { dp.airAbsorption[k] = 1; dp.transmission[k] = transmission[k]; }
++
++    if(c.mode == SON3D_CASQUE)
++    {
++        for(int i = 0; i < framesize; i++) frmono[i] = 0.5f*(inl[i] + inr[i]);
++        float *src = frmono;
++        if(c.occlusion)
++        {
++            float *din[1] = { frmono }, *dout[1] = { frmid };
++            IPLAudioBuffer bin = { 1, framesize, din }, bout = { 1, framesize, dout };
++            p_iplDirectEffectApply(c.directmono, &dp, &bin, &bout);
++            src = frmid;
++        }
++        IPLBinauralEffectParams bp;
++        memset(&bp, 0, sizeof(bp));
++        bp.direction.x = p.dir[0];
++        bp.direction.y = p.dir[1];
++        bp.direction.z = p.dir[2];
++        bp.interpolation = bilinear ? IPL_HRTFINTERPOLATION_BILINEAR : IPL_HRTFINTERPOLATION_NEAREST;
++        bp.spatialBlend = p.blend;
++        bp.hrtf = hrtf;
++        float *bin1[1] = { src }, *bout2[2] = { frout[0], frout[1] };
++        IPLAudioBuffer bin = { 1, framesize, bin1 }, bout = { 2, framesize, bout2 };
++        p_iplBinauralEffectApply(c.binaural, &bp, &bin, &bout);
++        float g = hrtfgain;
++        for(int i = 0; i < framesize; i++) { outl[i] = g*frout[0][i]; outr[i] = g*frout[1][i]; }
++    }
++    else
++    {
++        float *din[2] = { (float *)inl, (float *)inr }, *dout[2] = { outl, outr };
++        IPLAudioBuffer bin = { 2, framesize, din }, bout = { 2, framesize, dout };
++        p_iplDirectEffectApply(c.directstereo, &dp, &bin, &bout);
++    }
++}
++
++void son3d_dsp_effect(int chanid, void *stream, int len, void *udata)
++{
++    if(!chans || chanid < 0 || chanid >= numchannels) return;
++    chanstate &c = chans[chanid];
++    int n = len/4;
++    if(n <= 0 || n > maxsamples || !c.attached) return;
++    Uint64 t0 = SDL_GetPerformanceCounter();
++
++    Sint16 *s = (Sint16 *)stream;
++    for(int i = 0; i < n; i++)
++    {
++        scratch[0][i] = s[2*i]*(1.0f/32768.0f);
++        scratch[1][i] = s[2*i+1]*(1.0f/32768.0f);
++    }
++
++    son3dparams target;
++    SDL_AtomicLock(&c.lock);
++    target = c.next;
++    SDL_AtomicUnlock(&c.lock);
++    if(c.first) { c.cur = target; c.first = false; }
++    son3dparams from = c.cur, p;
++
++    int nfr = (c.inlen + n)/framesize, pad = c.outlen + nfr*framesize < n ? 1 : 0, total = nfr + pad, k = 0, ip = 0;
++    for(;;)
++    {
++        int take = framesize - c.inlen;
++        if(take > n - ip) take = n - ip;
++        memcpy(&c.inacc[0][c.inlen], &scratch[0][ip], take*sizeof(float));
++        memcpy(&c.inacc[1][c.inlen], &scratch[1][ip], take*sizeof(float));
++        c.inlen += take;
++        ip += take;
++        if(c.inlen < framesize)
++        {
++            if(ip < n || !pad) break;
++            // last call of a one-shot sound: zero pad the partial frame
++            memset(&c.inacc[0][c.inlen], 0, (framesize - c.inlen)*sizeof(float));
++            memset(&c.inacc[1][c.inlen], 0, (framesize - c.inlen)*sizeof(float));
++            pad = 0;
++        }
++        // direction, blend and occlusion glide to the new value over the frames of the callback
++        // (or over rampframes frames when set), instead of jumping once per callback
++        int ramp = rampframes > 0 && rampframes < total ? int(rampframes) : total;
++        lerpparams(from, target, k+1 >= ramp ? 1.0f : float(k+1)/ramp, p);
++        runframe(c, p, c.inacc[0], c.inacc[1], &c.outq[0][c.outlen], &c.outq[1][c.outlen]);
++        c.outlen += framesize;
++        c.inlen = 0;
++        k++;
++        if(ip >= n && !pad) break;
++    }
++    c.cur = target;
++
++    int clipped = 0;
++    int avail = c.outlen < n ? c.outlen : n;
++    for(int i = 0; i < avail; i++)
++    {
++        for(int ch = 0; ch < 2; ch++)
++        {
++            // The HRTF can lift the near ear above full scale on the loudest sounds (bench:
++            // 0.004% of samples): soft knee above 80% instead of a hard clip.
++            float v = c.outq[ch][i], a = fabsf(v);
++            if(a > 0.8f)
++            {
++                a = 0.8f + 0.2f*tanhf((a - 0.8f)*5.0f);
++                v = v < 0 ? -a : a;
++                clipped++;
++            }
++            v *= 32768.0f;
++            int iv = int(v >= 0 ? v + 0.5f : v - 0.5f);
++            if(iv > 32767) iv = 32767;
++            else if(iv < -32768) iv = -32768;
++            s[2*i+ch] = Sint16(iv);
++        }
++    }
++    for(int i = avail; i < n; i++) s[2*i] = s[2*i+1] = 0;
++    c.outlen -= avail;
++    if(c.outlen > 0)
++    {
++        memmove(c.outq[0], &c.outq[0][avail], c.outlen*sizeof(float));
++        memmove(c.outq[1], &c.outq[1][avail], c.outlen*sizeof(float));
++    }
++
++    Uint64 t1 = SDL_GetPerformanceCounter();
++    cbacc += (long long)(t1 - t0);
++    cbactive++;
++    st_calls++;
++    st_frames += k;
++    if(clipped) st_clipped += clipped;
++}
++
++void son3d_dsp_postmix(int chan, void *stream, int len, void *udata)
++{
++    long long period = (long long)SDL_GetPerformanceFrequency() * (len/4) / (samplerate > 0 ? samplerate : 22050);
++    st_callbacks++;
++    st_cbticks += cbacc;
++    if(cbacc > st_cbmax) st_cbmax = cbacc;
++    if(cbacc*10 > period) st_cbover10++;
++    if(cbactive > st_maxactive) st_maxactive = cbactive;
++    cbacc = 0;
++    cbactive = 0;
++}
++
++void son3d_dsp_getstats(son3dstats &s)
++{
++    s.callbacks = st_callbacks;
++    s.cbticks = st_cbticks;
++    s.cbmax = st_cbmax;
++    s.calls = st_calls;
++    s.frames = st_frames;
++    s.clipped = st_clipped;
++    s.cbover10 = st_cbover10;
++    s.maxactive = st_maxactive;
++    s.freq = (long long)SDL_GetPerformanceFrequency();
++}
++
++void son3d_dsp_resetstats()
++{
++    st_callbacks = 0; st_cbticks = 0; st_cbmax = 0; st_calls = 0; st_frames = 0; st_clipped = 0; st_cbover10 = 0;
++    st_maxactive = 0;
++}
+diff --git a/src/engine/son3d_dsp.h b/src/engine/son3d_dsp.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..5d7dca539e974fad0424cee7b2f72cb66ad82b63
+--- /dev/null
++++ b/src/engine/son3d_dsp.h
+@@ -0,0 +1,68 @@
++// son3d_dsp.h: Steam Audio (phonon.dll) processing of one SDL_mixer channel.
++// No engine dependency, so that an offline bench can run the same code.
++
++#ifndef SON3D_DSP_H
++#define SON3D_DSP_H
++
++#include <stddef.h>
++
++enum { SON3D_OFF = 0, SON3D_CASQUE = 1, SON3D_ENCEINTES = 2 };
++
++struct son3dparams
++{
++    float dir[3];     // unit vector listener -> source, Steam Audio listener space: +x right, +y up, -z ahead
++    float blend;      // 0 = centred (source on the listener), 1 = fully spatialised
++    float occlusion;  // 1 = clear line of sight, 0 = every sample point blocked
++};
++
++struct son3dstats
++{
++    long long callbacks;      // audio callbacks seen by the post-mix hook
++    long long cbticks, cbmax; // processing time added per callback (performance counter ticks), sum and max
++    long long calls, frames;  // effect calls, Steam Audio frames
++    long long clipped;        // output samples above 80% of full scale (soft knee)
++    long long cbover10;       // callbacks where the added time exceeded 10% of the buffer period
++    int maxactive;            // most spatialised channels processed in one callback
++    long long freq;           // performance counter frequency
++};
++
++// Loads phonon.dll from an explicit path and creates the Steam Audio context. Idempotent.
++bool son3d_dsp_load(const char *dllpath, char *err, size_t errlen);
++void son3d_dsp_unload();
++bool son3d_dsp_loaded();
++
++// Creates the HRTF and the per-channel effects for the opened mixer. Audio must not use the effects yet.
++bool son3d_dsp_open(int freq, int buffersamples, int numchans, char *err, size_t errlen);
++void son3d_dsp_close();
++bool son3d_dsp_isopen();
++bool son3d_dsp_hashrtf(); // false at 22050 Hz: only SON3D_ENCEINTES then
++int son3d_dsp_framesize();
++int son3d_dsp_freq();
++int son3d_dsp_numchans();
++
++// Tuning shared by every channel (main thread, takes effect on the next frame).
++void son3d_dsp_settransmission(float low, float mid, float high);
++void son3d_dsp_sethrtfgain(float gain);
++void son3d_dsp_setbilinear(bool on);
++void son3d_dsp_setramp(int frames); // 0 = whole callback
++void son3d_dsp_setframesize(int frames); // 0 = automatic; takes effect at the next son3d_dsp_open
++
++// Main thread. Resets the channel state; call only while the effect is not registered with SDL_mixer.
++void son3d_dsp_prepare(int chan, int mode, bool looping, bool occlusion, const son3dparams &p);
++// Main thread, any time: parameters picked up by the next audio callback.
++void son3d_dsp_update(int chan, const son3dparams &p);
++bool son3d_dsp_attached(int chan);
++void son3d_dsp_setattached(int chan, bool on);
++int son3d_dsp_mode(int chan);
++
++// SDL_mixer Mix_EffectFunc_t / Mix_EffectDone_t (16-bit stereo interleaved).
++void son3d_dsp_effect(int chan, void *stream, int len, void *udata);
++void son3d_dsp_done(int chan, void *udata);
++// Call once per audio callback after all channels (Mix_RegisterEffect on MIX_CHANNEL_POST).
++void son3d_dsp_postmix(int chan, void *stream, int len, void *udata);
++
++void son3d_dsp_getstats(son3dstats &s);
++void son3d_dsp_resetstats();
++const char *son3d_dsp_lastlog();
++
++#endif
+diff --git a/src/engine/sound.cpp b/src/engine/sound.cpp
+index c19cab7dc094d8b8ce3d62663b332321fb105b92..95fb44811b58c27bc63c57c5660aeb7c5eaab54a 100644
+--- a/src/engine/sound.cpp
++++ b/src/engine/sound.cpp
+@@ -2,6 +2,7 @@
+ 
+ #include "engine.h"
+ #include "SDL_mixer.h"
++#include "son3d.h"
+ 
+ bool nosound = true;
+ 
+@@ -50,6 +51,8 @@ struct soundchannel
+     extentity *ent; 
+     int radius, volume, pan, flags;
+     bool dirty;
++    int soundid;
++    son3dchan s3; // 3D sound (son3d.cpp), unused while son3d is off
+ 
+     soundchannel(int id) : id(id) { reset(); }
+ 
+@@ -67,12 +70,14 @@ struct soundchannel
+         pan = -1;
+         flags = 0;
+         dirty = false;
++        soundid = -1;
++        s3.reset();
+     }
+ };
+ vector<soundchannel> channels;
+ int maxchannels = 0;
+ 
+-soundchannel &newchannel(int n, soundslot *slot, const vec *loc = NULL, extentity *ent = NULL, int flags = 0, int radius = 0)
++soundchannel &newchannel(int n, soundslot *slot, const vec *loc = NULL, extentity *ent = NULL, int flags = 0, int radius = 0, int soundid = -1)
+ {
+     if(ent)
+     {
+@@ -86,8 +91,9 @@ soundchannel &newchannel(int n, soundslot *slot, const vec *loc = NULL, extentit
+     if(loc) chan.loc = *loc;
+     chan.slot = slot;
+     chan.ent = ent;
+-    chan.flags = 0;
++    chan.flags = flags;
+     chan.radius = radius;
++    chan.soundid = soundid;
+     return chan;
+ }
+ 
+@@ -103,7 +109,8 @@ void syncchannel(soundchannel &chan)
+ {
+     if(!chan.dirty) return;
+     if(!Mix_FadingChannel(chan.id)) Mix_Volume(chan.id, chan.volume);
+-    Mix_SetPanning(chan.id, 255-chan.pan, chan.pan);
++    if(chan.s3.mode || son3d_dsp_attached(chan.id)) son3dsync(chan.id, chan.s3, chan.pan);
++    else Mix_SetPanning(chan.id, 255-chan.pan, chan.pan);
+     chan.dirty = false;
+ }
+ 
+@@ -229,6 +236,7 @@ void initsound()
+ 	Mix_AllocateChannels(soundchans);	
+     maxchannels = soundchans;
+     nosound = false;
++    son3daudioopen();
+ }
+ 
+ void musicdone()
+@@ -581,6 +589,7 @@ void clear_sound()
+     mapsounds.clear();
+     samples.clear();
+     Mix_CloseAudio();
++    son3daudioclose();
+     resetchannels();
+ }
+ 
+@@ -655,11 +664,16 @@ bool updatechannel(soundchannel &chan)
+             pan = int(255.9f*(0.5f - 0.5f*v.x/v.magnitude2())); // range is from 0 (left) to 255 (right)
+         }
+     }
++    int mix = 100;
++    if(chan.soundid >= 0) mix = game::soundmixvol(chan.soundid, chan.ent!=NULL || (chan.flags&SND_MAP));
++    vol = (vol*clamp(mix, 0, 200))/100;
+     vol = (vol*MIX_MAX_VOLUME*chan.slot->volume)/255/255;
+     vol = min(vol, MIX_MAX_VOLUME);
+-    if(vol == chan.volume && pan == chan.pan) return false;
++    int s3 = son3dupdate(chan.id, chan.s3, chan.hasloc() ? &chan.loc : NULL);
++    if(vol == chan.volume && pan == chan.pan && s3 == chan.s3.mode) return false;
+     chan.volume = vol;
+     chan.pan = pan;
++    chan.s3.mode = s3;
+     chan.dirty = true;
+     return true;
+ }  
+@@ -790,8 +804,10 @@ int playsound(int n, const vec *loc, extentity *ent, int flags, int loops, int f
+     if(chanid < 0) loopv(channels) if(!channels[i].volume) { chanid = i; break; }
+     if(chanid < 0) return -1;
+ 
+-    soundchannel &chan = newchannel(chanid, &slot, loc, ent, flags, radius);
++    soundchannel &chan = newchannel(chanid, &slot, loc, ent, flags, radius, n);
++    chan.s3.looping = loops != 0;
+     updatechannel(chan);
++    if(chan.s3.mode) son3dstart(chanid, chan.s3);
+     int playing = -1;
+     if(fade) 
+     {
+@@ -848,6 +864,7 @@ void resetsound()
+         }
+         if(musicstream) musicstream->seek(0, SEEK_SET);
+         Mix_CloseAudio();
++        son3daudioclose();
+     }
+     initsound();
+     resetchannels();
+diff --git a/third_party/fetch-steam-audio.ps1 b/third_party/fetch-steam-audio.ps1
+new file mode 100644
+index 0000000000000000000000000000000000000000..0121d6cf201a44bd0bd69c77109bd655d3e6ff59
+--- /dev/null
++++ b/third_party/fetch-steam-audio.ps1
+@@ -0,0 +1,26 @@
++# Download the official Steam Audio 4.8.1 release and copy phonon.dll to bin64\.
++# phonon.dll is only loaded when 3D sound (son3d) is switched on in game.
++# The headers in src\include\phonon come from the same release (Apache 2.0).
++# The archive SHA-256 is the one recorded in distrib\docs\licenses\THIRD-PARTY-NOTICES.txt.
++$ErrorActionPreference = "Stop"
++$sha = "4a0aa5ec1176f38f0b0993a37c2259d9e86f27e22d5e24f83ec4c3cb9a1d5449"
++$url = "https://github.com/ValveSoftware/steam-audio/releases/download/v4.8.1/steamaudio_4.8.1.zip"
++$root = Split-Path -Parent $PSScriptRoot
++$dl = Join-Path $PSScriptRoot "downloads"
++New-Item -ItemType Directory -Force -Path $dl | Out-Null
++$zip = Join-Path $dl "steamaudio_4.8.1.zip"
++if (-not (Test-Path $zip)) {
++    Write-Host "Downloading $url"
++    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
++    Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $zip
++}
++$got = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
++if ($got -ne $sha) { throw "SHA-256 mismatch for $zip ($got)" }
++$tmp = Join-Path $dl "steamaudio-extract"
++if (-not (Test-Path $tmp)) { Expand-Archive -LiteralPath $zip -DestinationPath $tmp -Force }
++$dll = Get-ChildItem $tmp -Recurse -Filter phonon.dll | Where-Object { $_.FullName -match 'windows-x64' } | Select-Object -First 1
++if (-not $dll) { throw "phonon.dll (windows-x64) not found in the archive" }
++$bin = Join-Path $root "bin64"
++New-Item -ItemType Directory -Force -Path $bin | Out-Null
++Copy-Item $dll.FullName $bin -Force
++Write-Host "OK: $bin\phonon.dll"

@@ -1,0 +1,108 @@
+L4ZY 2026.10.16.1: Sound mix
+
+Apply after: 00-build-fix to 04-low-latency (in order)
+From the root of the source tree: git apply 05-sound-mix.patch
+Notes: 05-sound-mix.md
+
+diff --git a/src/engine/sound.cpp b/src/engine/sound.cpp
+index 96003ea50b5c7a545ec130b862a4a1b49d61cb54..c19cab7dc094d8b8ce3d62663b332321fb105b92 100644
+--- a/src/engine/sound.cpp
++++ b/src/engine/sound.cpp
+@@ -730,6 +730,7 @@ void preloadmapsounds()
+ int playsound(int n, const vec *loc, extentity *ent, int flags, int loops, int fade, int chanid, int radius, int expire)
+ {
+     if(nosound || !soundvol || (minimized && !minimizedsounds)) return -1;
++    if(game::soundmixvol(n, ent || flags&SND_MAP) <= 0) return -1;
+ 
+     soundtype &sounds = ent || flags&SND_MAP ? mapsounds : gamesounds;
+     if(!sounds.configs.inrange(n)) { conoutf(CON_WARN, "unregistered sound: %d", n); return -1; }
+diff --git a/src/fpsgame/fps.cpp b/src/fpsgame/fps.cpp
+index e30e491b51a1dacb5688c5ec8a791c2fe65e701e..aaef5cfed3e0a1333557a3168100af6e2f5d50d1 100644
+--- a/src/fpsgame/fps.cpp
++++ b/src/fpsgame/fps.cpp
+@@ -1178,6 +1178,61 @@ namespace game
+         }
+     }
+ 
++    VARP(mixweapons, 0, 100, 200);
++    VARP(mixhits, 0, 100, 200);
++    VARP(mixpain, 0, 100, 200);
++    VARP(mixitems, 0, 100, 200);
++    VARP(mixannounce, 0, 100, 200);
++    VARP(mixflags, 0, 100, 200);
++    VARP(mixmove, 0, 100, 200);
++    VARP(mixworld, 0, 100, 200);
++
++    int soundmixvol(int n, bool mapsound)
++    {
++        if(mapsound) return mixworld;
++        switch(n)
++        {
++            case S_RIFLE: case S_PUNCH1: case S_SG: case S_CG:
++            case S_RLFIRE: case S_RLHIT: case S_FLAUNCH: case S_FEXPLODE:
++            case S_PISTOL: case S_CHAINSAW_ATTACK: case S_CHAINSAW_IDLE:
++            case S_ICEBALL: case S_SLIMEBALL:
++                return mixweapons;
++            case S_HIT:
++                return mixhits;
++            case S_PAIN1: case S_PAIN2: case S_PAIN3: case S_PAIN4: case S_PAIN5: case S_PAIN6:
++            case S_DIE1: case S_DIE2:
++            case S_GRUNT1: case S_GRUNT2:
++            case S_PAINO: case S_PAINR: case S_DEATHR:
++            case S_PAINE: case S_DEATHE: case S_PAINS: case S_DEATHS:
++            case S_PAINB: case S_DEATHB: case S_PAINP: case S_PIGGR2:
++            case S_PAINH: case S_DEATHH: case S_PAIND: case S_DEATHD:
++            case S_PIGR1: case S_BURN:
++                return mixpain;
++            case S_WEAPLOAD: case S_ITEMAMMO: case S_ITEMHEALTH:
++            case S_ITEMARMOUR: case S_ITEMPUP: case S_ITEMSPAWN:
++            case S_NOAMMO: case S_PUPOUT:
++                return mixitems;
++            case S_V_BASECAP: case S_V_BASELOST: case S_V_FIGHT:
++            case S_V_BOOST: case S_V_BOOST10: case S_V_QUAD: case S_V_QUAD10:
++            case S_V_RESPAWNPOINT:
++                return mixannounce;
++            case S_FLAGPICKUP: case S_FLAGDROP: case S_FLAGRETURN:
++            case S_FLAGSCORE: case S_FLAGRESET: case S_FLAGFAIL:
++                return mixflags;
++            case S_JUMP: case S_LAND: case S_SPLASH1: case S_SPLASH2:
++            case S_JUMPPAD: case S_TELEPORT: case S_RUMBLE:
++                return mixmove;
++            default:
++                return 100;
++        }
++    }
++
++    ICOMMAND(mixreset, "", (),
++    {
++        mixweapons = mixhits = mixpain = mixitems = 100;
++        mixannounce = mixflags = mixmove = mixworld = 100;
++    });
++
+     bool serverinfostartcolumn(g3d_gui *g, int i)
+     {
+         static const char * const names[] = { "ping ", "players ", "mode ", "map ", "time ", "master ", "host ", "port ", "description " };
+diff --git a/src/rpggame/rpg.cpp b/src/rpggame/rpg.cpp
+index 2a047b7ce7ac9ff2c2446704d9b7f3e858e155d4..b8b5be369286b97e247810e231735ca47f442271 100644
+--- a/src/rpggame/rpg.cpp
++++ b/src/rpggame/rpg.cpp
+@@ -276,6 +276,7 @@ namespace game
+     }
+ 
+     int maxsoundradius(int n) { return 500; }
++    int soundmixvol(int n, bool mapsound) { (void)n; (void)mapsound; return 100; }
+ 
+     void writegamedata(vector<char> &extras) {}
+     void readgamedata (vector<char> &extras) {}
+diff --git a/src/shared/igame.h b/src/shared/igame.h
+index c2b6432599478ce5a05da65f6c48eac2540ae609..be49038e0e19b2ee0c0af95e9e74957c7818bb3a 100644
+--- a/src/shared/igame.h
++++ b/src/shared/igame.h
+@@ -99,6 +99,7 @@ namespace game
+     extern void particletrack(physent *owner, vec &o, vec &d);
+     extern void dynlighttrack(physent *owner, vec &o, vec &hud);
+     extern int maxsoundradius(int n);
++    extern int soundmixvol(int n, bool mapsound);
+     extern bool serverinfostartcolumn(g3d_gui *g, int i);
+     extern void serverinfoendcolumn(g3d_gui *g, int i);
+     extern bool serverinfoentry(g3d_gui *g, int i, const char *name, int port, const char *desc, const char *map, int ping, const vector<int> &attr, int np);

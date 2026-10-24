@@ -1,0 +1,3813 @@
+L4ZY 2026.10.16.1: Menus
+
+Apply after: 00-build-fix to 15-launcher-and-updates (in order)
+From the root of the source tree: git apply 16-menus.patch
+Notes: 16-menus.md
+
+diff --git a/data/menus.cfg b/data/menus.cfg
+index 469b17b5f92afb7c09008f0a98e75e31b206e709..641455c7ec2001eab95e51fff26424cc695b7c55 100644
+--- a/data/menus.cfg
++++ b/data/menus.cfg
+@@ -18,62 +18,258 @@ checkrolloveraction = [
+ 
+ chooseplayermodel = [guirolloveraction = (playermodelbutton $playermodel); showgui playermodel]
+ 
+-newgui main [
++// Section title with a bit of air. arg1 = label (no brackets).
++guisection = [
++    guistrut 0.45
++    guititle $arg1
++    guistrut 0.18
++]
++
++friendhudtitle = [
++    if (< $arg1 0) [
++        guitext (concatword "^f7" $arg2) 0
++    ] [
++        guitext (concatword "^f" $arg1 $arg2) 0
++    ]
++]
++
++friendcolorpicks = [
+     guilist [
+-        guiimage (concatword "packages/icons/" (playermodelicon) ".jpg") [chooseplayermodel] 1.15
+-        guistrut 0.25
+         guilist [
+-            newname = (getname)
+-            guifield newname 15 [name $newname]
+-            guispring
+             guilist [
+-                guibutton (playermodelname) [chooseplayermodel] 0
+-                guistrut 1
+-                guiimage (getcrosshair) [showgui crosshair] 0.5
++                guicolorswatch $arg1 -1
++                loop i 5 [guicolorswatch $arg1 $i]
++            ]
++            guilist [
++                loop i 5 [guicolorswatch $arg1 (+ 5 $i)]
++            ]
++        ]
++    ]
++]
++
++friendsoverlay = [
++    friendsync
++    guititle "Friends"
++    guistrut 0.08
++    guistayopen [
++        guilist [
++            guifield friendaddname 15 [addfriend]
++            if (|| (!=s $friendaddname "") (&& (=s (textfocus) "friendaddname") (!=s (textcurrentline) ""))) [
++                guistrut 2
++                guibutton "Add" [addfriend] 0
++            ]
++        ]
++    ]
++    guistrut 0.08
++    guilist [
++        guitext "^f4Online" 0
++        guistrut 2
++        guistayopen [
++            guibutton "Refresh" [friendrefresh] 0
++        ]
++    ]
++    if $numfriendsonline [
++        loop i (min $numfriendsonline 12) [
++            guibutton (getfriendonlinename $i) (concat joinfriend $i) 0
++            if (!=s (getfriendonlinemap $i) "") [
++                guitext (concatword "^f4" (getfriendonlinemap $i)) 0
++            ]
++        ]
++    ] [
++        if (|| $numfriends (!=s $clantag "")) [
++            guitext $friendscanmsg 0
++        ] [
++            guitext "^f4Nobody yet" 0
++        ]
++    ]
++]
++
++friendspanel = [
++    friendsync
++    guisection "Friends"
++    guistayopen [
++        guilist [
++            guitext "Nick" 0
++            guistrut 2
++            guifield friendaddname 15 [addfriend]
++            if (|| (!=s $friendaddname "") (&& (=s (textfocus) "friendaddname") (!=s (textcurrentline) ""))) [
++                guistrut 2
++                guibutton "Add" [addfriend] 0
++            ]
++        ]
++        guilist [
++            guitext "Clan" 0
++            guistrut 2
++            guifield clantag 10
++        ]
++        guitext "^f4Tag in the nick counts too" 0
++        guistrut 0.12
++        if $numfriends [
++            loop i (min $numfriends 12) [
++                guilist [
++                    guitext (getfriend $i) 0
++                    guistrut 2
++                    guibutton "x" (concat delfriend $i) 0
++                ]
++            ]
++            if (> $numfriends 12) [guitext "^f4..." 0]
++        ]
++        if $numfriendshere [
++            guibar
++            guitext "^f4Here" 0
++            loop i $numfriendshere [
++                guilist [
++                    guitext (getfriendhere $i) 0
++                    guitext (getfriendhererel $i) 0
++                ]
+             ]
+         ]
+     ]
+     guibar
+-    guibutton "server browser.."  "showgui servers"
+-    if (isconnected) [
+-        guibar
+-        if (|| $editing (m_edit (getmode))) [
+-            guibutton "editing.." "showgui editing"
+-        ]
+-        guibutton "vote game mode / map.." "showgui gamemode"
+-        // guibutton "lanconnect"
+-        // guibutton "connect localhost"
+-        guibutton "switch team" [if (strcmp (getteam) "good") [team evil] [team good]]
+-        guibutton "toggle spectator" [spectator (! (isspectator (getclientnum)))] "spectator"
+-        guibutton "master.." [showgui master]
+-        guibar
+-        guibutton "options.."  "showgui options"
+-        guibutton "disconnect" "disconnect"         "exit"
++    guistayopen [
++        guilist [
++            guitext "Online" 0
++            guistrut 2
++            guibutton "Refresh" [friendrefresh] 0
++        ]
++    ]
++    if $numfriendsonline [
++        loop i (min $numfriendsonline 10) [
++            guilist [
++                guibutton (getfriendonlinename $i) (concat joinfriend $i) 0
++                if (!=s (getfriendonlinemap $i) "") [
++                    guitext (concatword "^f4" (getfriendonlinemap $i)) 0
++                ]
++            ]
++        ]
+     ] [
+-        guibutton "bot match.."      "showgui botmatch"
+-        guibutton "campaign.."       "showgui campaign"
+-        guibar
+-        guibutton "options.."        "showgui options"
+-        guibutton "about.."          "showgui about"
+-        guibutton "quit"             "quit"                 "exit"
++        if (|| $numfriends (!=s $clantag "")) [
++            guitext $friendscanmsg 0
++        ] [
++            guitext "^f4Nobody yet" 0
++        ]
++    ]
++]
++
++newgui main [
++    guibanner 1
++    guilist [
++        guilist [
++            guistrut 0.4
++            guititle "L4ZY"
++            guitext "Sauerbraten RT" 0
++            guistrut 0.5
++            guibutton "Find a Server" "showgui servers"
++            if (isconnected) [
++                if (|| $editing (m_edit (getmode))) [
++                    guibutton "Editing" "showgui editing"
++                ]
++                guibutton "Change Map / Mode" "showgui gamemode"
++                guibutton "Switch Team" [if (strcmp (getteam) "good") [team evil] [team good]]
++                guibutton "Spectate" [spectator (! (isspectator (getclientnum)))]
++                guibutton "Master" [showgui master]
++            ] [
++                guibutton "Bot Match" "showgui botmatch"
++                guibutton "Campaign" "showgui campaign"
++            ]
++            guibutton "Options" "showgui options"
++            guibutton "Chat Translation" [showgui "traduction"]
++            guibutton "About" "showgui about"
++            if (isconnected) [
++                guibutton "Disconnect" "disconnect"
++            ] [
++                guibutton "Quit" "quit"
++            ]
++            guistrut 0.45
++            tupdatesync
++            if (= $tupdateavail 3) [
++                guistayopen [ guibutton "^f0Restart to update" [tupdaterestart] 0 ]
++            ] [
++                if (= $tupdateavail 2) [
++                    guistayopen [ guibutton (tupdatelabel) [showgui updates] 0 ]
++                ] [
++                    if (= $tupdateavail 1) [
++                        guistayopen [ guibutton "^f0Update available" [showgui updates] 0 ]
++                    ]
++                ]
++            ]
++            guitext (concatword "^f4L4ZY " (tupdateinstalled)) 0
++            guibutton "^f4Updates" [showgui updates] 0
++            guistrut 16 1
++            guibannersplit
++        ]
++        guistrut 2
++        guibannercenter 0
++        guilist [
++            guistayopen [
++                playerpreviewtint $mycolor
++                guiplayerpreview (if $customplayermodel [result 5] [result $playermodel]) 0 6 [cyclemycolor] 6.5 0 ""
++                playerpreviewtint -1
++                guistrut 0.2
++                friendcolorpicks mycolor "My colour"
++            ]
++            guistrut 0.15
++            newname = (getname)
++            guifield newname 15 [name $newname]
++            guibutton (playermodelname) [chooseplayermodel] 0
++        ]
++    ]
++    guifloat 0.02 0.10 [
++        friendsoverlay
+     ]
+ ] 0
+ 
++// Mises a jour L4ZY. Tout part d'un clic : rien ne ferme une partie tout
++// seul. Le redemarrage automatique n'a lieu qu'apres "Update and restart" et
++// seulement si le joueur attend ici, hors partie.
++newgui updates [
++    tupdatesync
++    guitext (concatword "Installed: ^f0L4ZY " (tupdateinstalled) "^f7   channel: " (tupdatechannel)) 0
++    if (! (tupdateservice)) [
++        guitext "^f3Update service not running. Start the game with L4ZY.exe." 0
++    ]
++    guitextbox (tupdatemsg) 60 1
++    guibar
++    if (= $tupdateavail 0) [
++        guistayopen [ guibutton "Check for updates" [tupdatecheck] ]
++    ]
++    if (= $tupdateavail 1) [
++        guistayopen [ guibutton (tupdatelabel) [tupdateapply] ]
++        guitext "^f4Downloads in the background. The game restarts only when you say so." 0
++        guistayopen [ guibutton "Check again" [tupdatecheck] ]
++    ]
++    if (= $tupdateavail 2) [
++        guitext (tupdatelabel) 0
++        guitext "^f4You can keep playing. Nothing is replaced until the game restarts." 0
++    ]
++    if (= $tupdateavail 3) [
++        guistayopen [ guibutton "^f0Restart now to install" [tupdaterestart] ]
++        if (isconnected) [
++            guitext "^f4You are in a game: restart when you are ready." 0
++        ] [
++            if (tupdatewantrestart) [ tupdaterestart ]
++        ]
++    ]
++] "Updates"
++
+ newgui about [
+-    guitext "Cube 2: Sauerbraten" 0
++    guititle "About"
++    guitext "L4ZY" 0
++    guitext "Sauerbraten with ray tracing and chat translation" 0
++    guitext "Cube 2: Sauerbraten  2020 edition + patches" 0
++    guitext (concatword "L4ZY " (tupdateinstalled) "   (translation client " $tradversion ")") 0
+     guitext [by Wouter "Aardappel" van Oortmerssen, Lee "eihrul" Salzman,] 0
+     guitext [Mike "Gilt" Dysart, Robert "baby-rabbit" Pointon,] 0
+     guitext [John "geartrooper" Siar, Quinton "Quin" Reeves, and others] 0
+     guitext "(for a full list of contributors see the readme)" 0
+-    guitext "http://sauerbraten.org/" 0
+-]
++    guitext "http://sauerbraten.org/"     0
++] 0
+ 
+ genmapitems = [
+     looplist curmap $arg1 [
+         guibutton $curmap (concat map $curmap) "cube"
+     ]
+ ]
+-//17
+ 
+ ffamaps1 = "aard3c abyss academy access albatross akaritori akimiski alithia alloy antel anubis aod aqueducts arbana asenatra asthma averas"
+ ffamaps2 = "awoken bvdm_01 carbide cartel castle_trap catacombs cavefire church51 clash collusion colony complex conflict corruption crypta curvedm curvy_castle"
+@@ -123,155 +319,52 @@ showmapshot = [
+     ]
+ ]
+ 
+-newgui maps [
+-    guilist [
+-      guistrut 17 1
+-      guilist [ guistrut 15 1; genmapitems $ffamaps1 ]
+-      guilist [ guistrut 15 1; genmapitems $ffamaps2 ]
+-      guilist [ guistrut 15 1; genmapitems $ffamaps3 ]
+-      showmapshot
+-    ]
+-    guitab 2
+-    guilist [
+-      guistrut 17 1
+-      guilist [ guistrut 15 1; genmapitems $ffamaps4 ]
+-      guilist [ guistrut 15 1; genmapitems $ffamaps5 ]
+-      guilist [ guistrut 15 1; genmapitems $ffamaps6 ]
+-      showmapshot
+-    ]
+-    guitab 3
+-    guilist [
+-      guistrut 17 1
+-      guilist [ guistrut 15 1; genmapitems $ffamaps7 ]
+-      guilist [ guistrut 15 1; genmapitems $ffamaps8 ]
+-      guilist [ guistrut 15 1; genmapitems $ffamaps9 ]
+-      showmapshot
+-    ]
+-    guitab 4
+-    guilist [
+-      guistrut 17 1
+-      guilist [ guistrut 15 1; genmapitems $ffamaps10 ]
+-      guilist [ guistrut 15 1; genmapitems $ffamaps11 ]
+-      guilist [ guistrut 15 1 ]
+-      showmapshot
+-    ]
+-    guitab capture
+-    guilist [
+-      guistrut 17 1
+-      guilist [ guistrut 15 1; genmapitems $capturemaps1 ]
+-      guilist [ guistrut 15 1; genmapitems $capturemaps2 ]
+-      guilist [ guistrut 15 1; genmapitems $capturemaps3 ]
+-      showmapshot
+-    ]
+-    guitab 2
+-    guilist [
+-      guistrut 17 1
+-      guilist [ guistrut 15 1; genmapitems $capturemaps4 ]
+-      guilist [ guistrut 15 1; genmapitems $capturemaps5 ]
+-      guilist [ guistrut 15 1; genmapitems $capturemaps6 ]
+-      showmapshot
+-    ]
+-    guitab 3
+-    guilist [
+-      guistrut 17 1
+-      guilist [ guistrut 15 1; genmapitems $capturemaps7 ]
+-      guilist [ guistrut 15 1 ]
+-      guilist [ guistrut 15 1 ]
+-      showmapshot
+-    ]
+-    guitab ctf
+-    guilist [
+-        guistrut 17 1
+-        guilist [ guistrut 15 1; genmapitems $ctfmaps1 ]
+-        guilist [ guistrut 15 1; genmapitems $ctfmaps2 ]
+-        guilist [ guistrut 15 1; genmapitems $ctfmaps3 ]
+-        showmapshot
+-    ]
+-    guitab 2
+-    guilist [
+-        guistrut 17 1
+-        guilist [ guistrut 15 1; genmapitems $ctfmaps4 ]
+-        guilist [ guistrut 15 1; genmapitems $ctfmaps5 ]
+-        guilist [ guistrut 15 1; genmapitems $ctfmaps6 ]
+-        showmapshot
+-    ]
+-    guitab 3
+-    guilist [
+-        guistrut 17 1
+-        guilist [ guistrut 15 1; genmapitems $ctfmaps7 ]
+-        guilist [ guistrut 15 1 ]
+-        guilist [ guistrut 15 1 ]
+-        showmapshot
++showmapcols = [
++    mapcoln = (div (+ (listlen $arg1) 2) 3)
++    if (< $mapcoln 1) [mapcoln = 1]
++    if (at $guirollovername 0) [
++        guibackdrop (concatword "packages/base/" (at $guirollovername 0) ".jpg")
+     ]
+-
+-    guitab concept
+     guilist [
+-        guistrut 17 1
+-        guilist [ guistrut 15 1; genmapitems $conceptmaps ]
+-        guilist [ guistrut 15 1 ]
+-        guilist [ guistrut 15 1 ]
+-        showmapshot
++        loop a 3 [
++            guilist [
++                guistrut 15 1
++                loopsublist curmap $arg1 (* $a $mapcoln) $mapcoln [
++                    guibutton $curmap (concat map $curmap) "cube"
++                ]
++            ]
++        ]
+     ]
+ ]
+ 
++newgui maps [
++    guititle "Maps"
++    guisection "Deathmatch"
++    showmapcols $allffamaps
++    guisection "Capture"
++    showmapcols $allcapturemaps
++    guisection "CTF"
++    showmapcols $allctfmaps
++    guisection "Concept"
++    showmapcols $conceptmaps
++] 0
++
+ newgui capturemaps [
+-    guilist [
+-      guistrut 17 1
+-      guilist [ guistrut 15 1; genmapitems $capturemaps1 ]
+-      guilist [ guistrut 15 1; genmapitems $capturemaps2 ]
+-      guilist [ guistrut 15 1; genmapitems $capturemaps3 ]
+-      showmapshot
+-    ]
+-    guitab 2
+-    guilist [
+-      guistrut 17 1
+-      guilist [ guistrut 15 1; genmapitems $capturemaps4 ]
+-      guilist [ guistrut 15 1; genmapitems $capturemaps5 ]
+-      guilist [ guistrut 15 1; genmapitems $capturemaps6 ]
+-      showmapshot
+-    ]
+-    guitab 3
+-    guilist [
+-      guistrut 17 1
+-      guilist [ guistrut 15 1; genmapitems $capturemaps7 ]
+-      guilist [ guistrut 15 1 ]
+-      guilist [ guistrut 15 1 ]
+-      showmapshot
+-    ]
+-] "capture maps"
++    guititle "Capture Maps"
++    showmapcols $allcapturemaps
++] 0
+ 
+ newgui ctfmaps [
+-    guilist [
+-        guistrut 17 1
+-        guilist [ guistrut 15 1; genmapitems $ctfmaps1 ]
+-        guilist [ guistrut 15 1; genmapitems $ctfmaps2 ]
+-        guilist [ guistrut 15 1; genmapitems $ctfmaps3 ]
+-        showmapshot
+-    ]
+-    guitab 2
+-    guilist [
+-        guistrut 17 1
+-        guilist [ guistrut 15 1; genmapitems $ctfmaps4 ]
+-        guilist [ guistrut 15 1; genmapitems $ctfmaps5 ]
+-        guilist [ guistrut 15 1; genmapitems $ctfmaps6 ]
+-        showmapshot
+-    ]
+-    guitab 3
+-    guilist [
+-        guistrut 17 1
+-        guilist [ guistrut 15 1; genmapitems $ctfmaps7 ]
+-        guilist [ guistrut 15 1 ]
+-        guilist [ guistrut 15 1 ]
+-        showmapshot
+-    ]
+-] "ctf maps"
++    guititle "CTF Maps"
++    showmapcols $allctfmaps
++] 0
+ 
+ custommaps = ""
+ newgui custommaps [
+-    looplist curmap $custommaps [
+-        guibutton $curmap (concat map $curmap) "cube"
+-    ]
+-] "custom maps"
++    guititle "Custom Maps"
++    showmapcols $custommaps
++] 0
++
+ showcustommaps = [
+     custommaps = ""
+     loopfiles curmap "packages/base" "ogz" [
+@@ -285,11 +378,16 @@ showcustommaps = [
+ macro playermodelbutton [cleargui 1; playermodel %1]
+ 
+ newgui playermodel [
++    guititle "Player Model"
+     guilist [
+         guilist [
+             loop i $playermodelnum [
+                 guibutton (playermodelname $i) (playermodelbutton $i) (playermodelicon $i)
+             ]
++            guistrut 0.5
++            guicheckbox "Custom model" customplayermodel
++            guitext "^f4Your own files, nothing on top." 0
++            guistayopen [ guibutton "Open custom folder" [openfolder playermodel] 0 ]
+         ]
+         guibar
+         pmidx = (substr $guirolloveraction (strlen (playermodelbutton "")))
+@@ -297,13 +395,18 @@ newgui playermodel [
+         guilist [
+             guilist [
+                 guispring
++                playerpreviewtint $mycolor
+                 guiplayerpreview $pmidx 0 6 (checkrolloveraction "playermodel ") 4 1 (playermodelname $pmidx)
++                playerpreviewtint -1
+                 guispring
+             ]
++            guistayopen [
++                friendcolorpicks mycolor "My colour"
++            ]
+             guitextbox (playermodelstory $pmidx) 40 9
+         ]
+     ]
+-]
++] 0
+ 
+ crosshairs = ["data/crosshair.png data/hit.png"
+ "packages/crosshairs/x.png packages/crosshairs/x-hit.png"
+@@ -322,9 +425,191 @@ crosshairs = ["data/crosshair.png data/hit.png"
+ "packages/crosshairs/dot_whole.png packages/crosshairs/dot_whole_hit.png"
+ ]
+ 
++// crosshair colour row: hex field + a few presets (arg1 unused, names the var for the settings search)
++crosshaircolourpicks = [
++        guilist [
++            guitext "colour (hex) #" 0
++            if (!=s (textfocus) "crosshairhexfield") [crosshairhexfield = (crosshairhex)]
++            guifield crosshairhexfield 7 [crosshairhex $crosshairhexfield]
++            guistrut 1
++            guibutton "white" [crosshairhex FFFFFF] 0
++            guistrut 1
++            guibutton "green" [crosshairhex 00FF00] 0
++            guistrut 1
++            guibutton "cyan" [crosshairhex 00FFFF] 0
++            guistrut 1
++            guibutton "yellow" [crosshairhex FFFF00] 0
++            guistrut 1
++            guibutton "pink" [crosshairhex FF00FF] 0
++        ]
++]
++
++// weapon trail colour row: colour really used (hex in that colour), hex field,
++// "same as All" (Me / Others) or "stock" (All), a few presets.
++// arg1 = trail colour variable, or projectile colour variable (projcolor...,
++// projmycolor..., projothercolor...) (also names it for the settings search)
++trailcolourpicks = [
++    guilist [
++        guicolor (trailcolorvalue $arg1)
++        guistrut 1
++        if (!=s (textfocus) (concatword "trailhex" $arg1)) [alias (concatword "trailhex" $arg1) (settrailcolor $arg1)]
++        guifield (concatword "trailhex" $arg1) 7 [settrailcolor @arg1 (getalias (concatword "trailhex" @arg1))]
++        guistrut 1
++        if (&& (strstr $arg1 "trailcolor") (strstr $arg1 "projcolor")) [
++            guibutton "same as All" [settrailcolor @arg1 same] 0
++        ] [
++            guibutton "stock" [settrailcolor @arg1 stock] 0
++        ]
++        guistrut 1
++        guibutton "^f7white" [settrailcolor @arg1 FFFFFF] 0
++        guistrut 1
++        guibutton "^f8cyan" [settrailcolor @arg1 60F0FF] 0
++        guistrut 1
++        guibutton "^f0green" [settrailcolor @arg1 40FF80] 0
++        guistrut 1
++        guibutton "^f2yellow" [settrailcolor @arg1 FFC040] 0
++        guistrut 1
++        guibutton "^f3red" [settrailcolor @arg1 FF4040] 0
++    ]
++]
++
++newgui trails [
++    guititle "Weapons and trails"
++    MENU_width
++    guisection "My gun"
++    guicheckbox "Show my gun" hudgun
++    if $hudgun [
++        guilist [
++            guistrut 3
++            guilist [
++                guicheckbox "Sway when I move" hudgunsway
++            ]
++        ]
++    ]
++    guisection "Muzzle flashes (every player)"
++    guicheckbox "Flash" muzzleflash
++    guicheckbox "Light (lights walls and players when shooting)" muzzlelight
++    if $muzzlelight [
++        guitext "^f4Light per weapon:" 0
++        guilist [
++            guistrut 3
++            guilist [
++                guicheckbox "Shotgun" muzzlelightshotgun
++                guicheckbox "Chaingun" muzzlelightchaingun
++                guicheckbox "Rifle" muzzlelightrifle
++            ]
++            guistrut 4
++            guilist [
++                guicheckbox "Grenade" muzzlelightgrenadelauncher
++                guicheckbox "Pistol" muzzlelightpistol
++            ]
++        ]
++    ]
++    guisection "Trail colours"
++    guitext "^f4Your view only: nothing is sent, size and duration stay stock." 0
++    guistayopen [
++        guilist [
++            guibutton "Me..." [showgui trailsme] 0
++            guistrut 4
++            guibutton "Others..." [showgui trailsothers] 0
++            guistrut 4
++            guibutton "All..." [showgui trailsall] 0
++        ]
++    ]
++    guitext "^f4Me: my shots. Others: everyone else. All: every shot without its own." 0
++    guitext "Brightness of custom colours" 0
++    guislider trailbrightness
++    guistayopen [
++        guibutton "Back to stock colours" [trailcolorreset]
++    ]
++    guitext "^f4Rockets and grenades also have a projectile colour (glow and explosion)." 0
++    guistayopen [
++        guibutton "Projectiles and explosions back to stock" [projcolorreset]
++    ]
++] 0
++
++newgui trailsme [
++    guititle "Weapon Trails: Me"
++    guitext "^f4My shots. same as All = use the All colour." 0
++    guistayopen [
++        guitext "Shotgun" 0
++        trailcolourpicks trailmycolorshotgun "Shotgun trail colour, me"
++        guitext "Chaingun" 0
++        trailcolourpicks trailmycolorchaingun "Chaingun trail colour, me"
++        guitext "Rifle" 0
++        trailcolourpicks trailmycolorrifle "Rifle trail colour, me"
++        guitext "Rocket launcher (smoke)" 0
++        trailcolourpicks trailmycolorrocketlauncher "Rocket trail colour, me"
++        guitext "Grenade launcher (smoke)" 0
++        trailcolourpicks trailmycolorgrenadelauncher "Grenade trail colour, me"
++        guitext "Pistol" 0
++        trailcolourpicks trailmycolorpistol "Pistol trail colour, me"
++        guistrut 0.3
++        guitext "Rocket (projectile and explosion)" 0
++        trailcolourpicks projmycolorrocketlauncher "Rocket projectile colour, me"
++        guitext "Grenade (projectile and explosion)" 0
++        trailcolourpicks projmycolorgrenadelauncher "Grenade projectile colour, me"
++    ]
++] 0
++
++newgui trailsothers [
++    guititle "Weapon Trails: Others"
++    guitext "^f4Everyone else (players, bots), any team. same as All = use the All colour." 0
++    guistayopen [
++        guitext "Shotgun" 0
++        trailcolourpicks trailothercolorshotgun "Shotgun trail colour, others"
++        guitext "Chaingun" 0
++        trailcolourpicks trailothercolorchaingun "Chaingun trail colour, others"
++        guitext "Rifle" 0
++        trailcolourpicks trailothercolorrifle "Rifle trail colour, others"
++        guitext "Rocket launcher (smoke)" 0
++        trailcolourpicks trailothercolorrocketlauncher "Rocket trail colour, others"
++        guitext "Grenade launcher (smoke)" 0
++        trailcolourpicks trailothercolorgrenadelauncher "Grenade trail colour, others"
++        guitext "Pistol" 0
++        trailcolourpicks trailothercolorpistol "Pistol trail colour, others"
++        guistrut 0.3
++        guitext "Rocket (projectile and explosion)" 0
++        trailcolourpicks projothercolorrocketlauncher "Rocket projectile colour, others"
++        guitext "Grenade (projectile and explosion)" 0
++        trailcolourpicks projothercolorgrenadelauncher "Grenade projectile colour, others"
++    ]
++] 0
++
++newgui trailsall [
++    guititle "Weapon Trails: All"
++    guitext "^f4Every shot, unless Me / Others has its own colour. stock = the game's colour." 0
++    guistayopen [
++        guitext "Shotgun" 0
++        trailcolourpicks trailcolorshotgun "Shotgun trail colour"
++        guitext "Chaingun" 0
++        trailcolourpicks trailcolorchaingun "Chaingun trail colour"
++        guitext "Rifle" 0
++        trailcolourpicks trailcolorrifle "Rifle trail colour"
++        guitext "Rocket launcher (smoke)" 0
++        trailcolourpicks trailcolorrocketlauncher "Rocket trail colour"
++        guitext "Grenade launcher (smoke)" 0
++        trailcolourpicks trailcolorgrenadelauncher "Grenade trail colour"
++        guitext "Pistol" 0
++        trailcolourpicks trailcolorpistol "Pistol trail colour"
++        guistrut 0.3
++        guitext "Rocket (projectile and explosion)" 0
++        trailcolourpicks projcolorrocketlauncher "Rocket projectile colour"
++        guitext "Grenade (projectile and explosion)" 0
++        trailcolourpicks projcolorgrenadelauncher "Grenade projectile colour"
++    ]
++] 0
++
+ newgui crosshair [
+-    guitext "crosshair size"
++    guititle "Crosshair"
++    MENU_width
++    guisection "Look"
++    guitext "Size" 0
+     guislider crosshairsize
++    guistayopen [
++        crosshaircolourpicks crosshaircolour "Crosshair colour (hex)"
++    ]
++    guitext "^f4Click an image to use it:" 0
+     loop row (div (+ (listlen $crosshairs) 6) 7) [
+         guilist [
+             loop col 7 [
+@@ -339,14 +624,56 @@ newgui crosshair [
+             ]
+         ]
+     ]
+-]
++    guisection "Effects"
++    guicheckbox "Crosshair effects" crosshairfx
++    if $crosshairfx [
++        guilist [
++            guistrut 3
++            guilist [
++                guicheckbox "Colour shows my health" crosshaircolors
++                guicheckbox "Other crosshair on teammates" teamcrosshair
++                guicheckbox "Hit marker" hitcrosshair 425
++                guicheckbox "Dim while reloading" crosshairreloaddim
++            ]
++        ]
++    ]
++] 0
+ 
++// Master page: client number after each name; per-player actions are icons, and the hint line
++// spells out the action (and the player) while the mouse is over an icon.
++masterhintlast = ""
++masterhintmillis = 0
++masterhintsave = [
++    if (!=s $guirolloveraction "") [
++        masterhintlast = $guirolloveraction
++        masterhintmillis = (getmillis 1)
++    ]
++]
++masterhinttext = [
++    local a n c i who
++    a = $masterhintlast
++    n = (listlen $a)
++    c = (at $a 0)
++    if (> (- (getmillis 1) $masterhintmillis) 150) [n = 0]
++    i = (? (|| (=s $c "spectator") (=s $c "setmaster")) 2 1)
++    who = (concatword (getclientname (at $a $i)) " (" (at $a $i) ")")
++    if (&& (= $n 2) (=s $c "kick")) [result (concat "^f3Kick" $who "from the server")] [
++    if (&& (= $n 3) (=s $c "spectator")) [result (? (at $a 1) (concat "Make" $who "a spectator") (concat "Let" $who "play again"))] [
++    if (&& (= $n 3) (=s $c "setteam")) [result (concat "Move" $who "to team" (at $a 2))] [
++    if (&& (= $n 3) (=s $c "setmaster")) [result (? (at $a 1) (concat "Give master to" $who) (concat "Take master from" $who))] [
++    result "^f4Point at an icon to see what it does"]]]]
++]
+ newgui master [
++    guititle "Master"
+   guistayopen [
+-    if (ismaster (getclientnum)) [
+-        guibutton "relinquish master" "setmaster 0"
+-    ] [
+-        guibutton "claim master" "setmaster 1"
++    guilist [
++        if (ismaster (getclientnum)) [
++            guibutton "relinquish master" "setmaster 0"
++        ] [
++            guibutton "claim master" "setmaster 1"
++        ]
++        guibar
++        guitext (masterhinttext)
+     ]
+     guilist [
+         guitext "mastermode: "
+@@ -357,24 +684,42 @@ newgui master [
+         guiradio "private (3) " mm 3 "mastermode 3"
+     ]
+     guibar
++    // bots: added with a style; on a clan server Tiny Apa bots stay Tiny Apa whoever's game runs them
++    guitext "add a bot, skill"
++    guislider masterbotskill 50 101
++    guilist [
++        guibutton "Add bot: Classic   " [addbot $masterbotskill classic]
++        guibutton "Add bot: Tiny Apa   " [addbot $masterbotskill tinyapa]
++        guibutton "remove a bot" [delbot]
++    ]
++    if (tinyapaserver) [
++        guitext "^f4Tiny Apa bots stay Tiny Apa; other bots follow each player's bots play." 0
++    ] [
++        guitext "^f4Tiny Apa on add: only on an L4ZY server. Here bots follow bots play." 0
++    ]
++    guibar
++    guirolloveraction = ""
+     looplist cn (listclients 0 0) [
+         guilist [
+-            guitext (concatword (getclientname $cn) ": ") (getclienticon $cn)
+-            guibutton "kick " [kick @cn]
+-            guibutton "toggle spectator " [spectator @(= (isspectator $cn) 0) @cn]
++            // the player you are watching as a spectator: eye instead of the player icon
++            guitext (concatword (getclientname $cn) " (" $cn "): ") (? (= $cn (getfollow)) "../../data/following.png" (getclienticon $cn))
++            guibutton "" [kick @cn] "../../data/master_kick.png"
++            guibutton "" [spectator @(= (isspectator $cn) 0) @cn] "../../data/master_spectator.png"
+             if (m_teammode (getmode)) [
+-                guibutton "switch team " [setteam @cn @(? (=s (getclientteam $cn) "good") "evil" "good")]
++                guibutton "" [setteam @cn @(? (=s (getclientteam $cn) "good") "evil" "good")] "../../data/master_team.png"
+             ]
+             if (ismaster $cn) [
+-                guibutton "take master" [setmaster 0 @cn]
++                guibutton "" [setmaster 0 @cn] "../../data/master_take.png"
+             ] [
+-                guibutton "give master" [setmaster 1 @cn]
++                guibutton "" [setmaster 1 @cn] "../../data/master_give.png"
+             ]
+         ]
+     ]
++    masterhintsave
+   ]
+-]
++] 0
+ 
++masterbotskill = 90
+ botmatchcount = 5
+ botmatchminskill = 50
+ botmatchmaxskill = 100
+@@ -388,16 +733,32 @@ startbotmatch = [
+ ]
+ 
+ newgui botmatch [
++    guititle "Bot Match"
+     guitext "bot amount"
+     guislider botmatchcount 0 32
+     guitext "bot minimum skill"
+     guislider botmatchminskill 50 101 [if (< $botmatchmaxskill $botmatchminskill) [botmatchmaxskill = $botmatchminskill]]
+     guitext "bot maximum skill"
+     guislider botmatchmaxskill 50 101 [if (> $botmatchminskill $botmatchmaxskill) [botmatchminskill = $botmatchmaxskill]]
++    guitext "bots play"
++    guistayopen [ guilist [
++        guiradio "Classic" botperception 0
++        guistrut 2
++        guiradio "Tiny Apa" botperception 2
++    ] ]
++    if (= $botperception 0) [ guitext "^f4Classic: the normal Sauerbraten bots." 0 ]
++    if (= $botperception 2) [
++        guitext "^f4Tiny Apa (WIP): bots modelled on one real player's play." 0
++        guitext (concatword "their level: " $botstylelevel " %")
++        guislider botstylelevel 50 100
++        guitext "^f4100 = a strong player, 50 = half the accuracy, slower." 0
++        guicheckbox "a different form each game" botstyleform
++    ]
+     guibutton "start match.." [guionclear [startbotmatch]; showgui gamemode]
+-] "bot match"
++] 0
+ 
+ newgui campaign [
++    guititle "Campaign"
+     guibutton "start Private Stan Sauer"           "showgui privatestansauer"
+     guibutton "start An Army Of One"               "showgui armyofone"
+     guibutton "start Lost"                         "sp lost" "cube"
+@@ -409,20 +770,24 @@ newgui campaign [
+     guicheckbox "slow motion"                      "slowmosp"
+     guitext   "skill (default: 3)"
+     guislider skill
+-]
++] 0
+ 
+ newgui armyofone [
++    guititle "An Army Of One"
+     guilist [
+         guilist [
+             guibutton "Part I"   "sp mpsp6a" "cube"
+             guibutton "Part II"  "sp mpsp6b" "cube"
+             guibutton "Part III" "sp mpsp6c" "cube"
+         ]
+-        showmapshot (substr $guirolloveraction 3)
++        if (substr $guirolloveraction 3) [
++            guibackdrop (concatword "packages/base/" (substr $guirolloveraction 3) ".jpg")
++        ]
+     ]
+-] "An Army Of One"
++] 0
+ 
+ newgui privatestansauer [
++    guititle "Private Stan Sauer"
+     guilist [
+         guilist [
+             guibutton "Run N' Gun Part I"        "sp mpsp9a" "cube"
+@@ -430,11 +795,14 @@ newgui privatestansauer [
+             guibutton "Run N' Gun Part III"      "sp mpsp9c" "cube"
+             guibutton "THE SERIOUSLY BIG VALLEY" "sp mpsp10" "cube"
+         ]
+-        showmapshot (substr $guirolloveraction 3)
++        if (substr $guirolloveraction 3) [
++            guibackdrop (concatword "packages/base/" (substr $guirolloveraction 3) ".jpg")
++        ]
+     ]
+-] "Private Stan Sauer"
++] 0
+ 
+ newgui servers [
++    guititle "Servers"
+     guistayopen [
+         guiservers [
+             guilist [
+@@ -451,11 +819,84 @@ newgui servers [
+                 ]
+             ]
+             guibar
+-        ] 17
++        ]
++    ]
++] 0 [initservers]
++
++newgui friends [
++    guititle "FRIENDS AND COLOURS"
++    MENU_width
++    guilist [
++        MENU_tab friendsview 0 "Friends"
++        guistrut 3
++        MENU_tab friendsview 1 "Player colours"
++    ]
++    guibar
++    if (= $friendsview 0) [
++        guitext "^f4Friends are found by nick or clan tag. Colours: see Player colours." 0
++        friendspanel
++    ] [
++        guisection "Team colours"
++        guistayopen [
++            guilist [
++                guilist [
++                    friendhudtitle $teamcolorally "Teammates"
++                    guitext "^f4Body, bots too. None: blue." 0
++                    guilist [
++                        guilist [friendcolorpicks teamcolorally "Teammates colour"]
++                        playerpreviewtint $teamcolorally
++                        guiplayerpreview $playermodel 1 6 [] 2.2 0 ""
++                    ]
++                ]
++                HUD_gap
++                guibar
++                HUD_gap
++                guilist [
++                    friendhudtitle $teamcolorenemy "Enemies"
++                    guitext "^f4Body, bots too. None: red." 0
++                    guilist [
++                        guilist [friendcolorpicks teamcolorenemy "Enemies colour"]
++                        playerpreviewtint $teamcolorenemy
++                        guiplayerpreview $playermodel 2 6 [] 2.2 0 ""
++                    ]
++                ]
++            ]
++            playerpreviewtint -1
++        ]
++        guitext "^f4Free for all: everyone else is an enemy." 0
++        guisection "Friends colours"
++        guistayopen [
++            guilist [
++                guilist [
++                    friendhudtitle $friendallycolor "Same team"
++                    guitext "^f4Body, Name, Minimap" 0
++                    guilist [
++                        guilist [friendcolorpicks friendallycolor "Friends colour, same team"]
++                        playerpreviewtint $friendallycolor
++                        guiplayerpreview $playermodel 1 6 [] 2.2 0 ""
++                    ]
++                ]
++                HUD_gap
++                guibar
++                HUD_gap
++                guilist [
++                    friendhudtitle $friendenemycolor "Other team"
++                    guitext "^f4Body, Name." 0
++                    guilist [
++                        guilist [friendcolorpicks friendenemycolor "Friends colour, other team"]
++                        playerpreviewtint $friendenemycolor
++                        guiplayerpreview $playermodel 2 6 [] 2.2 0 ""
++                    ]
++                ]
++            ]
++            playerpreviewtint -1
++        ]
++        guicheckbox "Friends' bodies use the team colours" friendsfollowteamcolor
+     ]
+-] "" [initservers]
++] 0 [initservers]
+ 
+ newgui gamemode [
++    guititle "Game Mode"
+     guilist [
+         guilist [
+             guibutton "ffa"                "mode 0; showgui maps"
+@@ -486,7 +927,7 @@ newgui gamemode [
+             guibutton "efficiency collect" "mode 22; showgui ctfmaps"
+         ]
+     ]
+-]
++] 0
+ 
+ showfileeditor = [
+     guinoautotab [
+@@ -515,9 +956,10 @@ showfileeditor = [
+ notepadfile = "untitled.txt"
+ 
+ newgui notepad [
++    guititle "Notepad"
+     guifield notepadfile -30
+     showfileeditor $notepadfile -80 20
+-]
++] 0
+ 
+ notepad = [
+     if (> $numargs 0) [notepadfile = $arg1]
+@@ -525,6 +967,7 @@ notepad = [
+ ]
+ 
+ newgui pastebuffer [
++    guititle "Paste Buffer"
+     guinoautotab [
+         guieditor "#pastebuffer" -80 20
+         guistayopen [
+@@ -535,11 +978,12 @@ newgui pastebuffer [
+             ]
+         ]
+     ]
+-]
++] 0
+ 
+ pastebuffer = [showgui pastebuffer]
+ 
+ newgui scratchpad [
++    guititle "Scratchpad"
+     guinoautotab [
+         guieditor "#scratchpad" -80 20
+         guistayopen [
+@@ -556,7 +1000,7 @@ newgui scratchpad [
+             ]
+         ]
+     ]
+-]
++] 0
+ 
+ scratchpad = [showgui scratchpad]
+ 
+@@ -1276,380 +1720,1401 @@ macro resbutton [
+     guibutton "%1x%2" "screenres %1 %2" (if (&& (= $scr_w %1) (= $scr_h %2)) [result "radio_on"] [result "radio_off"])
+ ]
+ 
+-newgui options [ /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+-    guilist [
+-        guicheckbox "2D menus"  gui2d
+-        guibar
+-        guicheckbox "click tab" guiclicktab
+-        guibar
+-        guicheckbox "menu fade in" guifadein
+-    ]
+-    guicheckbox "show scoreboard at death"  deathscore
+-    guicheckbox "blood"                     blood
+-    guilist [
+-        guicheckbox "ragdoll deaths"    ragdoll
+-        if $ragdoll [
+-            guibar
+-            guicheckbox "keep after respawn" ragdollmillis 10000
++// Look. The Richer preset (hdrtonemap + automatic glare + forced shadow
++// values) is gone. lookpreset stays 0 so a saved "1" cannot select it.
++// LOOK_keep is only the anti-aliasing chain: clear postfx, glare off,
++// FXAA in Native only when lookfxaa is 1 (off by default: it softened the
++// textures) and DLAA/DLSS is not applied. It does not touch RT,
++// NRD, lights, or shadow settings. HUD/chat stay after postfx.
++// config.cfg and restore.cfg load after this file and may still define
++// the old LOOK_apply. LOOK_retire puts that alias back without rewriting
++// the other saved settings. The glare command itself stays for a later
++// discrete HDR glare; Richer no longer turns it on.
++lookpreset = 0
++LOOK_keep = [
++    watersubdiv 1
++    clearpostfx
++    glare 0
++    if (&& (= $looktaa 0) $lookfxaa) [
++        gfxusefxaa = 1
++        if (>= (getvarmax hwrtngxmode) 4) [
++            if (!= (hwrtngxmodeapplied) 0) [ gfxusefxaa = 0 ]
++        ]
++        if $gfxusefxaa [
++            addpostfx fxaa 0 0 0
+         ]
+-        guibar
+-        guicheckbox "hide dead players" hidedead
+     ]
+-    guitext "ragdoll velocity multiplier"
+-    guislider deadpush
+-    guilist [
+-        guicheckbox "fullbright player models" fullbrightmodels 60 0
+-        if $fullbrightmodels [
+-            guibar
+-            guiradio "subtle" fullbrightmodels 60
+-            guibar
+-            guiradio "bright" fullbrightmodels 100
+-            guibar
+-            guiradio "overbright" fullbrightmodels 150
+-            guibar
+-            guiradio "max" fullbrightmodels 200
++]
++LOOK_apply = [ LOOK_keep ]
++LOOK_retire = [
++    // old "Richer" preset (lookpreset 1): retired silently
++    lookpreset = 0
++    LOOK_apply = [ LOOK_keep ]
++]
++
++// Graphics advanced: name column is text only (no mixed checkboxes).
++GFX_name = [
++    guilist [
++        guitext $arg1
++        guistrut 16 1
++    ]
++]
++
++HUD_gap = [guistrut 2]
++
++// ---------------------------------------------------------------------------
++// Settings pages: one look everywhere (model: the Chat Translation page).
++// - a section title (guisection) for each group, in the order a player looks;
++// - one setting per line, or aligned columns (MENU_col, HUD_gap);
++// - short grey notes (^f4) under what they explain, kept under ~75 letters;
++// - buttons ending in "..." open another page;
++// - a long page is cut into views shown as tabs at the top (MENU_tab): the
++//   open view is green, the controls stay in the same page for the search;
++// - every page has the same width (MENU_width) so the letters keep one size
++//   (the menu window shrinks a page to fit its widest line).
++// What is not relevant stays hidden (if ...), as before.
++// ---------------------------------------------------------------------------
++MENU_width = [ guistrut 66 1 ]
++MENU_col = 25
++// Graphics > Performance: shorter label column, the choices carry a short
++// explanation ("Transformer (sharper, slower)").
++GFX_perfcol = 14
++// Graphics > Performance: profiles Ultra / High / Medium / Low, from the best
++// picture to the fastest. One value per setting, in the order of GFX_profvars.
++// Ultra = the values the game uses today (data/hwrt.cfg gives hwrtdlights 4,
++// hwrtglowdlights 8, hwrtskyrays 1, hwrtskytemporal 32 before config.cfg).
++// A lower profile never raises what a higher one lowered. Soft shadows and their
++// rays / denoiser are set too (Graphics > Ray tracing; Low turns them off). The active profile is
++// found by comparing the current values (Custom = none): nothing is stored,
++// nothing waits. A value is only set when it differs (some settings reload
++// textures when set).
++GFX_profvars = "hwrtquality hwrtdlsscnn hwrtskyopaque hwrtnrdlight hwrtvelstatic hwrtskyrange hwrtrtadapt hwrtnrd hwrtskyrays hwrtskytemporal hwrtskyfilter hwrtsundisk hwrtdlights hwrtglowdlights hwrtdiffupscale hwrtdiffmipbias hwrtsoftshadowrays hwrtsoftsigma hwrtsoftsigmahistory hwrtsoftshadows"
++GFX_prof0 = "2 0 0 0 0 0 0 1 1 32 1 0 4 8 2 0 2 1 5 2"
++GFX_prof1 = "2 1 1 1 1 0 0 1 1 32 1 0 4 8 2 0 2 1 5 2"
++GFX_prof2 = "1 1 1 2 1 1024 1 1 1 32 1 0 3 4 2 0 1 1 5 2"
++GFX_prof3 = "0 1 1 2 1 1024 1 1 1 32 1 0 2 2 2 0 1 1 5 0"
++GFX_profis = [
++    GFX_pv = (getalias (concatword "GFX_prof" $arg1))
++    GFX_pr = 1
++    loop GFX_pi (listlen $GFX_profvars) [
++        if (!=f $(at $GFX_profvars $GFX_pi) (at $GFX_pv $GFX_pi)) [ GFX_pr = 0 ]
++    ]
++    result $GFX_pr
++]
++GFX_profwhich = [
++    GFX_pw = 4
++    loop GFX_pp 4 [ if (= $GFX_pw 4) [ if (GFX_profis $GFX_pp) [ GFX_pw = $GFX_pp ] ] ]
++    result $GFX_pw
++]
++GFX_profapply = [
++    if (&& (>= $arg1 0) (<= $arg1 3)) [
++        GFX_pv = (getalias (concatword "GFX_prof" $arg1))
++        loop GFX_pi (listlen $GFX_profvars) [
++            GFX_pn = (at $GFX_profvars $GFX_pi)
++            if (!=f $$GFX_pn (at $GFX_pv $GFX_pi)) [ do (concat $GFX_pn (at $GFX_pv $GFX_pi)) ]
+         ]
+     ]
+-    guilist [
+-        guicheckbox "force matching player models" forceplayermodels
+-        guibar
+-        guicheckbox "always use team skins" teamskins
++]
++GFX_prof = 0
++gfxperftab = 0
++// MENU_tab VAR VALUE "Label": one view of a page (the open one is green).
++MENU_tab = [
++    guistayopen [
++        guibutton (? (= (getalias $arg1) $arg2) (concatword "^f0" $arg3) $arg3) (concat $arg1 "=" $arg2) 0
++    ]
++]
++gfxtab = 0
++displaytab = 0
++audiotab = 0
++consoletab = 0
++recordtab = 0
++friendsview = 0
++MENU_resetask = 0
++
++newgui options [
++    guititle "SETTINGS"
++    MENU_width
++    guistayopen [
++        guibutton "^f2Search settings..." [showgui settingsearch]
++        guibutton "^f2Settings assistant (AI)..." [showgui assistant]
++    ]
++    guisection "What you see and hear"
++    guistayopen [
++        guibutton "Display" [showgui "display"]
++        guibutton "Graphics" [showgui "gfx"]
++        guibutton "Sound" [showgui "audio"]
++    ]
++    guisection "Controls"
++    guistayopen [
++        guibutton "Mouse" [showgui "mouse"]
++        guibutton "Keys" [showgui "keys"]
+     ]
+-    guicheckbox "hit sound" hitsound
++    guisection "Game"
++    guistayopen [
++        guibutton "HUD" [showgui "hud"]
++        guibutton "Friends and colours" [showgui "friends"]
++        guibutton "Chat Translation" [showgui "traduction"]
++        guibutton "Console and chat" [showgui "console"]
++        guibutton "Recording" [showgui "record"]
++    ]
++    guisection "Settings file"
++    guistayopen [
++        guibutton "Import settings from another client" [showgui importsettings]
++        guibutton "Edit autoexec.cfg" [showgui optionscfg]
++        if $MENU_resetask [
++            guitext "^f3Really clear all your settings?" 0
++            guilist [
++                guibutton "^f3Yes, restore defaults" [ MENU_resetask = 0; exec "restore.cfg"; LOOK_retire; LOOK_apply ] 0
++                guistrut 3
++                guibutton "No" [ MENU_resetask = 0 ] 0
++            ]
++        ] [
++            guibutton "Restore defaults (clears all settings)..." [ MENU_resetask = 1 ]
++        ]
++    ]
++] 0
++
++// Import settings from another client (Sauerbraten, older L4ZY clients...).
++// L4ZY.exe does the copy before the game starts, never while it runs.
++importsel = -2
++importdir = ""
++newgui importsettings [
++    guititle "Import settings"
++    importsrcrefresh
++    guitext "Copies keys, name, options, servers and friends" 0
++    guitext "from another client into L4ZY." 0
++    guistrut 0.3
++    if (= (importsrccount) 0) [
++        guitext "^f4No other client found in My Games." 0
++    ]
++    guistayopen [
++        loop i (importsrccount) [
++            guibutton (concatword (if (= $importsel $i) [result "^f0> "] [result ""]) (importsrclabel $i)) [importsel = @i]
++        ]
++        guibutton (concatword (if (= $importsel -1) [result "^f0> "] [result ""]) "Another folder (type it below)") [importsel = -1]
++    ]
++    guistayopen [
++        guifield importdir 50 [importsel = -1]
++    ]
++    guitext "^f4Example: C:\Games\Sauerbraten (the folder that holds config.cfg)" 0
+     guibar
+-    guibutton "restore defaults (clears ALL settings)" "exec restore.cfg"
++    if (>= $importsel -1) [
++        if (= $importsel -1) [
++            guitextbox (concatword "^f4From: " (guifieldtext importdir)) 50 1
++        ] [
++            guitextbox (concatword "^f4From: " (importsrcfolder $importsel)) 50 1
++        ]
++        guibutton (if (importrestartable) [result "^f0Import and restart"] [result "^f0Import at next start"]) [importsettingsfrom $importsel (guifieldtext importdir)]
++    ] [
++        guitext "^f4Pick a client above." 0
++    ]
++    guitext "^f4Your current settings are kept as config.cfg.before-import.bak" 0
++    if (strcmp (importlastresult) "") [] [
++        guitextbox (concatword "^f4Last time: " (importlastresult)) 50 2
++    ]
++] 0
+ 
+-    guitab "hud" ////////////////////////////////////////////////////////////////////////////////////////////////////////////
+-    guicheckbox "show FPS" showfps
+-    guilist [
+-        guicheckbox "wall clock" wallclock
+-        if $wallclock [
+-            guibar
+-            guicheckbox "24 hour" wallclock24
+-            guibar
+-            guicheckbox "seconds" wallclocksecs
++// Search in the settings: by name or keyword (French or English).
++// Results are the real controls; the grey line opens the page they are on.
++settingsquery = ""
++newgui settingsearch [
++    guititle "Search settings"
++    guistayopen [
++        guilist [
++            guitext "Search: " 0
++            guifield settingsquery 30
++        ]
++    ]
++    guitext "^f4Click the field and type. Several words narrow the search." 0
++    guistrut 0.2
++    guistayopen [
++        do (settingsearchgui (guifieldtext settingsquery))
++    ]
++    guistrut 0.3
++    guibutton "^f2Ask the assistant (AI)..." [assistq = (guifieldtext settingsquery); showgui assistant]
++] 0
++
++// Settings assistant: the local AI (the one that translates the chat) answers
++// questions about the settings. What it proposes is checked by the game and
++// only changes when you click Apply.
++assistq = ""
++assistant = [showgui assistant]
++newgui assistant [
++    guititle "Settings assistant (local AI)"
++    guistayopen [
++        do (assistantgui)
++    ]
++    guistrut 0.4
++    guistayopen [
++        guiinputfield assistq 60 [assistantask $assistq; assistq = ""]
++        guilist [
++            guibutton "^f2Send" [assistantask (guifieldtext assistq); assistq = ""]
++            guistrut 2
++            guibutton "New conversation" [assistantclear]
++            guistrut 2
++            guicheckbox "Think first (slower, smarter)" assistantthink
+         ]
+     ]
++] 0
++
++newgui optionscfg [
++    guititle "autoexec.cfg"
++    guistrut 0.1
++    showfileeditor "autoexec.cfg" -64 13
++] 0
++
++newgui hud [
++    guititle "HUD"
++    MENU_width
+     guilist [
+-        guicheckbox "damage screen"     damagescreen
+-        guibar
+-        guicheckbox "damage compass"    damagecompass
++        guibutton "^f2Move HUD parts (drag and drop)..." [hudedit]
++        guistrut 3
++        guibutton "Put everything back in place" [hudlayoutreset]
+     ]
++    guitext "^f4Drag the frames with the mouse, right click puts one back, Esc when done." 0
++
++    guisection "On screen"
+     guilist [
+-        guicheckbox "hudguns"       hudgun
+-        if $hudgun [
+-            guibar
+-            guicheckbox "sway"      hudgunsway
+-            guibar
+-            guicheckbox "muzzle flash" muzzleflash
+-            guibar
+-            guicheckbox "muzzle light" muzzlelight
+-        ]
++        guilist [ guicheckbox "Ammo bar" ammobar ; guistrut $MENU_col 1 ]
++        guibutton "Adjust..." [showgui ammobar] 0
+     ]
+     guilist [
+-        guicheckbox "crosshair effects" crosshairfx
+-        if $crosshairfx [
+-            guibar
+-            guicheckbox "health colors" crosshaircolors
+-            guibar
+-            guicheckbox "teammates" teamcrosshair
+-            guibar
+-            guicheckbox "hits" hitcrosshair 425
+-        ]
++        guilist [ guicheckbox "Game clock" gameclock ; guistrut $MENU_col 1 ]
++        guibutton "Adjust..." [showgui gameclock] 0
+     ]
+     guilist [
+-        guicheckbox "outline capture meters" outlinemeters
+-        guibar
+-        guicheckbox "numbered capture bases" basenumbers
+-        guibar
+-        guicheckbox "show teammates" radarteammates 1
++        guilist [ guicheckbox "Score display" hudscore ; guistrut $MENU_col 1 ]
++        guibutton "Adjust..." [showgui hudscore] 0
+     ]
+-    guibar
+     guilist [
+-        guicheckbox "ammobar^t^t" ammobar
+-        guibutton "adjust ammobar"   [showgui ammobar]
++        guilist [ guicheckbox "Kill feed" killfeed ; guistrut $MENU_col 1 ]
++        guibutton "Adjust..." [showgui killfeed] 0
+     ]
+     guilist [
+-        guicheckbox "gameclock^t" gameclock
+-        guibutton "adjust gameclock" [showgui gameclock]
++        guilist [ guicheckbox "Kill streak" killstreak ; guistrut $MENU_col 1 ]
++        guibutton "Adjust..." [showgui killstreak] 0
+     ]
+     guilist [
+-        guicheckbox "hudscore^t^t" hudscore
+-        guibutton "adjust hudscore" [showgui hudscore]
++        guilist [ guicheckbox "Show FPS" showfps ; guistrut $MENU_col 1 ]
++        guicheckbox "Wall clock" wallclock
++        if $wallclock [
++            HUD_gap
++            guicheckbox "24 hour" wallclock24
++            HUD_gap
++            guicheckbox "Seconds" wallclocksecs
++        ]
+     ]
+ 
+-    guitab "gfx" ////////////////////////////////////////////////////////////////////////////////////////////////////////////
+-    guitext "performance key: ^f0fast^f~, ^f2moderate^f~, ^f3slow and pretty^f~"
+-    guibar
++    guisection "When I am hit"
+     guilist [
+-        guitext "shaders^t^t"
+-        guibar
+-        guiradio "^f0low detail" shaderdetail 1
+-        guibar
+-        guiradio "^f2high detail" shaderdetail 3
++        guilist [ guicheckbox "Red screen flash" damagescreen ; guistrut $MENU_col 1 ]
++        guicheckbox "Arrows showing where it came from" damagecompass
+     ]
++
++    guisection "Team games"
++    guicheckbox "Teammates on the minimap" radarteammates 1
+     guilist [
+-        guitext "water^t^t"
+-        guibar
+-        guicheckbox "^f2refraction"  waterrefract
+-        guibar
+-        guicheckbox "^f3reflection"  waterreflect
+-        guibar
+-        guicheckbox "^f0caustics"    caustics
+-        guibar
+-        guicheckbox "^f2animation"   vertwater
++        guilist [ guicheckbox "Numbered capture bases" basenumbers ; guistrut $MENU_col 1 ]
++        guicheckbox "Outline capture meters" outlinemeters
++    ]
++    guicheckbox "Flag timer (stolen from the enemy base)" flagtimer
++    guicheckbox "Big flag messages (taken / dropped / returned / scored)" flagfeed
++
++    guisection "More"
++    guistayopen [
++        guilist [
++            guilist [ guibutton "Crosshair..." [showgui crosshair] ; guistrut $MENU_col 1 ]
++            guibutton "Weapons and trails..." [showgui trails]
++        ]
++        guilist [
++            guilist [ guibutton "Scoreboard (Tab)..." [showgui scoreboard] ; guistrut $MENU_col 1 ]
++            guibutton "Player colours..." [friendsview = 1; showgui friends]
++        ]
+     ]
++] 0
++
++newgui scoreboard [
++    guititle "Scoreboard"
++    MENU_width
++    guitext "^f4Shown while you hold Tab." 0
++    guisection "Board"
++    guitext "Opacity" 0
++    guistayopen [
++        guislider scoreboardalpha
++    ]
++    guitext "^f4Lower = see the game through the board" 0
++    guicheckbox "Show it when I die" deathscore
++    guicheckbox "Player list on the right while spectating" spectatorlist
++    guitext "^f4Hold Tab while spectating, then click a name to follow that player." 0
++    guisection "Columns"
++    guitext "^f4Each box is one column." 0
+     guilist [
+-        guitext "waterfalls^t^t"
++        guilist [
++            guicheckbox "Server name" showservinfo
++            guicheckbox "Frags" showfrags
++            guicheckbox "Frags in CTF / Collect" hidefrags 0 1
++            guicheckbox "Deaths" showdeaths
++            guicheckbox "K/D" showkd
++            guicheckbox "Flags / skulls" showflags
++            guicheckbox "Accuracy" showaccuracy
++            guicheckbox "Languages" showlang
++            guicheckbox "Vs you (kills-deaths)" showvs
++            guicheckbox "Status (dead / lag)" showstatus
++        ]
++        HUD_gap
+         guibar
+-        guicheckbox "^f2refraction" waterfallrefract
++        HUD_gap
++        guilist [
++            guicheckbox "Ping" showping
++            guicheckbox "Packet jump" showpj
++            guicheckbox "Client number" showclientnum
++            guicheckbox "Spectators" showspectators
++            guicheckbox "Highlight me" highlightscore
++            guicheckbox "Connecting players" showconnecting
++        ]
++    ]
++] 0
++
++// hwrt 1 is greyed out (menu, settings search, assistant) when the GPU cannot trace;
++// hwrtraison gives the reason, "" when ray tracing can run
++settinglock hwrt 1 [hwrtraison]
++// DLAA/DLSS (NVIDIA only) and FSR (any GPU with GL/Vulkan sharing) are greyed
++// the same way; hwrtdlssraison / hwrtfsrraison give the reason, "" when allowed
++looplist m [1 2 3 4] [ settinglock hwrtngxmode $m [hwrtdlssraison] ]
++looplist m [5 6 7 8] [ settinglock hwrtngxmode $m [hwrtfsrraison] ]
++AA_modename = [at [Native DLAA "DLSS Quality" "DLSS Balanced" "DLSS Performance" "FSR Native" "FSR Quality" "FSR Balanced" "FSR Performance"] $arg1]
++
++newgui gfx [
++    guititle "Graphics"
++    MENU_width
++    guilist [
++        MENU_tab gfxtab 0 "General"
++        guistrut 2
++        MENU_tab gfxtab 1 "Ray tracing"
++        guistrut 2
++        MENU_tab gfxtab 5 "Performance"
++        guistrut 2
++        MENU_tab gfxtab 3 "HDR screen"
++        guistrut 2
++        MENU_tab gfxtab 4 "Classic"
++    ]
++    guibar
++    if (= $gfxtab 0) [
++        guisection "Lighting"
++        guitext "^f4Classic: original lighting, any GPU. Ray tracing: RT lights, sun and sky."
++        guilist [
++            guistayopen [
++                guiradio "Classic (no RT)" hwrt 0
++                guibar
++                guiradio "Ray tracing" hwrt 1 [ if (!= $hwrtdebug 7) [ hwrtdebug 7 ] ]
++            ]
++        ]
++        if (!=s (hwrtraison) "") [
++            guitext (concatword "^f2" (hwrtraison))
++            guitext "^f4It needs a graphics card with hardware ray tracing and an up-to-date driver."
++        ]
++        if $hwrt [
++            if (hwrtlighteffective) [
++                guitext "^f0Ray-traced lighting is running. Its settings: Ray tracing tab."
++            ] [
++                guitext "^f3Ray tracing chosen, but not running yet (no map, or it failed: see console)."
++            ]
++        ] [
++            guitext "^f4Classic lighting settings: Classic tab."
++        ]
++
++        guisection "Anti-Aliasing"
++        guilist [
++            guilist [ guicheckbox "FXAA in Native (softer)" lookfxaa ; guistrut $MENU_col 1 ]
++            guitext "MSAA (Classic only) "
++            guistayopen [
++                guiradio "Off" fsaa (? (> $fsaa 0) -1 $fsaa)
++                guibar
++                guiradio "2x" fsaa 2
++                guibar
++                guiradio "4x" fsaa 4
++                guibar
++                guiradio "8x" fsaa 8
++            ]
++        ]
++        if (&& (> $fsaa 0) (! $hwrt) (= (hwrtngxmodeapplied) 0)) [
++            guitext "^f4MSAA: smooth edges, sharp textures. A change restarts the graphics."
++        ]
++        if (&& (>= (getvarmax hwrtngxmode) 4) (!= (hwrtngxmodeapplied) 0)) [
++            guitext "^f4FXAA unused while DLAA, DLSS or FSR is on."
++        ]
++        if (>= (getvarmax hwrtngxmode) 4) [
++            if (= (hwrtngxmodeapplied) 0) [ guitext "^f4FXAA off (default) keeps Native sharp. Quality = more internal pixels." ]
++            guilist [
++                guistayopen [
++                    guiradio "Native" hwrtngxmode 0 [ LOOK_retire; LOOK_apply ]
++                    guibar
++                    guiradio "DLAA" hwrtngxmode 1 [ LOOK_retire; LOOK_apply ]
++                    guibar
++                    guiradio "DLSS Quality" hwrtngxmode 2 [ LOOK_retire; LOOK_apply ]
++                    guibar
++                    guiradio "DLSS Balanced" hwrtngxmode 3 [ LOOK_retire; LOOK_apply ]
++                    guibar
++                    guiradio "DLSS Performance" hwrtngxmode 4 [ LOOK_retire; LOOK_apply ]
++                ]
++            ]
++            if (= (getvarmax hwrtngxmode) 8) [
++                guilist [
++                    guistayopen [
++                        guiradio "FSR Native" hwrtngxmode 5 [ LOOK_retire; LOOK_apply ]
++                        guibar
++                        guiradio "FSR Quality" hwrtngxmode 6 [ LOOK_retire; LOOK_apply ]
++                        guibar
++                        guiradio "FSR Balanced" hwrtngxmode 7 [ LOOK_retire; LOOK_apply ]
++                        guibar
++                        guiradio "FSR Performance" hwrtngxmode 8 [ LOOK_retire; LOOK_apply ]
++                    ]
++                ]
++                if (!=s (hwrtdlssraison) "") [ guitext (concatword "^f2" (hwrtdlssraison)) ]
++                if (!=s (hwrtfsrraison) "") [ guitext (concatword "^f2" (hwrtfsrraison)) ]
++                if (&& (>= $hwrtngxmode 6) (=s (hwrtfsrraison) "")) [
++                    guitext "^f4FSR sharpening after upscaling (0 = off, 10 = like DLSS):"
++                    guislider hwrtfsrsharpness
++                ]
++            ]
++            if (|| (&& (>= $hwrtngxmode 1) (<= $hwrtngxmode 4) (=s (hwrtdlssraison) "")) (|| (&& (>= $hwrtngxmode 2) (<= $hwrtngxmode 4)) (>= $hwrtngxmode 6))) [
++                guilist [
++                    if (&& (>= $hwrtngxmode 1) (<= $hwrtngxmode 4) (=s (hwrtdlssraison) "")) [
++                        guitext "DLAA/DLSS sharpening "
++                        guistayopen [
++                            guiradio "Off" hwrtdlsssharpness 0
++                            guibar
++                            guiradio "10" hwrtdlsssharpness 10
++                            guibar
++                            guiradio "20" hwrtdlsssharpness 20
++                            guibar
++                            guiradio "40" hwrtdlsssharpness 40
++                        ]
++                        guistrut 3
++                    ]
++                    if (|| (&& (>= $hwrtngxmode 2) (<= $hwrtngxmode 4)) (>= $hwrtngxmode 6)) [ guicheckbox "Sharper textures (may shimmer)" hwrtupscalemipbias ]
++                ]
++            ]
++            if (= (hwrtngxfallback) 1) [
++                guitext (concatword "^f3Using Native: " (AA_modename $hwrtngxmode) " did not start. Your choice is kept.")
++                if (!=s (hwrtngxreason) "") [ guitext (concatword "^f4" (hwrtngxreason)) ]
++            ]
++        ]
++
++        guisection "Players"
++        guilist [
++            guicheckbox "Fullbright player models" fullbrightmodels 60 0
++            if $fullbrightmodels [
++                guibar
++                guiradio "Subtle" fullbrightmodels 60
++                guibar
++                guiradio "Bright" fullbrightmodels 100
++                guibar
++                guiradio "Overbright" fullbrightmodels 150
++                guibar
++                guiradio "Max" fullbrightmodels 200
++            ]
++        ]
++        guicheckbox "Everyone uses my player model" forceplayermodels
++        guicheckbox "Always use team skins (blue / red)" teamskins
++
++        guisection "Deaths"
++        guilist [
++            guilist [ guicheckbox "Blood" blood ; guistrut $MENU_col 1 ]
++            guicheckbox "Hide dead players" hidedead
++        ]
++        guilist [
++            guilist [ guicheckbox "Ragdoll deaths" ragdoll ; guistrut $MENU_col 1 ]
++            if $ragdoll [
++                guicheckbox "Keep after respawn" ragdollmillis 10000
++            ]
++        ]
++        guitext "Ragdoll push (velocity multiplier)"
++        guislider deadpush
++    ]
++    if (= $gfxtab 1) [
++        if (! $hwrt) [
++            guitext "^f2Ray tracing is off: choose it in General > Lighting." 0
++            guitext "^f4These settings only act with ray tracing." 0
++        ] [
++            guisection "Lights"
++            guicheckbox "Teleporters glow and light the room" hwrtteleportlight
++            guicheckbox "Jump pads glow and light the room" hwrtjumppadlight
++            guicheckbox "Weapons light the scene (flashes, rockets, explosions)" hwrtdynlights
++
++            guisection "Shadows"
++            guitext "^f4My own shadow (first person): which lights draw it." 0
++            guistayopen [
++                guilist [
++                    guiradio "None" hwrtshadowself 0
++                    guibar
++                    guiradio "The sun only (default)" hwrtshadowself 1
++                    guibar
++                    guiradio "+ glowing lights" hwrtshadowself 2
++                ]
++                guilist [
++                    guiradio "+ nearby lamps (stretched)" hwrtshadowself 3
++                    guibar
++                    guiradio "+ the sky (dark patch around you)" hwrtshadowself 4
++                ]
++            ]
++            guitext "^f4Shadows of the others (players, bots, rockets, pickups): which lights." 0
++            guistayopen [
++                guilist [
++                    guiradio "None" hwrtshadowothers 0
++                    guibar
++                    guiradio "The sun and the sky" hwrtshadowothers 1
++                    guibar
++                    guiradio "+ glowing lights (default)" hwrtshadowothers 2
++                ]
++                guilist [
++                    guiradio "+ the map's lamps (a hidden lamp can add a 2nd shadow)" hwrtshadowothers 3
++                ]
++            ]
++            guicheckbox "Weapon smoke casts shadows" hwrtsmokeshadow
++            if $hwrtsmokeshadow [
++                guitext "^f4Smoke shadow density (percent, default: 100):"
++                guislider hwrtsmokeshadowdensity
++            ]
++            guilist [
++                guilist [ guitext "Soft shadows" 0 ; guistrut $MENU_col 1 ]
++                guistayopen [
++                    guiradio "Off" hwrtsoftshadows 0
++                    guibar
++                    guiradio "On (default)" hwrtsoftshadows 2
++                ]
++            ]
++            if (= $hwrtsoftshadows 1) [ guitext "^f4Sun only (set in the console): choose On or Off to change it." 0 ]
++            if (= $hwrtsoftshadows 2) [ guitext "^f4Sun, lamps, torches, teleporters: blur with distance. ~1-2.5 ms (1440p)." 0 ]
++            if $hwrtsoftshadows [
++                guilist [
++                    guilist [ guitext "Soft shadow rays" 0 ; guistrut $MENU_col 1 ]
++                    guistayopen [
++                        guiradio "1" hwrtsoftshadowrays 1
++                        guibar
++                        guiradio "2 (default)" hwrtsoftshadowrays 2
++                        guibar
++                        guiradio "4" hwrtsoftshadowrays 4
++                        guibar
++                        guiradio "8" hwrtsoftshadowrays 8
++                    ]
++                ]
++                guilist [
++                    guilist [ guitext "Soft shadow denoiser" 0 ; guistrut $MENU_col 1 ]
++                    guistayopen [
++                        guiradio "Off" hwrtsoftsigma 0
++                        guibar
++                        guiradio "On (NRD SIGMA, default)" hwrtsoftsigma 1
++                    ]
++                ]
++                if $hwrtsoftsigma [
++                    if (! $hwrtnrd) [ guitext "^f4Needs the NRD denoiser (Performance > Advanced)." 0 ]
++                    guilist [
++                        guilist [ guitext "Denoiser steadiness" 0 ; guistrut $MENU_col 1 ]
++                        guistayopen [
++                            guiradio "0" hwrtsoftsigmahistory 0
++                            guibar
++                            guiradio "3" hwrtsoftsigmahistory 3
++                            guibar
++                            guiradio "5 (default)" hwrtsoftsigmahistory 5
++                            guibar
++                            guiradio "7" hwrtsoftsigmahistory 7
++                        ]
++                    ]
++                ]
++            ]
++
++            guisection "Surfaces"
++            guicheckbox "Reflections on water and reflective surfaces" hwrtreflections
++            guicheckbox "Animated waves on water (ripples in the RT reflections)" hwrtwaterwaves
++            if $hwrtwaterwaves [
++                if (! $hwrtreflections) [ guitext "^f4Needs the reflections above." 0 ]
++                guilist [
++                    guilist [ guitext "Wave strength" 0 ; guistrut 12 1 ]
++                    guifield waterwaveamp 4
++                    guistayopen [ guibutton " - " [waterwaveamp (+fround $waterwaveamp -0.25)] 0 ]
++                    guistayopen [ guibutton " + " [waterwaveamp (+fround $waterwaveamp 0.25)] 0 ]
++                    HUD_gap
++                    guilist [ guitext "Speed" 0 ; guistrut 6 1 ]
++                    guifield waterwavespeed 4
++                    guistayopen [ guibutton " - " [waterwavespeed (+fround $waterwavespeed -0.25)] 0 ]
++                    guistayopen [ guibutton " + " [waterwavespeed (+fround $waterwavespeed 0.25)] 0 ]
++                ]
++                guilist [
++                    guilist [ guitext "Wave detail" 0 ; guistrut 12 1 ]
++                    guistayopen [
++                        guiradio "64" waterwavesize 64
++                        guibar
++                        guiradio "128 (default)" waterwavesize 128
++                        guibar
++                        guiradio "256" waterwavesize 256
++                    ]
++                ]
++                guitext "^f4Shared by RT and classic water. The water stays flat for the game." 0
++            ]
++            guicheckbox "Shine of lamps and sun on glossy surfaces" hwrtspecular
++            guicheckbox "Smooth lighting across faceted floors and walls" hwrtsmoothnormals
++        ]
++    ]
++    if (= $gfxtab 5) [
++        if (! $hwrt) [
++            guitext "^f2Ray tracing is off: choose it in General > Lighting." 0
++            guitext "^f4These settings only act with ray tracing." 0
++        ] [
++            GFX_prof = (GFX_profwhich)
++            guisection "Profile"
++            guistayopen [
++                guilist [
++                    guiradio "Ultra" GFX_prof 0 [ GFX_profapply 0 ]
++                    guibar
++                    guiradio "High" GFX_prof 1 [ GFX_profapply 1 ]
++                    guibar
++                    guiradio "Medium" GFX_prof 2 [ GFX_profapply 2 ]
++                    guibar
++                    guiradio "Low" GFX_prof 3 [ GFX_profapply 3 ]
++                    guibar
++                    guiradio "Custom" GFX_prof 4 [ GFX_prof = 4 ]
++                ]
++            ]
++            if (= $GFX_prof 0) [ guitext "^f4Ultra: the full picture (default). Slow and pretty." 0 ]
++            if (= $GFX_prof 1) [ guitext "^f4High: nearly the same picture, faster: CNN, solid leaves, still models." 0 ]
++            if (= $GFX_prof 2) [ guitext "^f4Medium: + half-pixel sky, 3 lamps, adaptive rays, 1 soft shadow ray." 0 ]
++            if (= $GFX_prof 3) [ guitext "^f4Low: + 2 lamps, 1 glow, softer far, no soft shadows. Darker, fastest." 0 ]
++            if (= $GFX_prof 4) [ guitext "^f4Custom: your own mix. A profile sets both views below and soft shadows." 0 ]
++        ]
++        guilist [
++            MENU_tab gfxperftab 0 "Main choices"
++            guistrut 2
++            MENU_tab gfxperftab 1 "Advanced: sky, lamps, textures"
++        ]
+         guibar
+-        guicheckbox "^f0reflection" waterfallenv
+     ]
+-    guilist [
+-        guicheckbox "^f3soft shadows^t"  shadowmap
+-        if $shadowmap [
++    if (&& (= $gfxtab 5) (= $gfxperftab 0)) [
++        if $hwrt [
++            guilist [
++                guilist [ guitext "RT quality" 0 ; guistrut $GFX_perfcol 1 ]
++                guistayopen [
++                    guiradio "Full (best)" hwrtquality 2
++                    guibar
++                    guiradio "Half sky" hwrtquality 1
++                    guibar
++                    guiradio "Half sky, 1 glow" hwrtquality 0
++                ]
++            ]
++            guilist [
++                guilist [ guitext "DLSS model" 0 ; guistrut $GFX_perfcol 1 ]
++                guistayopen [
++                    guiradio "Transformer (sharper, slower)" hwrtdlsscnn 0
++                    guibar
++                    guiradio "CNN (faster, softer)" hwrtdlsscnn 1
++                ]
++            ]
++            if (! (&& (>= $hwrtngxmode 1) (<= $hwrtngxmode 4))) [
++                guitext "^f4DLSS model: used with DLAA or DLSS (General > Anti-Aliasing)." 0
++            ]
++            guilist [
++                guilist [ guitext "Leaves" 0 ; guistrut $GFX_perfcol 1 ]
++                guistayopen [
++                    guiradio "See-through (exact)" hwrtskyopaque 0
++                    guibar
++                    guiradio "Solid (faster under trees)" hwrtskyopaque 1
++                ]
++            ]
++            guitext "^f4For sky light only: solid leaves give a denser shade below trees." 0
++            guilist [
++                guilist [ guitext "NRD denoiser" 0 ; guistrut $GFX_perfcol 1 ]
++                guistayopen [
++                    guiradio "Full" hwrtnrdlight 0
++                    guibar
++                    guiradio "Light (faster)" hwrtnrdlight 1
++                    guibar
++                    guiradio "Lightest (more flicker)" hwrtnrdlight 2
++                ]
++            ]
++            guilist [
++                guilist [ guitext "Still models" 0 ; guistrut $GFX_perfcol 1 ]
++                guistayopen [
++                    guiradio "Drawn again (exact)" hwrtvelstatic 0
++                    guibar
++                    guiradio "From depth (less CPU)" hwrtvelstatic 1
++                ]
++            ]
++            guitext "^f4Motion of still map models, used by DLAA, DLSS and FSR." 0
++            guilist [
++                guilist [ guitext "Sky reach" 0 ; guistrut $GFX_perfcol 1 ]
++                guistayopen [
++                    guiradio "Full" hwrtskyrange 0
++                    guibar
++                    guiradio "1024" hwrtskyrange 1024
++                    guibar
++                    guiradio "512" hwrtskyrange 512
++                    guibar
++                    guiradio "256" hwrtskyrange 256
++                ]
++            ]
++            guitext "^f4Shorter is faster; a hall higher than that gets some sky light." 0
++            guilist [
++                guilist [ guitext "Adaptive rays" 0 ; guistrut $GFX_perfcol 1 ]
++                guistayopen [
++                    guiradio "Off" hwrtrtadapt 0
++                    guibar
++                    guiradio "On (fewer rays at edges, far, in motion)" hwrtrtadapt 1
++                ]
++            ]
++        ]
++    ]
++    if (&& (= $gfxtab 5) (= $gfxperftab 1)) [
++        guisection "Sky light"
++        if (= (getvarmax hwrtnrd) 1) [
++            guitext "^f4Denoiser (cleans the grain of the sky light):" 0
++            guistayopen [
++                guilist [
++                    guiradio "Built-in filter" hwrtnrd 0
++                    guibar
++                    guiradio "NRD (stronger, with Native, DLSS and FSR)" hwrtnrd 1
++                ]
++            ]
++            if (&& (= (hwrtnrdfallback) 1) (hwrtlighteffective)) [
++                guitext "^f3NRD is unavailable here: the built-in filter is used."
++            ]
++        ]
++        if $hwrt [
++            guilist [
++                guilist [ guitext "Rays per pixel (NRD)" 0 ; guistrut $MENU_col 1 ]
++                guistayopen [
++                    guiradio "1" hwrtskyrays 1
++                    guibar
++                    guiradio "2" hwrtskyrays 2
++                    guibar
++                    guiradio "3" hwrtskyrays 3
++                    guibar
++                    guiradio "4" hwrtskyrays 4
++                ]
++            ]
++            guitext "^f4With NRD only: more = less grain, slower. Built-in filter: always 4." 0
++            guitext "Built-in filter: smoothing over frames (default: 32, 0 = off)" 0
++            guislider hwrtskytemporal
++            guicheckbox "Blur between neighbouring pixels (both denoisers)" hwrtskyfilter
++            guicheckbox "Draw the sun as a disk (instead of the map's sky picture)" hwrtsundisk
++
++            guisection "Lamps and textures"
++            guilist [
++                guilist [ guitext "Lamps with a shadow" 0 ; guistrut $MENU_col 1 ]
++                guistayopen [
++                    guiradio "1" hwrtdlights 1
++                    guibar
++                    guiradio "2" hwrtdlights 2
++                    guibar
++                    guiradio "3" hwrtdlights 3
++                    guibar
++                    guiradio "4" hwrtdlights 4
++                ]
++            ]
++            guitext "Glowing lights traced (teleporters, lava; default: 8)" 0
++            guislider hwrtglowdlights
++
++            guilist [
++                guilist [ guitext "Texture upscaling" 0 ; guistrut $MENU_col 1 ]
++                guistayopen [
++                    guiradio "Bicubic" hwrtdiffupscale 2
++                    guibar
++                    guiradio "Lanczos (sharper)" hwrtdiffupscale 3
++                    guibar
++                    guiradio "Nearest" hwrtdiffupscale 0
++                ]
++            ]
++            guilist [
++                guilist [ guitext "Texture detail far" 0 ; guistrut $MENU_col 1 ]
++                guistayopen [
++                    guiradio "Stable (less shimmer)" hwrtdiffmipbias 0
++                    guibar
++                    guiradio "Sharper" hwrtdiffmipbias -0.5
++                ]
++            ]
++        ]
++    ]
++    if (= $gfxtab 3) [
++        guisection "Display output"
++        guitext "^f4Native HDR sends a real HDR picture to an HDR screen." 0
++        guitext "^f4Windows HDR must already be on (it is never changed here)." 0
++        guilist [
++            guistayopen [
++                guiradio "SDR" hdroutpref 0
++                guibar
++                guiradio "Native HDR" hdroutpref 1
++            ]
++        ]
++        if (= (hdrouteffectif) 2) [
++            guitext "^f0In use: Native HDR"
++        ] [
++            if (= (hdrouteffectif) 1) [
++                guitext "^f2In use: HDR preview shown in SDR (diagnostic, not native HDR)"
++            ] [
++                guitext "In use: SDR"
++            ]
++        ]
++        if (&& (!= $hdroutpref 0) (= (hdroutdispo) 0)) [
++            guitext (concat (? (= $hdroutpref 1) "^f3" "^f4") (hdroutraison))
++        ]
++
++        guisection "HDR calibration"
++        guitext "^f4Native HDR only. Kept across maps, outputs, anti-aliasing and lighting." 0
++        guitext (format "Exposure: %1 EV (default 0)" $hwrthdrexp)
++        guilist [
++            guistayopen [
++                guibutton "-0.5" [ hdroutexpstep -0.5 ]
++                guibar
++                guibutton "-0.1" [ hdroutexpstep -0.1 ]
++                guibar
++                guibutton "+0.1" [ hdroutexpstep 0.1 ]
++                guibar
++                guibutton "+0.5" [ hdroutexpstep 0.5 ]
++                guibar
++                guibutton "Reset" [ hwrthdrexp 0 ]
++            ]
++        ]
++        guitext (format "Reference white: %1 nits (default 80)" $hdroutref)
++        guislider hdroutref
++        guitext (hdroutpeaklabel)
++        guilist [
++            guistayopen [
++                guiradio "Automatic peak" hdroutmax 0
++                guibar
++                if (= $hdroutmax 0) [
++                    guibutton "Manual peak" [ hdroutmax (max 400 (hdroutpeakauto)) ]
++                ] [
++                    guibutton "-100" [ hdroutmax (max 100 (- $hdroutmax 100)) ]
++                    guibar
++                    guibutton "+100" [ hdroutmax (min 10000 (+ $hdroutmax 100)) ]
++                ]
++            ]
++        ]
++        guitext (hdrouthudlabel)
++        guilist [
++            guistayopen [
++                guiradio "HUD follows reference white" hdrouthud 0
++                guibar
++                if (= $hdrouthud 0) [
++                    guibutton "Custom HUD brightness" [ hdrouthud (max 40 $hdroutref) ]
++                ]
++            ]
++        ]
++        if (> $hdrouthud 0) [ guislider hdrouthud ]
++    ]
++    if (= $gfxtab 4) [
++        guisection "Shading (classic lighting)"
++        guitext "^f4Slightly darker corners and wall bases; players are never darkened." 0
++        guilist [
++            guilist [ guitext "Ambient Occlusion" 0 ; guistrut $MENU_col 1 ]
++            guistayopen [
++                guiradio "Off" gtao 0
++                guibar
++                guiradio "Low" gtao 1
++                guibar
++                guiradio "High" gtao 2
++            ]
++        ]
++        if (&& $gtao (hwrtlighteffective)) [ guitext "^f4Not used with ray tracing: RT already traces the sky light." ]
++        if (= $gtao 0) [
++            guilist [
++                guilist [ guicheckbox "Old corner shading" lookao ; guistrut $MENU_col 1 ]
++                if $lookao [
++                    guitext "Strength" 0
++                    guifield lookaoscale 4
++                    guistayopen [ guibutton " - " [lookaoscale (+fround $lookaoscale -0.05)] 0 ]
++                    guistayopen [ guibutton " + " [lookaoscale (+fround $lookaoscale 0.05)] 0 ]
++                    HUD_gap
++                    guitext "Size" 0
++                    guifield lookaoradius 4
++                    guistayopen [ guibutton " - " [lookaoradius (+fround $lookaoradius -0.05)] 0 ]
++                    guistayopen [ guibutton " + " [lookaoradius (+fround $lookaoradius 0.05)] 0 ]
++                ]
++            ]
++            guitext "^f4Used when Ambient Occlusion is Off (on by default)." 0
++        ]
++
++        guisection "Detail"
++        guitext "Speed: ^f0Fast^f~, ^f2Moderate^f~, ^f3Slow and Pretty^f~" 0
++        guilist [
++            GFX_name "Shaders"
+             guibar
+-            guiradio "^f2medium quality" shadowmapsize 9 [blurshadowmap 1]
++            guiradio "^f0Low Detail" shaderdetail 1
+             guibar
+-            guiradio "^f3high quality"   shadowmapsize 10 [blurshadowmap 2]
+-        ] [
++            guiradio "^f2High Detail" shaderdetail 3
++        ]
++        guilist [
++            GFX_name "Water"
++            guibar
++            guicheckbox "^f2Refraction"  waterrefract
++            guibar
++            guicheckbox "^f3Reflection"  waterreflect
+             guibar
+-            guicheckbox "^f2blob shadows" blobs
++            guicheckbox "^f0Caustics"    caustics
++            guibar
++            guicheckbox "^f2Animation"   vertwater
+         ]
+-    ]
+-    if $glare [
+-        glarepreset = 0
+-        if (= $glarescale 1) [
+-            if (= $blurglare 4) [glarepreset = 1]
+-            if (= $blurglare 7) [glarepreset = 3]
++        guilist [
++            GFX_name "Water waves"
++            guibar
++            guicheckbox "^f2Animated (ripples in reflections and refraction)" waterwaves
++        ]
++        if $waterwaves [
++            guilist [
++                guilist [ guitext "Wave strength" 0 ; guistrut 12 1 ]
++                guifield waterwaveamp 4
++                guistayopen [ guibutton " - " [waterwaveamp (+fround $waterwaveamp -0.25)] 0 ]
++                guistayopen [ guibutton " + " [waterwaveamp (+fround $waterwaveamp 0.25)] 0 ]
++                HUD_gap
++                guilist [ guitext "Speed" 0 ; guistrut 6 1 ]
++                guifield waterwavespeed 4
++                guistayopen [ guibutton " - " [waterwavespeed (+fround $waterwavespeed -0.25)] 0 ]
++                guistayopen [ guibutton " + " [waterwavespeed (+fround $waterwavespeed 0.25)] 0 ]
++            ]
++            guilist [
++                guilist [ guitext "Wave detail" 0 ; guistrut 12 1 ]
++                guistayopen [
++                    guiradio "64" waterwavesize 64
++                    guibar
++                    guiradio "128 (default)" waterwavesize 128
++                    guibar
++                    guiradio "256" waterwavesize 256
++                ]
++            ]
++            guitext "^f4Shared by RT and classic water. The water stays flat for the game." 0
++        ]
++        guilist [
++            GFX_name "Waterfalls"
++            guibar
++            guicheckbox "^f2Refraction" waterfallrefract
++            guibar
++            guicheckbox "^f0Reflection" waterfallenv
++        ]
++        guilist [
++            GFX_name "^f3Classic shadows"
++            guibar
++            guicheckbox "On" shadowmap
++            if $shadowmap [
++                guibar
++                guiradio "^f2Medium Quality" shadowmapsize 9 [blurshadowmap 1]
++                guibar
++                guiradio "^f3High Quality"   shadowmapsize 10 [blurshadowmap 2]
++            ] [
++                guibar
++                guicheckbox "^f2Blob Shadows" blobs
++            ]
++        ]
++        guilist [
++            GFX_name "My Shadow"
++            guibar
++            guicheckbox "Mine too, from the sun (with Classic shadows; RT: Ray tracing tab)" lookselfshadow
++        ]
++        if $glare [
++            glarepreset = 0
++            if (= $glarescale 1) [
++                if (= $blurglare 4) [glarepreset = 1]
++                if (= $blurglare 7) [glarepreset = 3]
++            ]
++            if (= $glarescale 2) [
++                if (= $blurglare 3) [glarepreset = 2]
++                if (= $blurglare 7) [glarepreset = 4]
++            ]
++        ]
++        guilist [
++            GFX_name "^f3Glare"
++            guibar
++            guicheckbox "On" glare
++            if $glare [
++                guibar
++                guiradio "^f2Subtle" glarepreset 1 [blurglare 4; glarescale 1]
++                guibar
++                guiradio "^f2Glowy" glarepreset 2 [blurglare 3; glarescale 2]
++                guibar
++                guiradio "^f3Soft" glarepreset 3 [blurglare 7; glarescale 1]
++                guibar
++                guiradio "^f3Intense" glarepreset 4 [blurglare 7; glarescale 2]
++            ]
++        ]
++        guilist [
++            GFX_name "^f3Motion Blur"
++            guibar
++            guicheckbox "On" motionblur
++            if $motionblur [
++                guibar
++                guiradio "^f3Subtle" motionblurscale 0.5
++                guibar
++                guiradio "^f3Moderate" motionblurscale 0.65
++                guibar
++                guiradio "^f3Intense" motionblurscale 0.8
++            ]
+         ]
+-        if (= $glarescale 2) [
+-            if (= $blurglare 3) [glarepreset = 2]
+-            if (= $blurglare 7) [glarepreset = 4]
++        guilist [
++            GFX_name "^f3Grass"
++            guibar
++            guicheckbox "On" grass
++            if $grass [
++                guibar
++                guiradio "^f2Quick Fade" grassdist 128
++                guibar
++                guiradio "^f2Moderate Fade" grassdist 256
++                guibar
++                guiradio "^f3Slow Fade" grassdist 512
++            ]
+         ]
+         guilist [
+-            guicheckbox "^f3glare^t^t^t"       glare
++            GFX_name "^f0Dynamic Lights"
+             guibar
+-            guiradio "^f2subtle" glarepreset 1 [blurglare 4; glarescale 1]
++            guicheckbox "On" maxdynlights 3 0
++            if $maxdynlights [
++                guibar
++                guiradio "^f0Medium Quality" maxdynlights 3
++                guibar
++                guiradio "^f2High Quality" maxdynlights 5
++            ]
++        ]
++        guilist [
++            GFX_name "^f0Soft Particles"
+             guibar
+-            guiradio "^f2glowy" glarepreset 2 [blurglare 3; glarescale 2]
++            guicheckbox "On" depthfx
++            if $depthfx [
++                guibar
++                guiradio "^f0Low Quality" depthfxsize 7 [blurdepthfx 1]
++                guibar
++                guiradio "^f2Medium Quality" depthfxsize 10 [blurdepthfx 0]
++                guibar
++                guiradio "^f3High Quality" depthfxsize 12 [blurdepthfx 0]
++            ]
++        ]
++        guilist [
++            GFX_name "^f0Glass Reflection"
+             guibar
+-            guiradio "^f3soft" glarepreset 3 [blurglare 7; glarescale 1]
++            guicheckbox "On" glassenv
++        ]
++        guilist [
++            GFX_name "^f0Decals"
+             guibar
+-            guiradio "^f3intense" glarepreset 4 [blurglare 7; glarescale 2]
++            guicheckbox "On" decals
++            if $decals [
++                guibar
++                guiradio "^f0Quick Fade" decalfade 10000 [maxdecaltris 1024]
++                guibar
++                guiradio "^f2Slow Fade" decalfade 60000 [maxdecaltris 4096]
++            ]
+         ]
+-    ] [
+-        guicheckbox "^f3glare"         glare
+-    ]
+-    guilist [
+-        guicheckbox "^f3motion blur^t" motionblur
+-        if $motionblur [
++        guilist [
++            GFX_name "Textures"
+             guibar
+-            guiradio "^f3subtle" motionblurscale 0.5
++            guiradio "^f0Low Quality" maxtexsize 256
+             guibar
+-            guiradio "^f3moderate" motionblurscale 0.65
++            guiradio "^f0Medium Quality" maxtexsize 512
+             guibar
+-            guiradio "^f3intense" motionblurscale 0.8
++            guiradio "^f2High Quality" maxtexsize 0
+         ]
+-    ]
+-    guilist [
+-        guicheckbox "^f3grass^t^t^t" grass
+-        if $grass [
+-            guibar
+-            guiradio "^f2quick fade" grassdist 128
++        guilist [
++            GFX_name "Models"
+             guibar
+-            guiradio "^f2moderate fade" grassdist 256
++            guicheckbox "^f0Reflection"  envmapmodels
+             guibar
+-            guiradio "^f3slow fade" grassdist 512
++            guicheckbox "^f2Bump Map" bumpmodels
+         ]
+     ]
++] 0
++
++newgui display [
++    guititle "Display"
++    MENU_width
+     guilist [
+-        guicheckbox "^f0dynamic lights^t"    maxdynlights 3 0
+-        if $maxdynlights [
+-            guibar
+-            guiradio "^f0medium quality" maxdynlights 3
+-            guibar
+-            guiradio "^f2high quality" maxdynlights 5
++        MENU_tab displaytab 0 "Screen"
++        guistrut 3
++        MENU_tab displaytab 1 "Resolution"
++        guistrut 3
++        MENU_tab displaytab 2 "Advanced"
++    ]
++    guibar
++    if (= $displaytab 0) [
++        guisection "Window"
++        guistayopen [
++            guiradio "Exclusive Fullscreen" windowmode 1
++            guiradio "Borderless"           windowmode 2
++            guiradio "Windowed"             windowmode 0
++        ]
++        guitext "^f4Borderless: Alt+Tab and a second screen work without closing the game." 0
++        if (= $windowmode 2) [
++            if (> $fsaa 0) [
++                guitext "^f4Borderless at a chosen resolution needs FSAA at -1 or 0 (Advanced)."
++            ] [
++                guicheckbox "Borderless at the chosen resolution (stretched, Windows unchanged)" borderlessres
++                if $borderlessres [
++                    guilist [
++                        guistrut 3
++                        guilist [
++                            guicheckbox "Keep proportions (black bars)" borderlessaspect
++                        ]
++                    ]
++                ]
++            ]
++        ]
++        if (&& (= $windowmode 2) (|| (! $borderlessres) (> $fsaa 0))) [
++            guitext (format "^f2Borderless: the game uses the monitor size (%1x%2)." $desktopw $desktoph)
++        ] [
++            guitext (format "Resolution: %1x%2 (Resolution tab)" $scr_w $scr_h)
++        ]
++
++        guisection "Picture"
++        guitext "Field of View (default: 100)"
++        guislider fov
++        guitext "Gamma (default: 100)"
++        guislider gamma
++        if (hdroutwindowshdr) [ guitext "^f4Windows HDR is on for this screen: gamma is not applied." ]
++        guitext "^f4HDR: Options > Graphics > HDR screen" 0
++
++        guisection "Speed and latency"
++        guicheckbox "V-Sync"            vsync 1 0
++        guitext "Low Latency (mouse read once the GPU catches up)"
++        guistayopen [
++            guilist [
++                guiradio "Off" lowlatency 0
++                guibar
++                guiradio "On" lowlatency 1
++                guibar
++                guiradio "Strict (lowest latency, fewer FPS)" lowlatency 2
++            ]
+         ]
+     ]
+-    guilist [
+-        guicheckbox "^f0soft particles^t" depthfx
+-        if $depthfx [
+-            guibar
+-            guiradio "^f0low quality" depthfxsize 7 [blurdepthfx 1]
++    if (= $displaytab 1) [
++        if (&& (= $windowmode 2) (|| (! $borderlessres) (> $fsaa 0))) [
++            guitext (format "^f2Borderless: the game uses the monitor size (%1x%2)." $desktopw $desktoph)
++            guitext "^f4The resolution below applies in Exclusive Fullscreen or Windowed," 0
++            guitext "^f4or in Borderless at the chosen resolution (Screen tab)." 0
++        ]
++        if (= $windowmode 1) [ guitext "^f4Exclusive Fullscreen: the monitor switches to the resolution you pick." ]
++        guistayopen [
++          guilist [
++            guilist [
++                guitext "4:3"
++                @@@@(resbutton 320 240)
++                @@@@(resbutton 640 480)
++                @@@@(resbutton 800 600)
++                @@@@(resbutton 1024 768)
++                @@@@(resbutton 1152 864)
++                @@@@(resbutton 1280 960)
++                @@@@(resbutton 1400 1050)
++                @@@@(resbutton 1600 1200)
++                @@@@(resbutton 1792 1344)
++                @@@@(resbutton 1856 1392)
++                @@@@(resbutton 1920 1440)
++                @@@@(resbutton 2048 1536)
++                @@@@(resbutton 2800 2100)
++                @@@@(resbutton 3200 2400)
++            ]
+             guibar
+-            guiradio "^f2medium quality" depthfxsize 10 [blurdepthfx 0]
++            guilist [
++                guitext "16:10"
++                @@@@(resbutton 320 200)
++                @@@@(resbutton 640 400)
++                @@@@(resbutton 1024 640)
++                @@@@(resbutton 1280 800)
++                @@@@(resbutton 1440 900)
++                @@@@(resbutton 1600 1000)
++                @@@@(resbutton 1680 1050)
++                @@@@(resbutton 1920 1200)
++                @@@@(resbutton 2048 1280)
++                @@@@(resbutton 2560 1600)
++                @@@@(resbutton 2880 1800)
++                @@@@(resbutton 3200 2000)
++                @@@@(resbutton 3840 2400)
++            ]
+             guibar
+-            guiradio "^f3high quality" depthfxsize 12 [blurdepthfx 0]
+-        ]
+-    ]
+-    guicheckbox "^f0glass reflection"  glassenv
+-    guilist [
+-        guicheckbox "^f0decals^t^t" decals
+-        if $decals [
++            guilist [
++                guitext "16:9"
++                @@@@(resbutton 1024 600)
++                @@@@(resbutton 1280 720)
++                @@@@(resbutton 1366 768)
++                @@@@(resbutton 1600 900)
++                @@@@(resbutton 1920 1080)
++                @@@@(resbutton 2048 1152)
++                @@@@(resbutton 2560 1440)
++                @@@@(resbutton 2880 1620)
++                @@@@(resbutton 3200 1800)
++                @@@@(resbutton 3840 2160)
++            ]
+             guibar
+-            guiradio "^f0quick fade" decalfade 10000 [maxdecaltris 1024]
++            guilist [
++                guitext "5:4"
++                @@@@(resbutton 600 480)
++                @@@@(resbutton 1280 1024)
++                @@@@(resbutton 1600 1280)
++                @@@@(resbutton 2560 2048)
++            ]
+             guibar
+-            guiradio "^f2slow fade" decalfade 60000 [maxdecaltris 4096]
++            guilist [
++                guitext "5:3"
++                @@@@(resbutton 800 480)
++                @@@@(resbutton 1280 768)
++
++                guibar
++                guitext "Custom"
++                guilist [
++                    customw = $scr_w
++                    customh = $scr_h
++                    guifield customw 4 [screenres $customw $scr_h]
++                    guifield customh 4 [screenres $scr_w $customh]
++                ]
++            ]
++          ]
+         ]
+     ]
+-    guilist [
+-        guitext "textures^t^t"
+-        guibar
+-        guiradio "^f0low quality" maxtexsize 256
+-        guibar
+-        guiradio "^f0medium quality" maxtexsize 512
+-        guibar
+-        guiradio "^f2high quality" maxtexsize 0
++    if (= $displaytab 2) [
++        guisection "Texture filtering"
++        guitext "Anisotropic Filtering (default: 0)"
++        guilistslider aniso "0 2 4 8 16"
++        guicheckbox "Bilinear Filtering" bilinear
++        guicheckbox "Trilinear Filtering (Mipmaps)" trilinear
++
++        guisection "Rendering"
++        guitext "Full-Scene Anti-Aliasing (default: -1)"
++        guilistslider fsaa "-1 0 2 4 8 16"
++        guitext "Z-Buffer Depth (default: 0)"
++        guilistslider depthbits "0 16 24 32"
++
++        guisection "Menus"
++        guicheckbox "2D Menus" gui2d
++        guicheckbox "Click Tab" guiclicktab
++        guicheckbox "Menu Fade In" guifadein
+     ]
++] 0
++
++// son3d 1/2 are greyed out when phonon.dll (Steam Audio) is missing or cannot load
++settinglock son3d 1 [son3draison]
++settinglock son3d 2 [son3draison]
++
++newgui "audio" [
++    guititle "Sound"
++    MENU_width
+     guilist [
+-        guitext "models^t^t"
+-        guibar
+-        guicheckbox "^f0reflection"  envmapmodels
+-        guibar
+-        guicheckbox "^f2bumpmap" bumpmodels
+-    ]
+-
+-    guitab "display" ////////////////////////////////////////////////////////////////////////////////////////////////////////////
+-    guitext "field of view (default: 100)"
+-    guislider fov
+-    guicheckbox "v-sync"            vsync 1 0
+-    guicheckbox "fullscreen"        fullscreen
+-    guitext "gamma (default: 100)"
+-    guislider gamma
+-    guitext "full-scene anti-aliasing (default: -1)"
+-    guilistslider fsaa "-1 0 2 4 8 16"
+-    guitext "z-buffer depth (default: 0)"
+-    guilistslider depthbits "0 16 24 32"
+-    guitext "anisotropic filtering (default: 0)"
+-    guilistslider aniso "0 2 4 8 16"
+-    guilist [
+-        guicheckbox "bilinear filtering" bilinear
+-        guibar
+-        guicheckbox "trilinear filtering (mipmaps)" trilinear
++        MENU_tab audiotab 0 "Volume and mix"
++        guistrut 3
++        MENU_tab audiotab 1 "3D sound and device"
+     ]
+-
+-    guitab "res" ////////////////////////////////////////////////////////////////////////////////////////////////////////////
+-    guistayopen [
+-      guilist [
+-        guilist [
+-            guitext "4:3"
+-            @@@@(resbutton 320 240)
+-            @@@@(resbutton 640 480)
+-            @@@@(resbutton 800 600)
+-            @@@@(resbutton 1024 768)
+-            @@@@(resbutton 1152 864)
+-            @@@@(resbutton 1280 960)
+-            @@@@(resbutton 1400 1050)
+-            @@@@(resbutton 1600 1200)
+-            @@@@(resbutton 1792 1344)
+-            @@@@(resbutton 1856 1392)
+-            @@@@(resbutton 1920 1440)
+-            @@@@(resbutton 2048 1536)
+-            @@@@(resbutton 2800 2100)
+-            @@@@(resbutton 3200 2400)
+-        ]
+-        guibar
+-        guilist [
+-            guitext "16:10"
+-            @@@@(resbutton 320 200)
+-            @@@@(resbutton 640 400)
+-            @@@@(resbutton 1024 640)
+-            @@@@(resbutton 1280 800)
+-            @@@@(resbutton 1440 900)
+-            @@@@(resbutton 1600 1000)
+-            @@@@(resbutton 1680 1050)
+-            @@@@(resbutton 1920 1200)
+-            @@@@(resbutton 2048 1280)
+-            @@@@(resbutton 2560 1600)
+-            @@@@(resbutton 2880 1800)
+-            @@@@(resbutton 3200 2000)
+-            @@@@(resbutton 3840 2400)
+-        ]
+-        guibar
+-        guilist [
+-            guitext "16:9"
+-            @@@@(resbutton 1024 600)
+-            @@@@(resbutton 1280 720)
+-            @@@@(resbutton 1366 768)
+-            @@@@(resbutton 1600 900)
+-            @@@@(resbutton 1920 1080)
+-            @@@@(resbutton 2048 1152)
+-            @@@@(resbutton 2560 1440)
+-            @@@@(resbutton 2880 1620)
+-            @@@@(resbutton 3200 1800)
+-            @@@@(resbutton 3840 2160)
+-        ]
+-        guibar
+-        guilist [
+-            guitext "5:4"
+-            @@@@(resbutton 600 480)
+-            @@@@(resbutton 1280 1024)
+-            @@@@(resbutton 1600 1280)
+-            @@@@(resbutton 2560 2048)
+-        ]
+-        guibar
++    guibar
++    if (= $audiotab 0) [
++        guisection "Volume"
++        guitext "Master Volume"
++        guislider soundvol
++        guitext "Music Volume"
++        guislider musicvol
++        guicheckbox "Hit Sound" hitsound
++        guitext "^f4Ping when you hit someone. Its volume: Hits, below." 0
++
++        guisection "Mix"
++        guitext "^f4100 = normal. 0 = mute. 200 = twice as loud."
+         guilist [
+-            guitext "5:3"
+-            @@@@(resbutton 800 480)
+-            @@@@(resbutton 1280 768)
+-
++            guilist [
++                guitext "Weapons (shots, explosions)"
++                guislider mixweapons
++                guitext "Hits (hit ping)"
++                guislider mixhits
++                guitext "Pain and Deaths"
++                guislider mixpain
++                guitext "Items (pickups)"
++                guislider mixitems
++            ]
++            HUD_gap
+             guibar
+-            guitext "Custom"
++            HUD_gap
+             guilist [
+-                customw = $scr_w
+-                customh = $scr_h
+-                guifield customw 4 [scr_w $customw]
+-                guifield customh 4 [scr_h $customh]
++                guitext "Announcements (quad, fight)"
++                guislider mixannounce
++                guitext "Flags (CTF / collect)"
++                guislider mixflags
++                guitext "Movement (jump, land)"
++                guislider mixmove
++                guitext "Map (ambient loops)"
++                guislider mixworld
+             ]
+         ]
+-      ]
++        guistayopen [
++            guibutton "Reset Mix to 100" [mixreset] 0
++        ]
+     ]
++    if (= $audiotab 1) [
++        guisection "3D Sound"
++        guitext "^f4Headphones: hear if a sound is ahead or behind, above or below." 0
++        guitext "^f4(Steam Audio HRTF, sets 44100 Hz)" 0
++        guitext "^f4Speakers: usual left/right sound." 0
++        guitext "^f4Your own sounds, menus, announcements and music are never changed." 0
++        guilist [
++            guistayopen [
++                guiradio "Off" son3d 0
++                guibar
++                guiradio "Headphones (HRTF)" son3d 1
++                guibar
++                guiradio "Speakers" son3d 2
++            ]
++        ]
++        guicheckbox "Occlusion: walls muffle sounds (needs Headphones or Speakers)" son3docclusion
++        if (&& $son3d (= (son3deffectif) 0)) [ guitext (concatword "^f3" "3D sound unavailable: " (son3derreur)) 0 ]
+ 
+-    guitab "sound" ////////////////////////////////////////////////////////////////////////////////////////////////////////////
+-    guitext "sound volume"
+-    guislider soundvol
+-    guitext "music volume"
+-    guislider musicvol
+-    guitext "sound channels"
+-    guislider soundchans
+-    guitext "sound frequency"
+-    guilistslider soundfreq "11025 22050 44100"
+-    guitext "sound buffer length"
+-    guislider soundbufferlen
+-    guicheckbox "Mumble positional audio" mumble
+-
+-    guitab "mouse" ////////////////////////////////////////////////////////////////////////////////////////////////////////////
+-    guicheckbox "invert mouse"      invmouse
++        guisection "Device"
++        guitext "Sound Channels"
++        guislider soundchans
++        guitext "Sound Frequency"
++        guilistslider soundfreq "11025 22050 44100"
++        guitext "Sound Buffer Length"
++        guislider soundbufferlen
++        guicheckbox "Mumble Positional Audio" mumble
++    ]
++] 0
+ 
++newgui mouse [
++    guititle "Mouse"
++    MENU_width
++    guisection "Mouse"
++    guicheckbox "Invert mouse"      invmouse
+     guilist [
+-        guitext "mouse sensitivity: "
++        guilist [ guitext "Sensitivity" 0 ; guistrut $MENU_col 1 ]
+         newsens = $sensitivity
+         guifield newsens 8 [sensitivity $newsens]
+     ]
++    guilist [
++        guilist [ guitext "Mouse DPI" 0 ; guistrut $MENU_col 1 ]
++        newdpi = $mousedpi
++        guifield newdpi 6 [mousedpi $newdpi]
++    ]
++    guitext (getcm360text)
++    guilist [
++        guilist [ guitext "Set cm/360" 0 ; guistrut $MENU_col 1 ]
++        newcm360 = (getcm360)
++        guifield newcm360 8 [setcm360 $newcm360]
++    ]
++    guitext "^f4Windows: turn off Enhance pointer precision, or cm/360 is wrong." 0
+ 
++    guisection "Menus"
+     guilist [
+-        guitext "mouse UI sensitivity: "
++        guilist [ guitext "Menu cursor speed" 0 ; guistrut $MENU_col 1 ]
+         newguisens = $guisens
+         guifield newguisens 8 [guisens $newguisens]
+     ]
+ 
++    guisection "Crosshair"
+     guilist [
+-        guibutton "crosshair: " [showgui crosshair]
++        guibutton "Crosshair..." [showgui crosshair] 0
++        guistrut 3
+         guiimage (getcrosshair) [showgui crosshair] 0.5
+     ]
+-    guitext "crosshair size"
+-    guislider crosshairsize
+-
+-    guitab "keys" ////////////////////////////////////////////////////////////////////////////////////////////////////////////
+-    guitext "(basic keybinds, for anything more use the 'bind' command)"
+-    guitext "select action to bind and press desired keys (ESC when done):"
++    guitext "^f4Also in Options > HUD." 0
++] 0
+ 
+-    bindidx = 0
+-    guilistsplit n 2 $bindactions [
++// Keys: every action that can be bound, by section. Each list is one section
++// (actions / labels); a field shows the keys bound now and takes new ones.
++// KEYS_list = normal keys, KEYS_speclist = while spectating, KEYS_editlist =
++// in edit mode (the game keeps three key maps). The action string is the one
++// the bind stores, so a key already bound to it is shown.
++KEYS_list = [
++    KEYS_l = $arg2
++    KEYS_i = 0
++    guilistsplit n 2 $arg1 [
+         guilist [
+-            guitext (tabify (concatword $n ": ") 4)
++            guilist [ guitext (at $KEYS_l $KEYS_i) 0 ; guistrut 15 1 ]
+             [newbinds@bindidx] = (searchbinds $n)
+             guikeyfield [newbinds@bindidx] -12 [
+                 oldbinds = (searchbinds [@@n])
+@@ -1657,196 +3122,519 @@ newgui options [ ///////////////////////////////////////////////////////////////
+                 looplist j $[newbinds@@bindidx] [bind $j [@@@n]]
+             ]
+             bindidx = (+ $bindidx 1)
++            KEYS_i = (+ $KEYS_i 1)
+         ]
+     ] [guibar]
+-
+-    guitab "console" ////////////////////////////////////////////////////////////////////////////////////////////////////////////
+-    guicheckbox "chat console" miniconfilter 0x300 0
+-    guitext "console size (lines)"
+-    guislider consize
+-    guitext "console filter:"
+-    guilist [
++]
++KEYS_speclist = [
++    KEYS_l = $arg2
++    KEYS_i = 0
++    guilistsplit n 2 $arg1 [
+         guilist [
+-            guibitfield "important information" confilter 0x11
+-            guibitfield "warnings" confilter 0x02
+-            guibitfield "errors" confilter 0x04
+-            guibitfield "script messages" confilter 0x20
++            guilist [ guitext (at $KEYS_l $KEYS_i) 0 ; guistrut 15 1 ]
++            [newbinds@bindidx] = (searchspecbinds $n)
++            guikeyfield [newbinds@bindidx] -12 [
++                oldbinds = (searchspecbinds [@@n])
++                looplist j $oldbinds [specbind $j ""]
++                looplist j $[newbinds@@bindidx] [specbind $j [@@@n]]
++            ]
++            bindidx = (+ $bindidx 1)
++            KEYS_i = (+ $KEYS_i 1)
+         ]
+-        guibar
++    ] [guibar]
++]
++KEYS_editlist = [
++    KEYS_l = $arg2
++    KEYS_i = 0
++    guilistsplit n 2 $arg1 [
+         guilist [
+-            guibitfield "chat" confilter 0x100
+-            guibitfield "team chat" confilter 0x200
+-            guibitfield "game events" confilter 0x400
++            guilist [ guitext (at $KEYS_l $KEYS_i) 0 ; guistrut 15 1 ]
++            [newbinds@bindidx] = (searcheditbinds $n)
++            guikeyfield [newbinds@bindidx] -12 [
++                oldbinds = (searcheditbinds [@@n])
++                looplist j $oldbinds [editbind $j ""]
++                looplist j $[newbinds@@bindidx] [editbind $j [@@@n]]
++            ]
++            bindidx = (+ $bindidx 1)
++            KEYS_i = (+ $KEYS_i 1)
+         ]
+-        guibar
++    ] [guibar]
++]
++KEYS_move = [forward backward left right jump]
++KEYS_movel = [Forward Backward Left Right Jump]
++KEYS_wpn = [attack togglezoom weapon "nextweapon" "nextweapon -1" "universaldelta 1" "universaldelta -1" "setweapon FI" "setweapon SG" "setweapon CG" "setweapon RL" "setweapon RI" "setweapon GL" "setweapon PI" dropflag suicide]
++KEYS_wpnl = [Attack "Zoom" "Best weapon" "Next weapon" "Previous weapon" "Wheel up" "Wheel down" Chainsaw Shotgun Chaingun Rocket Rifle Grenade Pistol "Drop flag" "Suicide"]
++KEYS_chat = [saycommand sayteamcommand "saycommand /" taunt togglechat toggleconsole "conskip 5" "conskip -1000"]
++KEYS_chatl = [Chat "Team chat" "Command line" Taunt "Expanded chat" "Console" "Scroll back" "Scroll to newest"]
++KEYS_trad = [toggletranslate tretry [saycommand "/tsay "] [saycommand "/tsayteam "] [saycommand "/tsayr "] [saycommand "/tsayteamr "] [saycommand "/trep "] [saycommand "/trepteam "]]
++KEYS_tradl = ["Mute translation" "Retranslate last" "Say translated" "Team, translated" "Say, careful" "Team, careful" "Reply translated" "Team, reply"]
++KEYS_game = [showscores togglekilllog togglemainmenu "showgui options" hudedit screenshot "spectator (! (isspectator (getclientnum)))" "set paused (= $paused 0)" "if (allowthirdperson) [togglevar thirdperson]" addbot delbot]
++KEYS_gamel = [Scoreboard "Kills / deaths" "Main menu" "Settings" "Move HUD parts" Screenshot "Spectate on / off" "Pause" "Third person" "Add bot" "Delete bot"]
++KEYS_spec = [nextfollow "nextfollow -1" follow]
++KEYS_specl = ["Next player" "Previous player" "Follow / free"]
++KEYS_rec = [togglematchrecord toggledemorecord demorewind demoforward toggledemohd toggledemoxray toggledemobar]
++KEYS_recl = ["Match record" "Demo record" "Demo: back 10 s" "Demo: ahead 10 s" "Demo: HD aim" "Demo: X-ray" "Demo: hide controls"]
++KEYS_editon = [edittoggle allowspedit]
++KEYS_editonl = ["Edit mode" "Allow edit (hold)"]
++KEYS_edit = [editcopy editpaste "undo; passthroughsel 0" redo editdel editflip calclight]
++KEYS_editl = [Copy Paste Undo Redo Delete Flip "Light (calc)"]
++keystab = 0
++newgui keys [
++    guititle "Keys"
++    MENU_width
++    guilist [
++        MENU_tab keystab 0 "Play"
++        guistrut 3
++        MENU_tab keystab 1 "Chat"
++        guistrut 3
++        MENU_tab keystab 3 "Game and demos"
++        guistrut 3
++        MENU_tab keystab 2 "Spectate and edit"
++    ]
++    guibar
++    guitext "^f4Click a field, press the keys (several are fine), then Esc." 0
++    bindidx = 0
++    if (= $keystab 0) [
++        guisection "Movement"
++        KEYS_list $KEYS_move $KEYS_movel
++        guisection "Weapons"
++        KEYS_list $KEYS_wpn $KEYS_wpnl
++        guitext "^f4Best weapon: the strongest one with ammo. Next / previous: in order." 0
++    ]
++    if (= $keystab 1) [
++        guisection "Communication"
++        KEYS_list $KEYS_chat $KEYS_chatl
++        guitext "^f4Scroll back / to newest: the console, or F10 and F8 when open." 0
++        guisection "Chat translation"
++        KEYS_list $KEYS_trad $KEYS_tradl
++        guitext "^f4Reply: translated into the language of the last chat line (/trep)." 0
++    ]
++    if (= $keystab 3) [
++        guisection "Game"
++        KEYS_list $KEYS_game $KEYS_gamel
++        guitext "^f4Pause: local games and demos. Third person: offline and edit mode." 0
++        guisection "Recording and demos"
++        KEYS_list $KEYS_rec $KEYS_recl
++        guitext "^f4The Demo keys work while you watch a demo." 0
++    ]
++    if (= $keystab 2) [
++        guisection "Spectating (only while you spectate)"
++        KEYS_speclist $KEYS_spec $KEYS_specl
++        guisection "Editing"
++        KEYS_list $KEYS_editon $KEYS_editonl
++        guitext "^f4Allow edit: hold it to enter edit mode in single player." 0
++        guitext "^f4These keys work in edit mode only:" 0
++        KEYS_editlist $KEYS_edit $KEYS_editl
++        guitext "^f4Other map editing keys: see the editing guide (editbind)." 0
++    ]
++] 0
++
++newgui console [
++    guititle "Console and chat"
++    MENU_width
++    guilist [
++        MENU_tab consoletab 0 "Console and chat box"
++        guistrut 3
++        MENU_tab consoletab 1 "Full screen (F10, F11)"
++    ]
++    guibar
++    if (= $consoletab 0) [
++        guisection "Console (top left)"
++        guitext "Lines shown" 0
++        guislider consize
++        guitext "^f4What it shows:" 0
++        guilist [
++            guilist [
++                guibitfield "important information" confilter 0x11
++                guibitfield "warnings" confilter 0x02
++                guibitfield "errors" confilter 0x04
++                guibitfield "script messages" confilter 0x20
++            ]
++            guibar
++            guilist [
++                guibitfield "chat" confilter 0x100
++                guibitfield "team chat" confilter 0x200
++                guibitfield "game events" confilter 0x400
++            ]
++            guibar
++            guilist [
++                guibitfield "self frags" confilter 0x800
++                guibitfield "other player frags" confilter 0x1000
++                guibitfield "team kills" confilter 0x2000
++            ]
++        ]
++        guisection "Chat box (bottom left)"
++        guicheckbox "Chat in its own box" miniconfilter 0x300 0
++        guitext "^f4Kill feed and frag messages: Options > HUD > Kill feed." 0
++    ]
++    if (= $consoletab 1) [
++        guisection "Full console (F11)"
++        guitext "Size (percent of screen)" 0
++        guislider fullconsize
++        guitext "^f4What it shows:" 0
+         guilist [
+-            guibitfield "self frags" confilter 0x800
+-            guibitfield "other player frags" confilter 0x1000
+-            guibitfield "team kills" confilter 0x2000
++            guilist [
++                guibitfield "important information" fullconfilter 0x11
++                guibitfield "warnings" fullconfilter 0x02
++                guibitfield "errors" fullconfilter 0x04
++                guibitfield "script messages" fullconfilter 0x20
++            ]
++            guibar
++            guilist [
++                guibitfield "chat" fullconfilter 0x100
++                guibitfield "team chat" fullconfilter 0x200
++                guibitfield "game events" fullconfilter 0x400
++            ]
++            guibar
++            guilist [
++                guibitfield "self frags" fullconfilter 0x800
++                guibitfield "other player frags" fullconfilter 0x1000
++                guibitfield "team kills" fullconfilter 0x2000
++            ]
+         ]
++        guisection "Expanded chat (F10)"
++        guistayopen [ guibutton "Open expanded chat (F10)" [togglechat] 0 ]
++        guitext "Expanded Chat Size" 0
++        guislider fullchatsize
++        guitext "^f4Chat only. Numbered lines, mouse wheel to scroll." 0
++        guitext "^f4Ctrl+C copies all. Ctrl+Shift+C = visible. Drag to copy a range." 0
+     ]
+-    guitext "full console size (percent of screen)"
+-    guislider fullconsize
+-    guitext "full console filter:"
++] 0
++
++newgui record [
++    guititle "Recording"
++    MENU_width
+     guilist [
++        MENU_tab recordtab 0 "Match videos"
++        guistrut 3
++        MENU_tab recordtab 1 "Demos (HD aim)"
++    ]
++    guibar
++    if (= $recordtab 0) [
++        guisection "Match videos"
++        guistayopen [
++            if $matchrecord [
++                guibutton "Match Recording: ON" [togglematchrecord]
++            ] [
++                guibutton "Match Recording: OFF" [togglematchrecord]
++            ]
++        ]
++        guitext (concatword "Quality: " (matchrecqname))
++        guislider matchrecquality
++        guitext "Videos to Keep (oldest deleted automatically)"
++        guislider matchkeep
++        guisection "Saved videos"
+         guilist [
+-            guibitfield "important information" fullconfilter 0x11
+-            guibitfield "warnings" fullconfilter 0x02
+-            guibitfield "errors" fullconfilter 0x04
+-            guibitfield "script messages" fullconfilter 0x20
++            guitext "My Games / L4ZY / recordings" 0
++            guistrut 3
++            guistayopen [ guibutton "Open Folder" [openfolder recordings] 0 ]
++        ]
++        if (> (nummatchrecs) 0) [
++            loop i (nummatchrecs) [
++                guilist [
++                    guitext (matchrecname $i)
++                    guistayopen [ guibutton "Extract" [matchrecextract @i] ]
++                ]
++            ]
++        ] [
++            guitext "^f4No Recordings Yet" 0
+         ]
+-        guibar
++        guitext "^f4Extract copies the file." 0
++    ]
++    if (= $recordtab 1) [
++        guisection "Demos with HD aim"
++        guistayopen [
++            if $demohdrecord [
++                guibutton "Demo + HD Aim: ON" [toggledemorecord]
++            ] [
++                guibutton "Demo + HD Aim: OFF" [toggledemorecord]
++            ]
++        ]
++        guicheckbox "Record enemy visibility in HD demos" demohdvis
++        guitext "^f4Which enemies were really on your screen, for studying demos. Never shown in game." 0
++        guitext "^f4Aim recorded on this machine, not server truth." 0
+         guilist [
+-            guibitfield "chat" fullconfilter 0x100
+-            guibitfield "team chat" fullconfilter 0x200
+-            guibitfield "game events" fullconfilter 0x400
++            guilist [ guitext "X-ray at demo start" 0 ; guistrut $MENU_col 1 ]
++            guistayopen [
++                guiradio "Off" demoxraystart 0
++                guibar
++                guiradio "On" demoxraystart 1
++            ]
+         ]
+-        guibar
+         guilist [
+-            guibitfield "self frags" fullconfilter 0x800
+-            guibitfield "other player frags" fullconfilter 0x1000
+-            guibitfield "team kills" fullconfilter 0x2000
++            guilist [ guitext "X-ray style" 0 ; guistrut $MENU_col 1 ]
++            guistayopen [
++                guiradio "Outline" demoxraystyle 0
++                guibar
++                guiradio "Outline + veil" demoxraystyle 1
++            ]
+         ]
++        guitext "^f4X-ray: players seen through walls in their colour. Demos only." 0
++        guitext "Demos to Keep (oldest deleted automatically)"
++        guislider demokeep
++        guitext "Live HD spectating delay in ms (same for every player)"
++        guislider hdlivedelay
++        guisection "Saved demos"
++        guitext "^f4Put both files in this folder (same names, not a subfolder):" 0
++        guistayopen [ guibutton (localdemofolder) [openfolder demo] 0 ]
++        guitext "^f4The game's demo folder works too." 0
++        if (> (numlocaldemos) 0) [
++            loop i (numlocaldemos) [
++                guilist [
++                    guitext (localdemoname $i)
++                    guistayopen [ guibutton "Play" [playlocaldemo @i] ]
++                    guistrut 2
++                    guistayopen [ guibutton "Extract" [localdemoextract @i] ]
++                ]
++            ]
++        ] [
++            guitext "^f4No Local Demos Yet" 0
++        ]
++        guitext "^f4Extract copies the .dmo and the HD file together." 0
+     ]
++] 0
+ 
+-    guitab "cfg" ////////////////////////////////////////////////////////////////////////////////////////////////////////////
+-    guitext "autoexec.cfg"
+-    showfileeditor "autoexec.cfg" -64 13
+-] "game"
+ 
+ +fround = [round (+f $arg1 $arg2) (absf $arg2)]
+ 
+ newgui ammobar [
+-    guicheckbox "AmmoBar" ammobar
+-    guibar
++    guititle "Ammo Bar"
++    MENU_width
++    guicheckbox "Show the ammo bar" ammobar
++    guisection "Layout"
+     guilist [
+-        guitext "AmmoBarAlign:^t^t^t"
+-        guiradio "-1 " ammobaralign -1
+-        guiradio "0 "  ammobaralign  0
+-        guiradio "1"   ammobaralign  1
++        guilist [ guitext "Align" 0 ; guistrut $MENU_col 1 ]
++        guistayopen [
++            guiradio "Left" ammobaralign -1
++            HUD_gap
++            guiradio "Centre" ammobaralign 0
++            HUD_gap
++            guiradio "Right" ammobaralign 1
++        ]
+     ]
+-
+-    guicheckbox "AmmoBarHorizontal" ammobarhorizontal
+-
+-    guicheckbox "AmmoBarFlip" ammobarflip
+-
+-    guicheckbox "AmmoBarHideEmpty" ammobarhideempty
+-
+-    guitext "AmmoBarSep:"
++    guicheckbox "Horizontal" ammobarhorizontal
++    guicheckbox "Flip" ammobarflip
++    guicheckbox "Hide weapons without ammo" ammobarhideempty
++    guitext "Space between weapons" 0
+     guislider ammobarsep
+-
+-    guitext "AmmoBarCountSep:"
++    guitext "Space before the ammo count" 0
+     guislider ammobarcountsep
+-
++    guisection "Size and place"
++    guitext "^f4Easier: Options > HUD > Move HUD parts." 0
+     guilist [
+-        guitext "AmmoBarCountScale:^t"
++        guilist [ guitext "Ammo count size" 0 ; guistrut $MENU_col 1 ]
+         guifield ammobarcountscale 5
+-        guistayopen [ guibutton "- " [ammobarcountscale (+fround $ammobarcountscale -0.1)] ]
+-        guistayopen [ guibutton "+"  [ammobarcountscale (+fround $ammobarcountscale 0.1)] ]
++        guistayopen [ guibutton " - " [ammobarcountscale (+fround $ammobarcountscale -0.1)] 0 ]
++        guistayopen [ guibutton " + " [ammobarcountscale (+fround $ammobarcountscale 0.1)] 0 ]
+     ]
+-
+     guilist [
+-        guitext "AmmoBarScale:^t^t^t"
++        guilist [ guitext "Size" 0 ; guistrut $MENU_col 1 ]
+         guifield ammobarscale 5
+-        guistayopen [ guibutton "- " [ammobarscale (+fround $ammobarscale -0.01)] ]
+-        guistayopen [ guibutton "+"  [ammobarscale (+fround $ammobarscale 0.01)] ]
++        guistayopen [ guibutton " - " [ammobarscale (+fround $ammobarscale -0.01)] 0 ]
++        guistayopen [ guibutton " + " [ammobarscale (+fround $ammobarscale 0.01)] 0 ]
+     ]
+-
+     guilist [
+-        guitext "AmmoBarX:^t^t^t"
++        guilist [ guitext "Position X" 0 ; guistrut $MENU_col 1 ]
+         guifield ammobarx 5
+-        guistayopen [ guibutton "- " [ammobarx (+fround $ammobarx -0.01)] ]
+-        guistayopen [ guibutton "+"  [ammobarx (+fround $ammobarx 0.01)] ]
++        guistayopen [ guibutton " - " [ammobarx (+fround $ammobarx -0.01)] 0 ]
++        guistayopen [ guibutton " + " [ammobarx (+fround $ammobarx 0.01)] 0 ]
+     ]
+     guilist [
+-        guitext "AmmoBarY:^t^t^t"
++        guilist [ guitext "Position Y" 0 ; guistrut $MENU_col 1 ]
+         guifield ammobary 5
+-        guistayopen [ guibutton "- " [ammobary (+fround $ammobary -0.01)] ]
+-        guistayopen [ guibutton "+"  [ammobary (+fround $ammobary 0.01)] ]
++        guistayopen [ guibutton " - " [ammobary (+fround $ammobary -0.01)] 0 ]
++        guistayopen [ guibutton " + " [ammobary (+fround $ammobary 0.01)] 0 ]
+     ]
+-] "AmmoBar"
++] 0
+ 
+ 
+ newgui gameclock [
+-    guicheckbox "GameClock" gameclock
+-    guibar
++    guititle "Game Clock"
++    MENU_width
++    guicheckbox "Show the game clock" gameclock
++    guisection "Look"
+     guilist [
+-        guitext "GameClockAlign:^t"
+-        guiradio "-1 " gameclockalign -1
+-        guiradio "0 "  gameclockalign  0
+-        guiradio "1"   gameclockalign  1
++        guilist [ guitext "Align" 0 ; guistrut $MENU_col 1 ]
++        guistayopen [
++            guiradio "Left" gameclockalign -1
++            HUD_gap
++            guiradio "Centre" gameclockalign 0
++            HUD_gap
++            guiradio "Right" gameclockalign 1
++        ]
+     ]
+-
+-    guitext "GameClockAlpha:"
++    guitext "Opacity (0 to 255)" 0
+     guislider gameclockalpha
+-
+-    // gameclockcolour    0 - 0xFFFFFF
+-    // gameclocklowcolour 0 - 0xFFFFFF
+-
++    guisection "Size and place"
++    guitext "^f4Easier: Options > HUD > Move HUD parts." 0
+     guilist [
+-        guitext "GameClockScale:^t"
++        guilist [ guitext "Size" 0 ; guistrut $MENU_col 1 ]
+         guifield gameclockscale 5
+-        guistayopen [ guibutton "- " [gameclockscale (+fround $gameclockscale -0.01)] ]
+-        guistayopen [ guibutton "+"  [gameclockscale (+fround $gameclockscale 0.01)] ]
++        guistayopen [ guibutton " - " [gameclockscale (+fround $gameclockscale -0.01)] 0 ]
++        guistayopen [ guibutton " + " [gameclockscale (+fround $gameclockscale 0.01)] 0 ]
+     ]
+-
+     guilist [
+-        guitext "GameClockX:^t^t"
++        guilist [ guitext "Position X" 0 ; guistrut $MENU_col 1 ]
+         guifield gameclockx 5
+-        guistayopen [ guibutton "- " [gameclockx (+fround $gameclockx -0.01)] ]
+-        guistayopen [ guibutton "+"  [gameclockx (+fround $gameclockx 0.01)] ]
++        guistayopen [ guibutton " - " [gameclockx (+fround $gameclockx -0.01)] 0 ]
++        guistayopen [ guibutton " + " [gameclockx (+fround $gameclockx 0.01)] 0 ]
+     ]
+     guilist [
+-        guitext "GameClockY:^t^t"
++        guilist [ guitext "Position Y" 0 ; guistrut $MENU_col 1 ]
+         guifield gameclocky 5
+-        guistayopen [ guibutton "- " [gameclocky (+fround $gameclocky -0.01)] ]
+-        guistayopen [ guibutton "+"  [gameclocky (+fround $gameclocky 0.01)] ]
++        guistayopen [ guibutton " - " [gameclocky (+fround $gameclocky -0.01)] 0 ]
++        guistayopen [ guibutton " + " [gameclocky (+fround $gameclocky 0.01)] 0 ]
+     ]
+-] "GameClock"
++] 0
+ 
+ 
+ newgui hudscore [
+-    guicheckbox "HUDScore" hudscore
+-    guibar
++    guititle "HUD Score"
++    MENU_width
++    guicheckbox "Show the score" hudscore
++    guisection "Look"
+     guilist [
+-        guitext "HUDScoreAlign:^t^t"
+-        guiradio "-1 " hudscorealign -1
+-        guiradio "0 "  hudscorealign  0
+-        guiradio "1"   hudscorealign  1
++        guilist [ guitext "Align" 0 ; guistrut $MENU_col 1 ]
++        guistayopen [
++            guiradio "Left" hudscorealign -1
++            HUD_gap
++            guiradio "Centre" hudscorealign 0
++            HUD_gap
++            guiradio "Right" hudscorealign 1
++        ]
+     ]
+-
+-    guitext "HUDScoreAlpha:"
++    guitext "Opacity (0 to 255)" 0
+     guislider hudscorealpha
+-
+-    // hudscoreenemycolour  0 - 0xFFFFFF
+-    // hudscoreplayercolour 0 - 0xFFFFFF
+-
+-    guitext "HUDScoreSep:"
++    guitext "Space between the two scores" 0
+     guislider hudscoresep
+-
++    guisection "Size and place"
++    guitext "^f4Easier: Options > HUD > Move HUD parts." 0
+     guilist [
+-        guitext "HUDScoreScale:^t^t"
++        guilist [ guitext "Size" 0 ; guistrut $MENU_col 1 ]
+         guifield hudscorescale 5
+-        guistayopen [ guibutton "- " [hudscorescale (+fround $hudscorescale -0.01)] ]
+-        guistayopen [ guibutton "+"  [hudscorescale (+fround $hudscorescale 0.01)] ]
++        guistayopen [ guibutton " - " [hudscorescale (+fround $hudscorescale -0.01)] 0 ]
++        guistayopen [ guibutton " + " [hudscorescale (+fround $hudscorescale 0.01)] 0 ]
+     ]
+-
+     guilist [
+-        guitext "HUDScoreX:^t^t"
++        guilist [ guitext "Position X" 0 ; guistrut $MENU_col 1 ]
+         guifield hudscorex 5
+-        guistayopen [ guibutton "- " [hudscorex (+fround $hudscorex -0.01)] ]
+-        guistayopen [ guibutton "+"  [hudscorex (+fround $hudscorex 0.01)] ]
++        guistayopen [ guibutton " - " [hudscorex (+fround $hudscorex -0.01)] 0 ]
++        guistayopen [ guibutton " + " [hudscorex (+fround $hudscorex 0.01)] 0 ]
+     ]
+     guilist [
+-        guitext "HUDScoreY:^t^t"
++        guilist [ guitext "Position Y" 0 ; guistrut $MENU_col 1 ]
+         guifield hudscorey 5
+-        guistayopen [ guibutton "- " [hudscorey (+fround $hudscorey -0.01)] ]
+-        guistayopen [ guibutton "+"  [hudscorey (+fround $hudscorey 0.01)] ]
++        guistayopen [ guibutton " - " [hudscorey (+fround $hudscorey -0.01)] 0 ]
++        guistayopen [ guibutton " + " [hudscorey (+fround $hudscorey 0.01)] 0 ]
++    ]
++] 0
++
++
++newgui killfeed [
++    guititle "Kill Feed"
++    MENU_width
++    guicheckbox "Show the kill feed" killfeed
++    guisection "What it shows"
++    guilist [
++        guilist [ guitext "Frags" 0 ; guistrut $MENU_col 1 ]
++        guistayopen [
++            guiradio "All"  killfeedfilter 0
++            HUD_gap
++            guiradio "Team" killfeedfilter 1
++            HUD_gap
++            guiradio "Mine" killfeedfilter 2
++        ]
++    ]
++    guicheckbox "My reaction times (view / crosshair, ms)" reacttime
++    guicheckbox "Other players' reaction times (compatible server)" reacttimeall
++    guicheckbox "Score against each player (kills-deaths)" killfeedvs
++    guicheckbox "Also write frags in the console" killfeedconsole
++    guisection "Look"
++    guilist [
++        guilist [ guitext "Align" 0 ; guistrut $MENU_col 1 ]
++        guistayopen [
++            guiradio "Left"   killfeedalign -1
++            HUD_gap
++            guiradio "Centre" killfeedalign  0
++            HUD_gap
++            guiradio "Right"  killfeedalign  1
++        ]
++    ]
++    guitext "Fade after (seconds)" 0
++    guislider killfeedfade
++    guitext "Lines at most" 0
++    guislider killfeedmax
++    guilist [
++        guilist [ guitext "Size" 0 ; guistrut $MENU_col 1 ]
++        guifield killfeedscale 5
++        guistayopen [ guibutton " - " [killfeedscale (+fround $killfeedscale -0.01)] 0 ]
++        guistayopen [ guibutton " + " [killfeedscale (+fround $killfeedscale 0.01)] 0 ]
++    ]
++    guilist [
++        guilist [ guitext "Position X" 0 ; guistrut $MENU_col 1 ]
++        guifield killfeedx 5
++        guistayopen [ guibutton " - " [killfeedx (+fround $killfeedx -0.01)] 0 ]
++        guistayopen [ guibutton " + " [killfeedx (+fround $killfeedx 0.01)] 0 ]
++    ]
++    guilist [
++        guilist [ guitext "Position Y" 0 ; guistrut $MENU_col 1 ]
++        guifield killfeedy 5
++        guistayopen [ guibutton " - " [killfeedy (+fround $killfeedy -0.01)] 0 ]
++        guistayopen [ guibutton " + " [killfeedy (+fround $killfeedy 0.01)] 0 ]
++    ]
++    guisection "Kills / deaths log (F8)"
++    guistayopen [ guibutton "Open the log (F8)" [togglekilllog] 0 ]
++    guitext "Log size (percent of screen)" 0
++    guislider fullkilllogsize
++] 0
++
++
++newgui killstreak [
++    guititle "Kill Streak"
++    MENU_width
++    guicheckbox "Show kill streaks (display only, no bonus)" killstreak
++    guisection "What it shows"
++    guicheckbox "Also other players' streaks" killstreakothers
++    guicheckbox "A teamkill breaks the streak" killstreaktk
++    guitext "Announce every N frags" 0
++    guislider killstreakstep
++    guisection "Look"
++    guitext "Fade after (seconds)" 0
++    guislider killstreakfade
++    guilist [
++        guilist [ guitext "Align" 0 ; guistrut $MENU_col 1 ]
++        guistayopen [
++            guiradio "Left" killstreakalign -1
++            HUD_gap
++            guiradio "Centre" killstreakalign 0
++            HUD_gap
++            guiradio "Right" killstreakalign 1
++        ]
++    ]
++    guitext "^f4Easier: Options > HUD > Move HUD parts." 0
++    guilist [
++        guilist [ guitext "Size" 0 ; guistrut $MENU_col 1 ]
++        guifield killstreakscale 5
++        guistayopen [ guibutton " - " [killstreakscale (+fround $killstreakscale -0.01)] 0 ]
++        guistayopen [ guibutton " + " [killstreakscale (+fround $killstreakscale 0.01)] 0 ]
++    ]
++    guilist [
++        guilist [ guitext "Position X" 0 ; guistrut $MENU_col 1 ]
++        guifield killstreakx 5
++        guistayopen [ guibutton " - " [killstreakx (+fround $killstreakx -0.01)] 0 ]
++        guistayopen [ guibutton " + " [killstreakx (+fround $killstreakx 0.01)] 0 ]
++    ]
++    guilist [
++        guilist [ guitext "Position Y" 0 ; guistrut $MENU_col 1 ]
++        guifield killstreaky 5
++        guistayopen [ guibutton " - " [killstreaky (+fround $killstreaky -0.01)] 0 ]
++        guistayopen [ guibutton " + " [killstreaky (+fround $killstreaky 0.01)] 0 ]
+     ]
+-] "HUDScore"
++] 0
+ 
+ 
+-bindactions = [forward backward left right jump attack togglezoom saycommand sayteamcommand showscores toggleconsole screenshot edittoggle "setweapon FI" "setweapon SG" "setweapon CG" "setweapon RL" "setweapon RI" "setweapon GL" "setweapon PI" "weapon" "universaldelta 1" "universaldelta -1" dropflag addbot delbot]
++bindactions = [forward backward left right jump attack togglezoom saycommand sayteamcommand showscores toggleconsole togglechat togglekilllog tretry toggletranslate togglematchrecord toggledemorecord screenshot edittoggle "setweapon FI" "setweapon SG" "setweapon CG" "setweapon RL" "setweapon RI" "setweapon GL" "setweapon PI" "weapon" "universaldelta 1" "universaldelta -1" dropflag addbot delbot]
++bindlabels = [Forward Backward Left Right Jump Attack "Toggle Zoom" Chat "Team Chat" Scoreboard Console "Expanded Chat" "Kills / Deaths" "Retry Translation" "Mute Translation" "Match Record" "Demo Record" Screenshot "Edit Mode" Chainsaw Shotgun Chaingun Rocket Rifle Grenade Pistol "Next Weapon" "Wheel Up" "Wheel Down" "Drop Flag" "Add Bot" "Delete Bot"]
+ 
+ entupdate = [ entset $entguitype $entguiattr0 $entguiattr1 $entguiattr2 $entguiattr3 $entguiattr4 ]
+ 
+diff --git a/src/engine/main.cpp b/src/engine/main.cpp
+index 1aa0e0fcc8a5a97940f5b932031852d9c2eb99c1..2cc8dd573aa2760044a4cd1574882268e0d76cf2 100644
+--- a/src/engine/main.cpp
++++ b/src/engine/main.cpp
+@@ -213,142 +213,161 @@ void bgquad(float x, float y, float w, float h, float tx = 0, float ty = 0, floa
+     gle::end();
+ }
+ 
+-void renderbackground(const char *caption, Texture *mapshot, const char *mapname, const char *mapinfo, bool restore, bool force)
++static void bgrect(float x, float y, float w, float h)
+ {
+-    if(!inbetweenframes && !force) return;
++    gle::defvertex(2);
++    gle::begin(GL_TRIANGLE_STRIP);
++    gle::attribf(x, y);
++    gle::attribf(x+w, y);
++    gle::attribf(x, y+h);
++    gle::attribf(x+w, y+h);
++    gle::end();
++}
+ 
+-    if(!restore || force) stopsounds(); // stop sounds while loading
+- 
+-    int w = screenw, h = screenh;
+-    if(forceaspect) w = int(ceil(h*forceaspect));
+-    getbackgroundres(w, h);
+-    gettextres(w, h);
++static void bgtextscaled(const char *s, float x, float y, float scale, int r, int g, int b)
++{
++    pushhudmatrix();
++    hudmatrix.translate(x, y, 0);
++    hudmatrix.scale(scale, scale, 1);
++    flushhudmatrix();
++    hudshader->set();
++    draw_text(s, 0, 0, r, g, b);
++    pophudmatrix();
++}
+ 
+-    static int lastupdate = -1, lastw = -1, lasth = -1;
+-    static float backgroundu = 0, backgroundv = 0, detailu = 0, detailv = 0;
+-    static int numdecals = 0;
+-    static struct decal { float x, y, size; int side; } decals[12];
+-    if((renderedframe && !mainmenu && lastupdate != lastmillis) || lastw != w || lasth != h)
+-    {
+-        lastupdate = lastmillis;
+-        lastw = w;
+-        lasth = h;
+-
+-        backgroundu = rndscale(1);
+-        backgroundv = rndscale(1);
+-        detailu = rndscale(1);
+-        detailv = rndscale(1);
+-        numdecals = sizeof(decals)/sizeof(decals[0]);
+-        numdecals = numdecals/3 + rnd((numdecals*2)/3 + 1);
+-        float maxsize = min(w, h)/16.0f;
+-        loopi(numdecals)
+-        {
+-            decal d = { rndscale(w), rndscale(h), maxsize/2 + rndscale(maxsize/2), rnd(2) };
+-            decals[i] = d;
+-        }
+-    }
+-    else if(lastupdate != lastmillis) lastupdate = lastmillis;
++SVAR(mainmenubg, "packages/base/gothic-df.jpg");
+ 
+-    loopi(restore ? 1 : 3)
+-    {
+-        hudmatrix.ortho(0, w, h, 0, -1, 1);
+-        resethudmatrix();
++static void rendermenuscene(int w, int h)
++{
++    Texture *t = textureload(mainmenubg, 3, true, false);
++    if(t == notexture) t = textureload("packages/base/industry.jpg", 3, true, false);
++    if(t == notexture) t = textureload("data/background.png", 0, true, false);
++    float ia = t->ys > 0 ? float(t->xs)/float(t->ys) : 1.0f;
++    float sa = h > 0 ? float(w)/float(h) : 1.0f;
++    float tw = 1, th = 1, tx = 0, ty = 0;
++    if(ia > sa) { tw = sa/ia; tx = 0.5f*(1 - tw); }
++    else { th = ia/sa; ty = 0.5f*(1 - th); }
++    hudshader->set();
++    gle::colorf(0.42f, 0.44f, 0.48f);
++    gle::defvertex(2);
++    gle::deftexcoord0();
++    glBindTexture(GL_TEXTURE_2D, t->id);
++    bgquad(0, 0, w, h, tx, ty, tw, th);
++    glEnable(GL_BLEND);
++    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
++    hudnotextureshader->set();
++    gle::colorub(0, 0, 0, 110);
++    gle::defvertex(2);
++    gle::begin(GL_TRIANGLE_STRIP);
++    gle::attribf(0, 0);
++    gle::attribf(float(w), 0);
++    gle::attribf(0, float(h));
++    gle::attribf(float(w), float(h));
++    gle::end();
++    hudshader->set();
++    glDisable(GL_BLEND);
++}
++
++static void drawloadchrome(int w, int h, const char *caption, Texture *mapshot, const char *mapname, const char *mapinfo)
++{
++    glEnable(GL_BLEND);
++    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+ 
++    float stripe = max(3.0f, w * 0.0035f);
++    hudnotextureshader->set();
++    gle::colorub(255, 122, 24, 50);
++    bgrect(0, 0, stripe, float(h));
++
++    const char *gametitle = "L4ZY";
++    float titlesz = 0.042f * min(w, h) / FONTH;
++    float tx = w * 0.055f;
++    float ty = h * 0.07f;
++    bgtextscaled(gametitle, tx, ty, titlesz, 255, 122, 24);
++    int tw = text_width(gametitle);
++    hudnotextureshader->set();
++    gle::colorub(255, 122, 24, 200);
++    bgrect(tx, ty + FONTH * titlesz - max(2.0f, titlesz * 6), tw * titlesz, max(2.0f, titlesz * 3));
++    defformatstring(sub, "Sauerbraten RT  %s", SAUER_TRAD_VERSION);
++    bgtextscaled(sub, tx, ty + FONTH * titlesz * 1.15f, titlesz * 0.42f, 138, 145, 153);
++
++    if(mapshot || mapname)
++    {
++        int infowidth = 12 * FONTH;
++        float sz = 0.32f * min(w, h), msz = (0.70f * min(w, h) - sz) / (infowidth + FONTH);
++        float x = 0.5f * (w - sz), y = 0.28f * h;
++        if(mapinfo)
++        {
++            int mw, mh;
++            text_bounds(mapinfo, mw, mh, infowidth);
++            x -= 0.5f * (mw * msz + FONTH * msz);
++        }
+         hudshader->set();
+         gle::colorf(1, 1, 1);
+-
+         gle::defvertex(2);
+         gle::deftexcoord0();
+-
+-        settexture("data/background.png", 0);
+-        float bu = w*0.67f/256.0f + backgroundu, bv = h*0.67f/256.0f + backgroundv;
+-        bgquad(0, 0, w, h, 0, 0, bu, bv);
+-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+-        glEnable(GL_BLEND);
+-        settexture("data/background_detail.png", 0);
+-        float du = w*0.8f/512.0f + detailu, dv = h*0.8f/512.0f + detailv;
+-        bgquad(0, 0, w, h, 0, 0, du, dv);
+-        settexture("data/background_decal.png", 3);
+-        gle::begin(GL_QUADS);
+-        loopj(numdecals)
++        if(mapshot && mapshot != notexture)
+         {
+-            float hsz = decals[j].size, hx = clamp(decals[j].x, hsz, w-hsz), hy = clamp(decals[j].y, hsz, h-hsz), side = decals[j].side;
+-            gle::attribf(hx-hsz, hy-hsz); gle::attribf(side,   0);
+-            gle::attribf(hx+hsz, hy-hsz); gle::attribf(1-side, 0);
+-            gle::attribf(hx+hsz, hy+hsz); gle::attribf(1-side, 1);
+-            gle::attribf(hx-hsz, hy+hsz); gle::attribf(side,   1);
++            glBindTexture(GL_TEXTURE_2D, mapshot->id);
++            bgquad(x, y, sz, sz);
+         }
+-        gle::end();
+-        float lh = 0.5f*min(w, h), lw = lh*2,
+-              lx = 0.5f*(w - lw), ly = 0.5f*(h*0.5f - lh);
+-        settexture((maxtexsize ? min(maxtexsize, hwtexsize) : hwtexsize) >= 1024 && (screenw > 1280 || screenh > 800) ? "data/logo_1024.png" : "data/logo.png", 3);
+-        bgquad(lx, ly, lw, lh);
+-        if(caption)
++        else
++        {
++            hudnotextureshader->set();
++            gle::colorub(10, 12, 16, 200);
++            bgrect(x, y, sz, sz);
++            int qw, qh;
++            text_bounds("?", qw, qh);
++            float qsz = sz * 0.5f / max(qw, qh);
++            bgtextscaled("?", x + 0.5f * (sz - qw * qsz), y + 0.5f * (sz - qh * qsz), qsz, 255, 255, 255);
++        }
++        float b = max(2.0f, sz * 0.012f);
++        hudnotextureshader->set();
++        gle::colorub(255, 122, 24, 210);
++        bgrect(x, y, sz, b);
++        bgrect(x, y + sz - b, sz, b);
++        bgrect(x, y, b, sz);
++        bgrect(x + sz - b, y, b, sz);
++        if(mapname)
++        {
++            int ntw = text_width(mapname);
++            float nsz = sz / (10 * FONTH);
++            if(ntw * nsz > sz * 0.9f) nsz = sz * 0.9f / max(ntw, 1);
++            bgtextscaled(mapname, x + 0.5f * (sz - ntw * nsz), y + sz + FONTH * nsz * 0.25f, nsz, 255, 255, 255);
++        }
++        if(mapinfo)
+         {
+-            int tw = text_width(caption);
+-            float tsz = 0.04f*min(w, h)/FONTH,
+-                  tx = 0.5f*(w - tw*tsz), ty = h - 0.075f*1.5f*min(w, h) - 1.25f*FONTH*tsz;
+             pushhudmatrix();
+-            hudmatrix.translate(tx, ty, 0);
+-            hudmatrix.scale(tsz, tsz, 1);
++            hudmatrix.translate(x + sz + FONTH * msz, y, 0);
++            hudmatrix.scale(msz, msz, 1);
+             flushhudmatrix();
+-            draw_text(caption, 0, 0);
++            hudshader->set();
++            draw_text(mapinfo, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF, -1, infowidth);
+             pophudmatrix();
+         }
+-        if(mapshot || mapname)
+-        {
+-            int infowidth = 12*FONTH;
+-            float sz = 0.35f*min(w, h), msz = (0.75f*min(w, h) - sz)/(infowidth + FONTH), x = 0.5f*(w-sz), y = ly+lh - sz/15;
+-            if(mapinfo)
+-            {
+-                int mw, mh;
+-                text_bounds(mapinfo, mw, mh, infowidth);
+-                x -= 0.5f*(mw*msz + FONTH*msz);
+-            }
+-            if(mapshot && mapshot!=notexture)
+-            {
+-                glBindTexture(GL_TEXTURE_2D, mapshot->id);
+-                bgquad(x, y, sz, sz);
+-            }
+-            else
+-            {
+-                int qw, qh;
+-                text_bounds("?", qw, qh);
+-                float qsz = sz*0.5f/max(qw, qh);
+-                pushhudmatrix();
+-                hudmatrix.translate(x + 0.5f*(sz - qw*qsz), y + 0.5f*(sz - qh*qsz), 0);
+-                hudmatrix.scale(qsz, qsz, 1);
+-                flushhudmatrix();
+-                draw_text("?", 0, 0);
+-                pophudmatrix();
+-                glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+-            }        
+-            settexture("data/mapshot_frame.png", 3);
+-            bgquad(x, y, sz, sz);
+-            if(mapname)
+-            {
+-                int tw = text_width(mapname);
+-                float tsz = sz/(8*FONTH),
+-                      tx = 0.9f*sz - tw*tsz, ty = 0.9f*sz - FONTH*tsz;
+-                if(tx < 0.1f*sz) { tsz = 0.1f*sz/tw; tx = 0.1f; }
+-                pushhudmatrix();
+-                hudmatrix.translate(x+tx, y+ty, 0);
+-                hudmatrix.scale(tsz, tsz, 1);
+-                flushhudmatrix();
+-                draw_text(mapname, 0, 0);
+-                pophudmatrix();
+-            }
+-            if(mapinfo)
+-            {
+-                pushhudmatrix();
+-                hudmatrix.translate(x+sz+FONTH*msz, y, 0);
+-                hudmatrix.scale(msz, msz, 1);
+-                flushhudmatrix();
+-                draw_text(mapinfo, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF, -1, infowidth);
+-                pophudmatrix();
+-            }
+-        }
+-        glDisable(GL_BLEND);
++    }
++
++    hudshader->set();
++    glDisable(GL_BLEND);
++}
++
++void renderbackground(const char *caption, Texture *mapshot, const char *mapname, const char *mapinfo, bool restore, bool force)
++{
++    if(!inbetweenframes && !force) return;
++
++    if(!restore || force) stopsounds(); // stop sounds while loading
++ 
++    int w = screenw, h = screenh;
++    if(forceaspect) w = int(ceil(h*forceaspect));
++    getbackgroundres(w, h);
++    gettextres(w, h);
++
++    loopi(restore ? 1 : 3)
++    {
++        hdrout_begin_overlay();
++        hudmatrix.ortho(0, w, h, 0, -1, 1);
++        resethudmatrix();
++        rendermenuscene(w, h);
++        if(caption || mapshot || mapname) drawloadchrome(w, h, caption, mapshot, mapname, mapinfo);
+         if(!restore) swapbuffers(false);
+     }
+ 
+@@ -392,79 +411,86 @@ void renderprogress(float bar, const char *text, GLuint tex, bool background)
+     hudmatrix.ortho(0, w, h, 0, -1, 1);
+     resethudmatrix();
+ 
+-    hudshader->set();
+-    gle::colorf(1, 1, 1);
+-
+-    gle::defvertex(2);
+-    gle::deftexcoord0();
+-
+-    float fh = 0.075f*min(w, h), fw = fh*10,
+-          fx = renderedframe ? w - fw - fh/4 : 0.5f*(w - fw), 
+-          fy = renderedframe ? fh/4 : h - fh*1.5f,
+-          fu1 = 0/512.0f, fu2 = 511/512.0f,
+-          fv1 = 0/64.0f, fv2 = 52/64.0f;
+-    settexture("data/loading_frame.png", 3);
+-    bgquad(fx, fy, fw, fh, fu1, fv1, fu2-fu1, fv2-fv1);
+-
+-    glEnable(GL_BLEND);
+-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+-
+-    float bw = fw*(511 - 2*17)/511.0f, bh = fh*20/52.0f,
+-          bx = fx + fw*17/511.0f, by = fy + fh*16/52.0f,
+-          bv1 = 0/32.0f, bv2 = 20/32.0f,
+-          su1 = 0/32.0f, su2 = 7/32.0f, sw = fw*7/511.0f,
+-          eu1 = 23/32.0f, eu2 = 30/32.0f, ew = fw*7/511.0f,
+-          mw = bw - sw - ew,
+-          ex = bx+sw + max(mw*bar, fw*7/511.0f);
++    float fw, fh, fx, fy, pad;
++    hudnotextureshader->set();
++    glDisable(GL_BLEND);
++    if(!renderedframe)
++    {
++        float plateh = 0.12f * min(w, h);
++        gle::colorub(8, 10, 14, 255);
++        bgrect(0, float(h) - plateh, float(w), plateh);
++        fw = 0.46f * w;
++        fh = max(12.0f, 0.018f * h);
++        fx = 0.5f * (w - fw);
++        fy = h - 0.035f * min(w, h) - fh;
++        if(backgroundcaption[0])
++        {
++            int ctw = text_width(backgroundcaption);
++            float csz = 0.028f * min(w, h) / FONTH;
++            float cx = 0.5f * (w - ctw * csz);
++            float cy = fy - FONTH * csz - 0.012f * h;
++            glEnable(GL_BLEND);
++            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
++            bgtextscaled(backgroundcaption, cx, cy, csz, 255, 255, 255);
++            glDisable(GL_BLEND);
++            hudnotextureshader->set();
++        }
++    }
++    else
++    {
++        fw = 0.28f * min(w, h);
++        fh = max(10.0f, 0.016f * h);
++        fx = w - fw - 0.03f * min(w, h);
++        fy = 0.03f * min(w, h);
++        gle::colorub(8, 10, 14, 255);
++        bgrect(fx - 8, fy - 8, fw + 16, fh + 16);
++    }
++    pad = max(2.0f, fh * 0.16f);
++
++    gle::colorub(18, 20, 24, 255);
++    bgrect(fx, fy, fw, fh);
++    gle::colorub(255, 122, 24, 255);
++    bgrect(fx, fy, fw, pad);
++    bgrect(fx, fy + fh - pad, fw, pad);
++    bgrect(fx, fy, pad, fh);
++    bgrect(fx + fw - pad, fy, pad, fh);
+     if(bar > 0)
+     {
+-        settexture("data/loading_bar.png", 3);
+-        gle::begin(GL_QUADS);
+-        gle::attribf(bx,    by);    gle::attribf(su1, bv1);
+-        gle::attribf(bx+sw, by);    gle::attribf(su2, bv1);
+-        gle::attribf(bx+sw, by+bh); gle::attribf(su2, bv2);
+-        gle::attribf(bx,    by+bh); gle::attribf(su1, bv2);
+-
+-        gle::attribf(bx+sw, by);    gle::attribf(su2, bv1);
+-        gle::attribf(ex,    by);    gle::attribf(eu1, bv1);
+-        gle::attribf(ex,    by+bh); gle::attribf(eu1, bv2);
+-        gle::attribf(bx+sw, by+bh); gle::attribf(su2, bv2);
+-
+-        gle::attribf(ex,    by);    gle::attribf(eu1, bv1);
+-        gle::attribf(ex+ew, by);    gle::attribf(eu2, bv1);
+-        gle::attribf(ex+ew, by+bh); gle::attribf(eu2, bv2);
+-        gle::attribf(ex,    by+bh); gle::attribf(eu1, bv2);
+-        gle::end();
++        float inner = max(0.0f, fw - pad * 2);
++        gle::colorub(255, 122, 24, 255);
++        bgrect(fx + pad, fy + pad, inner * clamp(bar, 0.0f, 1.0f), fh - pad * 2);
+     }
+ 
+     if(text)
+     {
+         int tw = text_width(text);
+-        float tsz = bh*0.8f/FONTH;
+-        if(tw*tsz > mw) tsz = mw/tw;
+-        pushhudmatrix();
+-        hudmatrix.translate(bx+sw, by + (bh - FONTH*tsz)/2, 0);
+-        hudmatrix.scale(tsz, tsz, 1);
+-        flushhudmatrix();
+-        draw_text(text, 0, 0);
+-        pophudmatrix();
++        float tsz = (fh * 0.62f) / FONTH;
++        if(tw * tsz > fw - pad * 4) tsz = (fw - pad * 4) / max(tw, 1);
++        glEnable(GL_BLEND);
++        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
++        bgtextscaled(text, fx + 0.5f * (fw - tw * tsz), fy + 0.5f * (fh - FONTH * tsz), tsz, 255, 255, 255);
++        glDisable(GL_BLEND);
+     }
+ 
+-    glDisable(GL_BLEND);
+-
+     if(tex)
+     {
++        float sz = 0.28f * min(w, h), x = 0.5f * (w - sz), y = 0.32f * h;
++        hudshader->set();
++        gle::colorf(1, 1, 1);
++        gle::defvertex(2);
++        gle::deftexcoord0();
+         glBindTexture(GL_TEXTURE_2D, tex);
+-        float sz = 0.35f*min(w, h), x = 0.5f*(w-sz), y = 0.5f*min(w, h) - sz/15;
+         bgquad(x, y, sz, sz);
+-
+-        glEnable(GL_BLEND);
+-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+-        settexture("data/mapshot_frame.png", 3);
+-        bgquad(x, y, sz, sz);
+-        glDisable(GL_BLEND);
++        float b = max(2.0f, sz * 0.012f);
++        hudnotextureshader->set();
++        gle::colorub(255, 122, 24, 255);
++        bgrect(x, y, sz, b);
++        bgrect(x, y + sz - b, sz, b);
++        bgrect(x, y, b, sz);
++        bgrect(x + sz - b, y, b, sz);
+     }
+ 
++    hudshader->set();
+     swapbuffers(false);
+ }
+ 
