@@ -1,6 +1,6 @@
 # L4ZY
 
-A Cube 2: Sauerbraten (2020) client with **hardware ray-traced lighting**, **NVIDIA DLAA/DLSS** and **AMD FSR**, **native HDR output**, **local AI chat translation** and a **settings assistant**, **3D sound**, a **drag-and-drop HUD editor**, and a lot of quality-of-life additions: friends list, kill feed, CTF flag timer, automatic match recording, HD-aim demos with X-ray, Tiny Apa bots and more.
+A Cube 2: Sauerbraten (2020) client with **hardware ray-traced lighting**, **NVIDIA DLAA/DLSS** and **AMD FSR**, **native HDR output**, **local AI chat translation** and a **settings assistant**, **3D sound**, a **drag-and-drop HUD editor**, and other additions: friends list, kill feed, CTF flag timer, automatic match recording, HD-aim demos with X-ray, Tiny Apa bots and more.
 
 It plays on normal Sauerbraten servers. The only extra thing it sends is one `__L4ZY <version>` line when you connect, which vanilla servers ignore (see [Online rules](#online-rules)).
 
@@ -40,7 +40,7 @@ Main menu → **L4ZY `<version>` – Updates**:
 
 How updates are applied:
 
-- Only the parts that changed are downloaded: a game fix is a few MB, and maps and translation models are never re-downloaded.
+- Only the parts that changed are downloaded: a game fix is much smaller than the installer, and maps and translation models are never re-downloaded.
 - Every file is checked (HTTPS, size and SHA-256) before anything is replaced.
 - Nothing is replaced while the game runs.
 - A backup is kept. If an update is interrupted or fails, the previous version is put back automatically.
@@ -74,13 +74,12 @@ Windows 10/11 64-bit with an up-to-date graphics driver. Vulkan is only started 
 | Intel Arc | yes | not tested | no | not tested | no |
 | Other GPUs, integrated graphics | yes, if Vulkan is available | no | no | not tested | no |
 
-- Only an **NVIDIA RTX 4070 Ti SUPER** has been tested. The other RTX cards meet the same requirements, but have not been tried.
 - **Ray tracing** needs hardware RT (Vulkan `ray_query`), plus OpenGL/Vulkan memory sharing (`GL_EXT_memory_object`, `GL_EXT_semaphore`).
   - NVIDIA drivers provide both.
   - AMD and Intel cards have hardware RT, but this sharing has not been checked on their drivers.
   - If something is missing, the game stays on *Classic* lighting and says so in the menu.
 - **DLAA/DLSS** need NVIDIA Tensor cores (RTX).
-- **AMD FSR** uses the same OpenGL/Vulkan memory sharing as ray tracing. It has only been tested on the RTX 4070 Ti SUPER.
+- **AMD FSR** uses the same OpenGL/Vulkan memory sharing as ray tracing.
 - **Native HDR** uses the NVIDIA OpenGL/Direct3D bridge.
 - **Chat translation** runs on any Vulkan GPU, or on the CPU (slower).
   - Small model: about 4 GB of VRAM.
@@ -93,6 +92,12 @@ L4ZY ships its own `menus.cfg`: a new main menu, and an Options hub with pages f
 - **Chat Translation** is on the main menu and in Options → Game.
 - `/traduction` also opens it.
 - **Search settings…** and **Settings assistant (AI)…** are at the top of Options.
+- **Explanations:** rest the mouse on an option to see what it does (Options → Display → Advanced → *Menus*).
+
+| Setting | Values | Default |
+|---|---|---|
+| `menuhelpdelay` | ms before the explanation shows: `0` never, `500` to `5000` | `1500` |
+| `menuhelpplace` | `0` next to the mouse, `1` at the bottom of the screen | `0` |
 
 ## Features
 
@@ -139,12 +144,12 @@ If your graphics card or driver cannot run ray tracing, *Ray tracing* is greyed 
 ### Ray tracing performance
 
 - Graphics profiles *Ultra*, *High*, *Medium* and *Low* (Options → Graphics → *Performance* tab → *Profile*); changing one of their options on its own gives *Custom*.
-- Teleporter lights are gathered once per light update instead of every frame: about twice the FPS on maps with many teleporters.
+- Teleporter lights are gathered once per light update instead of every frame: faster on maps with many teleporters.
 - When the model cache is full, models that cannot be added are skipped before any GPU work.
 - Sky rays use blue noise with NRD: cleaner sky light at the same cost.
 - Item models (boost, armour, quad…) are prepared behind the loading screen, and new skins are added without waiting for the GPU: no more freeze when an item respawns.
 - Room for 128 different models in the ray-traced scene (was 64): items no longer go missing on big maps.
-- Lamps are sorted per screen tile, so each pixel only tests the lamps near it: in our tests, about +40 to +80 % FPS on the heaviest maps at 1600×900, less on lighter ones.
+- Lamps are sorted per screen tile, so each pixel only tests the lamps near it: faster lighting on maps with many lamps.
 - If ray tracing cannot run (no hardware RT, no Vulkan driver, driver too old, failed to start), *Ray tracing* is greyed out in Options → Graphics → *General* → *Lighting*, with the reason. The settings search and the assistant show it greyed out too.
 
 Commands:
@@ -159,7 +164,7 @@ Commands:
 | Setting | Values | Default |
 |---|---|---|
 | `hwrtngxmode` | `0` Native, `1` DLAA, `2` DLSS Quality, `3` DLSS Balanced, `4` DLSS Performance, `5` FSR Native, `6` FSR Quality, `7` FSR Balanced, `8` FSR Performance | `0` |
-| `hwrtfsrsharpness` | FSR sharpening after upscaling (`0` off, `10` close to DLSS) | `10` |
+| `hwrtfsrsharpness` | FSR sharpening after upscaling (`0` off to `100`) | `10` |
 | `hwrtdlsssharpness` | Sharpening after DLAA/DLSS with AMD's open RCAS filter (`0` off to `100`) | `0` |
 | `hwrtupscalemipbias` | Sharper textures with DLSS/FSR Quality, Balanced and Performance (`1` on) | `0` |
 | `fsaa` | MSAA, Classic lighting with Native only: `-1` default (off), `2`, `4`, `8`; a change restarts the graphics | `-1` |
@@ -269,7 +274,7 @@ Supported codes: `bg ca cs da de en es et fi fr hr hu id it nl no pl pt ro ru sk
 - `/say <msg>`: sent as typed.
 - `/tsay <msg>`, `/tsayteam <msg>`: translated to your send language.
 - `/tsay<code> <msg>`, `/tsayt<code> <msg>`: translated once into that language (team version with `t`). Example: `/tsayde hallo`.
-- `/tsayr <msg>`, `/tsayteamr <msg>`: careful translation into your send language: the model thinks before translating. Slower (about 4-10 s, never more than 25 s); with the Normal model it often handles slang and abbreviations better, not always. While it works the console shows *Translating carefully...*; the line goes away when the message is sent. If it fails or takes too long, nothing is sent (never the untranslated line), and the model's reasoning is never sent. Chat from others is translated once it is done. No preview.
+- `/tsayr <msg>`, `/tsayteamr <msg>`: careful translation into your send language: the model thinks before translating. Slower (a few seconds, never more than 25 s). While it works the console shows *Translating carefully...*; the line goes away when the message is sent. If it fails or takes too long, nothing is sent (never the untranslated line), and the model's reasoning is never sent. Chat from others is translated once it is done. No preview.
 - `/trep <msg>`, `/trepteam <msg>`: reply in the language of the last chat line.
 
 **Addressing a player** (puts `@name` in front; Tab completes the name, Up/Down cycles)
@@ -321,7 +326,7 @@ Supported codes: `bg ca cs da de en es et fi fr hr hu id it nl no pl pt ro ru sk
 
 ### Settings assistant (local AI)
 
-Ask in plain words how to find or change a setting, and the translation model answers like a person: where it is, what it does, what its values mean, the current value. When you ask for a change (or answer its question), it proposes it.
+Ask in plain words how to find or change a setting, and the translation model answers in plain words: where it is, what it does, what its values mean, the current value. When you ask for a change (or answer its question), it proposes it.
 
 - **Nothing changes until you click Apply** next to a proposal; **Undo** puts the old value back.
 - It can change game settings, put actions on keys, including up to 4 actions on one key (e.g. `bind LSHIFT "setweapon RI; attack"`), open a settings page, and open the HUD editor.
@@ -414,8 +419,6 @@ Pick the colour of each weapon's trail: for everyone (*All*), and if you want, d
 
 With ray tracing, lights follow your colours: a muzzle flash takes the trail colour, a rocket or grenade and its explosion take the projectile colour (never the smoke colour). Projectile colours and the muzzle flash light boxes are on the same pages (Options → HUD).
 
-Idea from p1xbraten; written for L4ZY.
-
 ### Kill feed, react times and streaks
 
 - **Kill feed:** `killer [weapon] victim`, fading out, with an `xN` tag on your streaks.
@@ -475,7 +478,7 @@ Idea from p1xbraten; written for L4ZY.
 - Demo controls: the exact time, a timeline (click or drag to go anywhere), back / ahead 10 s (0.5 s with Alt held), play/pause, speed (0.25× to 2×), the players you can follow (click a name), and *Hide*.
 - **X-ray** (demos played on this computer only, never in a game): players are seen through walls in their colour. Switch it with the *X-RAY* button of the demo controls or a key; it keeps its state when you go back in the demo, and each new demo starts from *X-ray at demo start*.
 - While you watch a player whose exact aim is used (HD demo, or live on a compatible server), a small grey **HD** sits next to their name; nothing is shown otherwise.
-- Live on a compatible server, the exact aim is shown `hdlivedelay` ms late (200 by default, the same for every player) and drawn along smooth curves, so it plays fluid and complete. The rest of the game (other players, shots, sounds, deaths, kill feed, scores) is replayed with the same delay, so you see exactly what the watched player saw; chat and server messages sent on their own are not delayed. The delay applies as soon as you spectate on a server with the clan extras, the same whoever you watch (with or without exact aim, bots) and in free cam; joining the game puts you back on time. Long HD aim files (over 31 MB) come in parts from compatible servers and are joined automatically.
+- Live on a compatible server, the exact aim is shown `hdlivedelay` ms late (200 by default, the same for every player) and drawn along smooth curves, so it plays fluid and complete. The rest of the game (other players, shots, sounds, deaths, kill feed, scores) is replayed with the same delay, so you see exactly what the watched player saw; chat and server messages sent on their own are not delayed. The delay applies as soon as you spectate on a compatible server, the same whoever you watch (with or without exact aim, bots) and in free cam; joining the game puts you back on time. Long HD aim files (over 31 MB) come in parts from compatible servers and are joined automatically.
 - On a compatible server, while you record, the server's demo of the match (with the HD aim of every L4ZY player) is downloaded during the map vote and replaces your local one, only if it arrived complete and is the same match. Your own recording is kept for 7 days in `demo\replaced`. One try per match, never retried; if the server demo has no HD aim, your local one is kept.
 
 **Menu:** Options → Recording
@@ -483,11 +486,16 @@ Idea from p1xbraten; written for L4ZY.
 | Setting / command | What it does | Default |
 |---|---|---|
 | `demohdrecord` / `demohdplay` | record / use the HD aim | `1` / `1` |
-| `demokeep` | demos kept (1–30) | `5` |
+| `demokeep` | demos kept (1–200) | `5` |
 | `hdlivedelay` | live spectating on a compatible server: the HD aim is shown this many ms late, the same for every player, so it plays smooth and complete (0–1000) | `200` |
 | `toggledemorecord`, `toggledemohd` | recording on/off, HD/vanilla aim while watching | |
 | `demoxraystart` | X-ray at demo start (Options → Recording → *Demos (HD aim)*): `0` Off, `1` On | `0` |
 | `demoxraystyle` | X-ray style: `0` outline, `1` outline + veil | `0` |
+| `demopov` | followed player's view (Options → Recording → *Demo playback*): `1` as their game showed them, `0` the real positions | `1` |
+| `demohitbox` | hitboxes in demos played on this computer: `0` Off, `1` On | `0` |
+| `demohitboxshots` | with hitboxes on, the shots with the hitboxes near them: `0` Off, `1` On | `1` |
+| `demohitboxdeath` | with hitboxes on, ms the hitbox of a killed player stays where they were hit (`0`–`5000`) | `1500` |
+| `demolookkey` | key held to look around with the mouse while watching a demo | `MOUSE3` |
 | `toggledemoxray`, `toggledemobar` | X-ray on/off, hide/show the demo controls (no key by default; Options → Keys) | |
 | `demorewind [ms]`, `demoforward [ms]` | seek (default 10 s) | |
 | `playlocaldemo <i>`, `localdemoextract <i>` | play a demo, copy it with its `.dmohd` | |
@@ -496,9 +504,9 @@ Idea from p1xbraten; written for L4ZY.
 ### Tiny Apa bots
 
 - **Classic:** the normal Sauerbraten bots.
-- **Tiny Apa (WIP):** bots modelled on Apathy's own play.
+- **Tiny Apa (WIP):** a second kind of bot, with its own aim, reactions and movement; work in progress.
 
-Tiny Apa (WIP) is the first player profile: bots on a human-like base, tuned on Apathy's own play. Classic bots stay the default.
+Classic bots stay the default.
 
 **Menu:** main menu → *Bot Match* → *bots play*: *Classic* or *Tiny Apa*; with Tiny Apa, their level and *a different form each game*.
 
@@ -507,6 +515,11 @@ Tiny Apa (WIP) is the first player profile: bots on a human-like base, tuned on 
 | `botperception` | `0` Classic, `2` Tiny Apa | `0` |
 | `botstylelevel` | Tiny Apa level in %, `50` to `100`: `100` a strong player, `50` half the accuracy and slower | `100` |
 | `botstyleform` | `1` a different form each game, `0` always the same | `1` |
+| `botstyletired` | % of games a Tiny Apa plays tired, `0` to `100` (with a different form each game) | `25` |
+| `botstylewarmup` | `1` warm up during the first two minutes, `0` full level from the start | `1` |
+| `botnavgrid` | `1` find their way on the map's walk grid, `0` the map's waypoints | `1` |
+| `botnavsafe` | on the walk grid: `1` keep clear of deadly falls, `0` off | `1` |
+| `botnet` | `1` a new way for Tiny Apa to make decisions (work in progress), `0` off | `0` |
 
 ### Scoreboard, sound and mouse
 
@@ -543,9 +556,23 @@ Tiny Apa (WIP) is the first player profile: bots on a human-like base, tuned on 
 
 Each release is listed on the [Releases](https://github.com/Lazy-Apathy/L4ZY/releases) page, newest first.
 
-### 2026.10.16.1 (test)
+### 2026.10.25.1 (test)
 
-- Bots: new optional "Tiny Apa" (WIP) bots in Bot Match, modelled on Apathy's own play, with a level and a different form each game (main menu → *Bot Match* → *bots play*). Classic stays the default.
+- Bots: Tiny Apa find their way on a walk grid made for each map (jump pads, teleporters, small steps, drops) and keep clear of deadly falls. The grid is built little by little the first time a map is played, then kept on disk and updated after map edits (main menu → Bot Match → walk grid settings..).
+- Bots: Tiny Apa aim at the part of a player they can see, keep one opponent in mind, shoot at where they believe you are, and react to sounds without knowing who made them.
+- Bots: Tiny Apa keep moving when they shoot, and their view speeds up and slows down smoothly.
+- Bots: Tiny Apa can play some games tired and warm up during the first two minutes (main menu → Bot Match → form settings..).
+- Bots: new option, off by default: a new way for Tiny Apa to make decisions (work in progress) (main menu → Bot Match).
+- Demos: new Demo playback tab (Options → Recording): the followed player's view as their game showed them, or the real positions; hitboxes, off by default, with the shots that touched them. New keys: hitboxes, player's view, next view, go to a typed time, and look around while held (middle mouse button by default).
+- Demos: the number of demos to keep is typed in the menu (1 to 200). Old matches are removed only when a recorded match ends.
+- Menus: the grey notes are gone; an explanation shows when the mouse rests on an option (after 1.5 s by default, Options → Display → Advanced → Menus).
+- CTF: flag messages colour player names like the kill feed (your colour, friends' colours), team colours otherwise.
+- Chat translation: the translator is given the nicknames of the players who wrote in the chat, so that it leaves them as they are.
+- Network: malformed fragmented packets are now rejected (checks from the official ENet project).
+
+### 2026.10.16.1 (stable)
+
+- Bots: new optional "Tiny Apa" (WIP) bots in Bot Match, with a level and a different form each game (main menu → *Bot Match* → *bots play*). Classic stays the default.
 - Anti-aliasing: Temporal AA leaves the menu; if it was on, it is turned off once. New, off by default: sharpening for DLAA/DLSS and *Sharper textures* with DLSS/FSR (Options → Graphics → *Anti-Aliasing*).
 - Spectating: a list of the players on the right; hold Tab and click a name to follow that player. A small eye marks the player you watch.
 - Master menu: each player's client number, and the actions as icons.
@@ -583,9 +610,9 @@ Each release is listed on the [Releases](https://github.com/Lazy-Apathy/L4ZY/rel
 - Fixed: mouse stuck in the middle of the screen in menus after loading a map, in exclusive fullscreen.
 - Fixed: a chat, kill feed, clock or other HUD part made much bigger in the HUD editor could leave the screen; chat messages then only showed in F10. Layouts saved that way are repaired.
 - Fixed: greyscale textures shown red with ray tracing.
-- Fixed: black minimap when loading maps with waterfalls (haste, tejen…).
+- Fixed: black minimap when loading maps with waterfalls.
 - Fixed: a crash while spectating and switching between players.
-- On servers with the clan extras:
+- On compatible servers:
   - spectating: you now watch the game 200 ms in the past, so the player's exact aim plays smooth and complete, with shots and the kill feed in sync;
   - HD demos record the exact aim twice as often (200 times per second);
   - if you record your matches, the server's demo (with the exact aim of every L4ZY player, not only yours) is downloaded during the map vote and replaces yours, only when it arrived complete; yours is kept for 7 days;
@@ -599,10 +626,10 @@ Each release is listed on the [Releases](https://github.com/Lazy-Apathy/L4ZY/rel
 - Ray tracing: less shimmer on distant textures in motion with DLAA/DLSS. If you prefer the sharper look, choose *Sharper* in Options → Graphics → *RT Textures*.
 - Ray tracing: no more faint dark ring on the floor around you (the old *Creases* effect is no longer applied on top of ray tracing). The *Creases* checkbox is gone from the menu: Ambient Occlusion (Options → Graphics → *Lighting*) does that job in classic lighting.
 - Ray tracing: fixed a crash when the player model changes, or when switching between players while spectating, during a ray-traced game.
-- Weapon trail colours: pick a colour for each weapon's trail, separately for your own shots (*Me*), everyone else's (*Others*) and both (*All*), with hex codes or presets (Options → HUD → *Weapon Trails: Colours*). Stock colours by default; there is no team-based colour. Idea from p1xbraten.
+- Weapon trail colours: pick a colour for each weapon's trail, separately for your own shots (*Me*), everyone else's (*Others*) and both (*All*), with hex codes or presets (Options → HUD → *Weapon Trails: Colours*). Stock colours by default; there is no team-based colour.
 - Team colours (optional, off by default): one colour for all teammates and one for all enemies, and friends can follow them (Options → HUD → *Team colours*).
 - Custom player model: a *Custom model* choice and a button that opens the folder to drop your own model in; no colour is drawn over it.
-- Local games no longer show the clan client check or "Welcome".
+- Local games no longer show the client check or "Welcome".
 - The console only shows game information; technical lines go to `log.txt`. When ray tracing or an anti-aliasing mode cannot start, one short line says why.
 
 ### 2026.10.4.1 (stable)
@@ -622,7 +649,7 @@ Each release is listed on the [Releases](https://github.com/Lazy-Apathy/L4ZY/rel
 
 - 3D sound (Steam Audio): Options → Sound → *3D Sound*. Headphones (HRTF) let you hear whether a sound is ahead or behind, above or below; walls muffle sounds (*Occlusion*). Off by default.
 - Low latency mode: the mouse is read once the GPU catches up, for a more direct aim with ray tracing, native HDR or V-Sync. On by default; *Strict* goes further at the cost of some FPS (Options → Display).
-- Ray tracing: about twice the FPS on maps with many teleporters; no more wasted work when the model cache is full.
+- Ray tracing: faster on maps with many teleporters; no more wasted work when the model cache is full.
 - Ray tracing: cleaner sky light with NRD (blue-noise sky rays).
 - Ray tracing is greyed out in Options → Graphics → *Lighting* when your graphics card or driver cannot run it, with the reason.
 - Online: L4ZY tells the server its version once when you connect (`__L4ZY <version>`), so admins can see which client you use. `/l4zyversion` shows it.
@@ -633,7 +660,7 @@ Each release is listed on the [Releases](https://github.com/Lazy-Apathy/L4ZY/rel
 - Menu text fields (name, add friend…) now have an orange outline, visible without hovering them.
 - Ray tracing: no more freeze when an item (boost, armour, quad) respawns.
 - Ray tracing: items and models no longer go missing from the ray-traced scene on big maps.
-- Ray tracing: faster lighting on maps with many lamps (in our tests, about +40 to +80 % FPS on the heaviest maps, less on lighter ones) and a quicker switch to ray tracing.
+- Ray tracing: faster lighting on maps with many lamps and a quicker switch to ray tracing.
 - CTF: no radar marker for a flag that the server keeps outside the map.
 - Fixes: friend names up to 15 characters in *Add friend*, Alt+Tab out of exclusive fullscreen gives the desktop its normal resolution back.
 

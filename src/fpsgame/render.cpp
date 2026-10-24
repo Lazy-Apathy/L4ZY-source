@@ -649,7 +649,7 @@ namespace game
 
     void rendergame(bool mainpass)
     {
-        if(mainpass) ai::render();
+        if(mainpass) { ai::render(); ai::navrender(); }
 
         if(intermission)
         {
@@ -1172,5 +1172,13 @@ namespace game
             demoxraycolour(demoxraycolor(d, team));
             renderplayer(d, getplayermodelinfo(d), team, 1, false);
         }
+    }
+
+    // colour of a player's hitbox in demos: the colour of his X-ray outline
+    int demohitboxcolor(fpsent *d)
+    {
+        int team = demohd::visteam(d);
+        if(!team && (teamskins || m_teammode)) team = isteam(player1->team, d->team) ? 1 : 2;
+        return demoxraycolor(d, team);
     }
 }

@@ -7,6 +7,8 @@
 //    follows the size of the target on screen (so accuracy hardly depends on distance), and a shot that leaves
 //    soon after the crosshair gets there, at the same rhythm as the reference player (shortly after the weapon is
 //    ready again); big turns are single fast flicks, and a target that drifts away is caught up with a new flick;
+//    when the middle of his body is hidden, the part of him it sees is aimed at instead (with a spread that follows
+//    the size of that part);
 //  - the moves: under fire it holds its place, dodging sideways around the spot it stands on instead of running at
 //    the enemy (so it keeps the distance it had), with steps and pauses of irregular lengths as measured (no
 //    rhythm), a short stop being ended by a step aside just before the enemy can shoot again; it keeps that place a
@@ -35,11 +37,16 @@
     // 0 ("each bot's own skill", the default of older versions) comes back as 100, 1 to 49 as 50 (as they counted)
     VARFP(botstylelevel, 0, 100, 100, { if(botstylelevel < 50) botstylelevel = botstylelevel ? 50 : 100; });
     VARP(botstyleform, 0, 1, 1);
+    // with a form drawn for each game (botstyleform 1): how often a game is played "very tired" (%), and a warm-up during
+    // the first two minutes of its game (as measured on the reference player); local games only (online the bots play at
+    // the skill they were added with, never tired nor warming up)
+    VARP(botstyletired, 0, 25, 100);
+    VARP(botstylewarmup, 0, 1, 1);
 
     // measured on the reference player (instagib rifle unless said otherwise), then fitted on real target paths
     static const float SREACTFORM = 41,    // ms, spread of the median reaction from one game to the next
                        SREACTLEVEL = 3,    // ms added to the median reaction per level point under 100
-                       SREACTDUEL = 60,    // ms less in a duel
+                       SREACTDUEL = 75,    // ms less in a duel
                        // gesture duration = SDUR0 * amplitude^SDURK ms; fitted so that the peak speed follows the
                        // reference player's by size of gesture (240 deg/s at 10-20 deg up to 1 400 deg/s at 160-400 deg)
                        SDUR0 = 82.5f, SDURK = 0.24f, SDURSD = 0.25f,
@@ -47,27 +54,27 @@
                        SGAIN = 0.99f, SGAIN15 = 0.26f, SGAINK = -0.55f, // gesture gain, its spread at 15 degrees
                        SPERP = 3.57f,      // degrees, sideways error of a gesture
                        SLEAD = 0.41f,      // part of the target's movement during the gesture that is anticipated
-                       SCORR = 88, SCORRSD = 0.6f,     // ms, delay before a correction
+                       SCORR = 70, SCORRSD = 0.6f,     // ms, delay before a correction
                        SLAG = 90,          // ms, the tracking follows where the target was that long ago,
                        SPRED = 1.0f,       //   carried on at the speed it had then (smooth pursuit)
                        STRACK = 0.124f, SJITTER = 1.31f, // tracking pull (per 5 ms) and tremor
                        SVMAX = 928,        // deg/s, fastest smooth tracking; beyond, the hand catches up with flicks
                        SCATCH = 1.5f, SCATCHDEG = 2.38f, SCATCHMS = 207, // a new flick when the target drifted further than
                                            //   SCATCH half widths (at least SCATCHDEG degrees), SCATCHMS after the last one
-                       SOFF = 0.593f, SOFFV = 1.32f,     // aimed point around the body, in half widths of the target
+                       SOFF = 0.65f, SOFFV = 1.32f,     // aimed point around the body, in half widths of the target
                        // the shot leaves as soon as the crosshair passes close enough to the middle of the target: within
                        // SCLIC half widths (drawn for each shot, log-normal spread SCLICSD, wider against a target hard to
                        // predict, x2 after waiting SPATIENCE ms), or within SFLICKTOL for a part SFLICK of the shots (on the
-                       // move); after a shot the hand notices the weapon is ready again SREPRISE ms late (median): measured,
-                       // the reference player fires about 70 ms after the crosshair reaches the target, and about 220 ms
-                       // after the weapon is ready again when the target is still in sight
-                       SCLIC = 1.15f, SCLICSD = 0.325f, SFLICK = 0.108f, SFLICKTOL = 2.85f,
-                       SREPRISE = 150, SREPRISESD = 0.66f,
-                       STRIG = 40, STRIGSD = 0.5f,       // ms, trigger delay
-                       SPATIENCE = 500,   // ms, the tolerance doubles after waiting this long
+                       // move); after a shot the hand notices the weapon is ready again SREPRISE ms late (median): measured
+                       // in duels, the reference player fires about 90 ms after the crosshair reaches the target, and about
+                       // 140 ms after the weapon is ready again when the target is still in sight
+                       SCLIC = 1.3f, SCLICSD = 0.325f, SFLICK = 0.05f, SFLICKTOL = 2.85f,
+                       SREPRISE = 100, SREPRISESD = 1.0f,
+                       STRIG = 30, STRIGSD = 0.5f,       // ms, trigger delay
+                       SPATIENCE = 300,   // ms, the tolerance doubles after waiting this long
                        SMINSHOT = 60,     // ms, no shot earlier than this after a gesture starts
                        SLEVELERR = 0.8f,  // aiming error at level 50: x (1 + SLEVELERR)
-                       SFORMACC = 0.12f,  // spread of the aiming error from one game to the next (log)
+                       SFORMACC = 0.09f,  // spread of the aiming error from one game to the next (log)
                        SFORMSPEED = 0.107f, // spread of the gesture speed from one game to the next (log)
                        // how hard the target is to hit (measured: the reference player's accuracy falls from 60 % on
                        // a target that kept its way for a second to 40 % on one that changed sides 3 times, and from
@@ -79,12 +86,12 @@
                        // moves (measured in the reference player's duels: with the enemy in sight, sideways 3/4 of the
                        // time and only 15 % towards him, about 1.3 changes of side a second, within 128 u of a spot most of
                        // the time; 4 to 7 jumps a minute)
-                       SDODGER = 112,      // u, radius of the place it holds around the spot it stood on
-                       SKEEPMIN = 140,     // u, closer to the enemy than that it also steps back
+                       SDODGER = 150,      // u, radius of the place it holds around the spot it stood on
+                       SKEEPMIN = 70,      // u, closer to the enemy than that it also steps back
                        SKEEPLOST = 1500,   // ms it keeps its place after losing sight of the enemy (team games)
                        SKEEPDUEL = 3000,   // in a duel, median (log-normal 0.5, 1.5 to 8 s): measured, the player stays within 64 u of
                                            // where they lost him 68 % of the time after 1-2 s, 58 % after 2-4 s, 43 % after 4-6 s
-                       SJUMPKEEP = 0.15f,  // part of the random jumps of the base game it keeps
+                       SJUMPKEEP = 0.3f,   // part of the random jumps of the base game it keeps
                        STURNBACK = 120,    // deg: following its way that far round is put off a moment
                        STURNMS = 450,      //   (median ms), it walks backwards or sideways meanwhile
                        // the dodge, measured in the reference player's duels with the enemy in sight: short sideways steps of
@@ -92,14 +99,14 @@
                        // over 350 ms), the other way three times out of four, a quarter of them also forwards or backwards,
                        // no rhythm; when they stand still, they step aside about 280 ms before the enemy's weapon is ready
                        // again (or about 400 ms after he starts looking at them)
-                       SLEG = 250, SLEGSD = 0.55f,        // ms a sideways key is held (log-normal)
-                       SPAUSEP = 0.25f, SPAUSE = 85, SPAUSESD = 0.8f, // a pause after a step: how often, how long (ms)
-                       SSIDECHANGE = 0.8f,                // the next step goes the other way
-                       SSTOPSHOT = 0.5f,                  // after a shot of the enemy it saw, how often it stops until just
+                       SLEG = 300, SLEGSD = 0.55f,        // ms a sideways key is held (log-normal)
+                       SPAUSEP = 0.12f, SPAUSE = 85, SPAUSESD = 0.8f, // a pause after a step: how often, how long (ms)
+                       SSIDECHANGE = 0.9f,                // the next step goes the other way
+                       SSTOPSHOT = 0.25f,                 // after a shot of the enemy it saw, how often it stops until just
                                                           //   before his weapon is ready again (to make its own shot sure)
                        SSTOPMAX = 1100,                   // ms, longest such stop or pause (with the slowing down, a stop stays
                                                           //   under 1.5 s; the player's stops in sight: 90 % under 1.2 s)
-                       SDIAG = 0.12f,                     // a step also goes forwards or backwards
+                       SDIAG = 0.06f,                     // a step also goes forwards or backwards
                        SDODGELEAD = 220, SDODGELEADSD = 0.5f, // ms before the enemy's weapon is ready again
                        SDODGESEEN = 320, SDODGESEENSD = 0.5f, // ms after the enemy starts aiming at it
                        SNOSTEP = 300,     // ms without any way to step: it leaves that place
@@ -130,7 +137,7 @@
                        // it did not, the hand settles first (their shot comes 325 ms after the end of a 15-30 degree gesture
                        // in median, 430 ms after 30-60, 525 ms beyond): ms before the trigger can be pulled after a
                        // gesture of 15 / 30 / 60 degrees that did not end in a shot (added to the hand's own corrections)
-                       SSETTLE15 = 160, SSETTLE30 = 330, SSETTLE60 = 300, SSETTLESD = 0.5f,
+                       SSETTLE15 = 80, SSETTLE30 = 180, SSETTLE60 = 200, SSETTLESD = 0.5f,
                        // after a frag, the spawn points by jumps of the view (measured: the first one checked is in front of
                        // them, the next ones 40 to 46 degrees from where they looked, 13 to 20 % behind them), 280-500 ms each
                        // (SWATCHBACK, SSEARCHBACK : how likely a spawn point behind it is chosen next, after a frag / while it searches)
@@ -146,7 +153,45 @@
     // the enemy in sight from their respawn: their first gesture towards him starts 206 / 240 / 280 / 339 ms after the respawn,
     // q10 / q25 / median / q75, and their first shot comes 0.5 to 1.3 s after it, under 500 ms 3.6 % of the time); where their
     // killer was is only used once they have their bearings
+    // a game played very tired (measured on the reference player late at night: a little less accurate, shots that leave a
+    // little early, more chances let go out of the centre of the screen, reaction hardly slower, next shot even a little
+    // quicker, moves unchanged): aiming error x exp(STIREDACC), STIREDFLICK more shots on the move (early), a sighting out of
+    // the centre noticed STIREDOFFMS later one time in STIREDOFFP (often too late: a chance let go; measured: 10 points fewer
+    // sightings out of the centre with a shot, the others hardly slower), reaction STIREDREACT ms later, next shot x
+    // STIREDREPRISE
+    static const float STIREDACC = 0.10f, STIREDFLICK = 0.06f, STIREDOFFP = 0.12f, STIREDOFFMS = 600, STIREDREACT = 18, STIREDREPRISE = 0.8f;
+    // its first two minutes (measured: 4 points of accuracy less than later, reaction x 1.09): the aiming error x exp(SWARMACC)
+    // and the reaction x (1 + SWARMREACT) at the start, both fading out over SWARMMS ms
+    static const float SWARMACC = 0.20f, SWARMREACT = 0.18f, SWARMMS = 120000;
+    // with no enemy in sight, its view stays within the pitch the reference player looks at then (measured: 1 % of the time
+    // under -29 degrees, 1 % over +26): it does not stare down at a spot below a ledge or up at a ceiling
+    static const float SCALMLO = -29, SCALMHI = 26;
+    // a shot on the move (measured on the reference player in duels: still at 6 % of their shots against 18 % of the time
+    // with the enemy in sight; they start moving about 100 ms before the shot and keep moving some 250 ms after it): when its
+    // shot is near (the enemy in sight, the weapon ready, the crosshair within SSOON times its shot tolerance, or the trigger
+    // already pulled) and SSHOTAFTER ms after it, a still bot steps aside SSHOTMOVE of the time rather than standing still
+    static const float SSOON = 2.5f, SSHOTAFTER = 250, SSHOTMOVE = 0.8f;
+    // with no target in sight (a line, a way out, a spot it checks), a point that jumps further than SREPLAN degrees from
+    // where it looks is reached by a gesture (a hand does not slide 100 degrees in a pull); closer, its view drifts there no
+    // faster than SDRIFT deg/s (measured on the reference player with nobody in sight: half as many view moves as the bot
+    // had, twice as big: a line that slides as it walks is followed smoothly, not by little jerks)
+    static const float SREPLAN = 10, SDRIFT = 50;
+    // its hand (measured on the reference player: the speed of the view never jumps; the peak acceleration of their small
+    // moves grows with their size, in median about 1 300 deg/s^2 + 150 per degree): while it follows a target or waits for a
+    // correction, the speed of its view changes no faster than SHANDACC0 + SHANDACCK x the distance left to the point it aims at
+    // (a bound four times that median: tighter, its reactions out of the centre of the screen came 50 ms too late)
+    static const float SHANDACC0 = 5000, SHANDACCK = 600;
     static const float SORIENT = 280, SORIENTSD = 0.25f;
+    // meanwhile its view is not frozen: a player moves it from SRESPLOOK ms after the respawn (median, measured: 70 ms, a
+    // quarter under 5 ms, a quarter over 170), looking along its way; and during the first SRESPMS ms of a life its
+    // reactions are SRESPREACT times slower (measured: x 1.10 to 1.13 just after the respawn)
+    static const float SRESPLOOK = 70, SRESPLOOKSD = 1.3f, SRESPMS = 3000, SRESPREACT = 1.12f;
+    // what its eyes tell it of a target in sight: where he was SSEELAG ms ago (his way, SSEEVEL ms to read his speed), carried
+    // on at the speed he had then, seen from where the bot is now (a player knows his own moves); its hand follows that, and
+    // the shot leaves when the crosshair is on the point it aims at there (it does not know its own aiming error), so it
+    // misses when the target changed its way meanwhile (measured on the reference player in duels: 47 % of the shots hit a
+    // target that kept its way for 250 ms, 35 % one that did not)
+    static const float SSEELAG = 90, SSEEVEL = 60;
     // where a lost enemy will come back into view (measured on the reference player's duels, each guess worked out 400 ms
     // before he came back into their line of sight, from where they stood then, angle to him in median: the line where he went
     // out, carried on 300 ms along his way, 6.4 deg in the first second and 9.5 the next; the spot where they last saw him
@@ -158,10 +203,22 @@
                        SPREPV = 1500,     // ms: his line carried on along his way until then, then the spot where it lost him
                        SPRESWITCH = 2000, // ms: from then on, now and then a glance elsewhere
                        SPREGLANCE = 0.2f, // how often a look is such a glance
+                       // ... more and more often as time goes by without news of him (a player does not watch one spot for
+                       // long: measured in duels, after 4 s the reference player's view is more than 45 degrees off his line
+                       // half of the time)
+                       SPREGLANCEMAX = 0.5f, SPREGLANCERISE = 3000,
                        SPREDWELL = 1500, SPREDWELLSD = 0.5f, // ms its line is watched before the next look is drawn
                        SPREGLANCEMS = 600, // ms a glance lasts (median)
                        SPREREST = 4, SPREMOVED = 24, // its view resting on his line is set again beyond that (degrees, u)
-                       SPREKNOWN = 1000;  // ms: where its killer was is watched itself first
+                       SPREKNOWN = 1000,  // ms: where its killer was is watched itself first
+                       // several enemies alive (in a duel, as above): heard well away from the line (more than SPREHEARDDIST u,
+                       // and 0.4 of how far the sound is) SPREHEARD ms or more after it lost him from sight: he went elsewhere,
+                       // that line no longer holds ; its attention is shared (measured on the reference player against three
+                       // bots, nobody in sight: their view rests on a hidden enemy 12 % of the time, 270 ms in median, and it is
+                       // where he comes out 3 times out of 4; 70 big gestures a minute): his line is watched SPREDWELLM ms
+                       // (median) before the next look is drawn, and once he has been gone SPRESWITCHM ms, a look is a glance
+                       // elsewhere SPREGLANCEM of the time, a way into its own place SPREOWNM of those (another one may come)
+                       SPREHEARD = 1500, SPREHEARDDIST = 192, SPREDWELLM = 600, SPRESWITCHM = 800, SPREGLANCEM = 0.7f, SPREOWNM = 0.8f;
     // out of a fight a player does not walk from waypoint to waypoint: he heads for the furthest point of his way he can
     // walk to straight (corners cut, on flat enough ground), and keeps the keys he holds a little while rather than switching
     // them at each bend
@@ -193,8 +250,9 @@
     struct aistyle
     {
         aiinfo *owner;
-        int life, formgame, respawnlife;
+        int life, formgame, respawnlife, formstart, respawnat, lookfrom;
         float formacc, formreact, formspeed;
+        bool formtired;
         // aim
         int aimcn, aimlife, phase, ncorr, onset, fireat, readyat, lastshot, lastupdate, lastinsight, gend, reprise;
         float gy0, gp0, gdy, gdp, gdur, gt, wait, oy, op, spread, clic;
@@ -202,8 +260,7 @@
         int histn, histhead, histt[SHIST];
         float histy[SHIST], histp[SHIST];
         // decisions
-        int holduntil, holdcool, seenmillis, linedur;
-        float seenpos[3], seenvel[3];
+        int holduntil, holdcool, linedur; // (the line where a lost enemy went out of view: aiperceived, one for each enemy)
         bool holdseen, wassee;
         int watchcn, watchuntil, watchnext, watchdone;
         float watchat[3];
@@ -249,15 +306,21 @@
         // shot, whether it goes to an enemy), until when the hand settles after it, and the direction its view rests on
         // while it searches or checks the spawn points (set again once it moved away from where it chose it)
         int seenlast, regain, settleuntil;
+        int aimpart; // the part of him it aims at (-1 the middle of his body)
         float gamp;
         bool gflick, gtarget, gshot, regainpending;
         float restyaw, restpitch, restfrom[3];
+        float hvy, hvp;     // the speed of its hand (deg/s)
+        int shotsoon;       // when its shot was last near (0: not now)
+        bool shotmove;      // and whether it moves for that shot
 
         void reset(aiinfo *ai)
         {
             owner = ai;
             life = formgame = respawnlife = -1;
+            formstart = respawnat = lookfrom = 0;
             formacc = formreact = formspeed = 0;
+            formtired = false;
             aimcn = aimlife = -1;
             phase = ncorr = onset = fireat = readyat = lastshot = lastupdate = lastinsight = gend = reprise = 0;
             gy0 = gp0 = gdy = gdp = gdur = gt = wait = oy = op = 0;
@@ -265,9 +328,7 @@
             spread = 1;
             flick = false;
             histn = histhead = 0;
-            holduntil = holdcool = seenmillis = linedur = 0;
-            seenpos[0] = seenpos[1] = seenpos[2] = 0;
-            seenvel[0] = seenvel[1] = seenvel[2] = 0;
+            holduntil = holdcool = linedur = 0;
             holdseen = wassee = false;
             watchcn = -1;
             watchuntil = watchnext = watchdone = 0;
@@ -299,11 +360,15 @@
         void resetaim()
         {
             seenlast = regain = settleuntil = 0;
+            aimpart = -1;
             gamp = 0;
             gflick = true;
             gtarget = gshot = regainpending = false;
             restyaw = restpitch = 0;
             restfrom[0] = restfrom[1] = restfrom[2] = 0;
+            hvy = hvp = 0;
+            shotsoon = 0;
+            shotmove = false;
         }
 
         void resetpreaim()
@@ -378,7 +443,9 @@
                 s.formacc = clamp(rndgauss(), -2.0f, 2.0f);
                 s.formreact = clamp(rndgauss(), -2.0f, 2.0f);
                 s.formspeed = clamp(rndgauss(), -2.0f, 2.0f);
+                s.formtired = !multiplayer(false) && rnd(100) < botstyletired;
             }
+            s.formstart = lastmillis;
         }
         if(s.life != d->lifesequence)
         { // a new life: aim, holds, moves and spawn checks start again; the killer is remembered
@@ -403,23 +470,52 @@
             s.keeplost = 0;
             // a new life: it finds its bearings first (no gesture, no shot); its killer is remembered meanwhile
             s.orientuntil = lastmillis + int(clamp(lognormal(SORIENT, SORIENTSD), 150.0f, 600.0f)*styleslow(d));
+            s.respawnat = lastmillis;
+            s.lookfrom = lastmillis + int(clamp(lognormal(SRESPLOOK, SRESPLOOKSD), 0.0f, 400.0f));
             s.killerpending = s.killercn >= 0;
         }
         return s;
     }
 
     // level and form: errors grow and gestures slow down under level 100, and both vary from game to game
-    static float styleerr(fpsent *d, aistyle &s) { return (1 + SLEVELERR*(100 - stylelevel(d))/50.0f)*expf(SFORMACC*s.formacc); }
+    // its warm-up: 1 at the start of its game, 0 after SWARMMS ms
+    static float stylewarm(aistyle &s) { return botstylewarmup && s.formstart && !multiplayer(false) ? clamp(1 - (lastmillis - s.formstart)/SWARMMS, 0.0f, 1.0f) : 0.0f; }
+    static float styleerr(fpsent *d, aistyle &s) { return (1 + SLEVELERR*(100 - stylelevel(d))/50.0f)*expf(SFORMACC*s.formacc + (s.formtired ? STIREDACC : 0) + SWARMACC*stylewarm(s)); }
     static float stylespeed(fpsent *d, aistyle &s) { return (1 + 0.3f*(100 - stylelevel(d))/50.0f)*expf(-SFORMSPEED*s.formspeed); }
     static float styleslow(fpsent *d) { return 1 + 0.5f*(100 - stylelevel(d))/50.0f; }
+
+    // the median of its reflex (when it was already looking there for him): botreflex at level 100 (the reference player's),
+    // slower under 100 as its hand is (styleslow), whatever skill the bot was added with: the full reaction below drops that
+    // skill too
+    // (plus SREFLEXPLUS ms: measured in the reference player's duels, the first shot at someone appearing in the middle of
+    // the screen comes 324 ms after he appears in median)
+    static const float SREFLEXPLUS = 35;
+    static float stylereflex(fpsent *d) { return (botreflex + SREFLEXPLUS)*styleslow(d); }
 
     static float stylereactshift(fpsent *d) // ms added to the median reaction of human perception
     {
         aistyle *s = style(d);
-        float form = s && s->owner == d->ai ? s->formreact : 0;
+        bool own = s && s->owner == d->ai;
+        float form = own ? s->formreact : 0, tired = own && s->formtired ? STIREDREACT : 0;
         // a single enemy alive (a duel): expected, noticed sooner (measured: 240 ms in duels against 305 in team games)
         float duel = aliveenemies(d) == 1 ? -SREACTDUEL : 0;
-        return SREACTFORM*form + SREACTLEVEL*(100 - stylelevel(d)) - (100 - clamp(d->skill, 1, 100))*2.2f + duel;
+        return SREACTFORM*form + SREACTLEVEL*(100 - stylelevel(d)) - (100 - clamp(d->skill, 1, 100))*2.2f + duel + tired;
+    }
+
+    // very tired, a sighting out of the centre of the screen is now and then noticed later (ms added to its reaction)
+    static int styletiredlate(fpsent *d, float ecc)
+    {
+        aistyle *s = style(d);
+        return s && s->owner == d->ai && s->formtired && ecc > PANTICIP && rndscale(1) < STIREDOFFP ? int(STIREDOFFMS) : 0;
+    }
+
+    static float stylereactscale(fpsent *d) // the median reaction of human perception is scaled by that
+    {
+        aistyle *s = style(d);
+        if(!s || s->owner != d->ai) return 1;
+        float k = 1 + SWARMREACT*stylewarm(*s);
+        if(s->life == d->lifesequence && s->respawnat && lastmillis - s->respawnat < SRESPMS) k *= SRESPREACT;
+        return k;
     }
 
     static float lognormal(float median, float sd) { return median*expf(sd*rndgauss()); }
@@ -484,7 +580,7 @@
     }
 
     // where each player went during the last second (every SPATHSTEP ms): how predictable a target is
-    struct stylepath { int life, n, head, t[SPATH]; float x[SPATH], y[SPATH]; };
+    struct stylepath { int life, n, head, t[SPATH]; float x[SPATH], y[SPATH], z[SPATH]; };
     static stylepath stylepaths[MAXCLIENTS+MAXBOTS];
     static int stylepathmillis = -1;
 
@@ -504,9 +600,41 @@
             }
             if(e->state != CS_ALIVE) continue;
             h.head = (h.head + 1)%SPATH;
-            h.t[h.head] = lastmillis; h.x[h.head] = e->o.x; h.y[h.head] = e->o.y;
+            h.t[h.head] = lastmillis; h.x[h.head] = e->o.x; h.y[h.head] = e->o.y; h.z[h.head] = e->o.z;
             if(h.n < SPATH) h.n++;
         }
+    }
+
+    // where e was at time t, from his way (false when it does not go back that far)
+    static bool stylepathat(const stylepath &h, float t, vec &o)
+    {
+        int k = h.head;
+        for(int i = 1; i < h.n; i++)
+        {
+            int j = (k + SPATH - 1)%SPATH;
+            if(h.t[j] <= t)
+            {
+                float f = h.t[k] > h.t[j] ? clamp((t - h.t[j])/float(h.t[k] - h.t[j]), 0.0f, 1.0f) : 1.0f;
+                o = vec(h.x[j] + (h.x[k] - h.x[j])*f, h.y[j] + (h.y[k] - h.y[j])*f, h.z[j] + (h.z[k] - h.z[j])*f);
+                return true;
+            }
+            k = j;
+        }
+        return false;
+    }
+
+    // where its eyes put e now, as a shift from his real place: his place SSEELAG ms ago, carried on at the speed he had then
+    static vec styleseenshift(fpsent *d, fpsent *e)
+    {
+        if(!e || e->clientnum < 0 || e->clientnum >= MAXCLIENTS+MAXBOTS) return vec(0, 0, 0);
+        const stylepath &h = stylepaths[e->clientnum];
+        if(h.n < 3 || h.life != e->lifesequence + 1) return vec(0, 0, 0);
+        float lag = SSEELAG*styleslow(d);
+        vec a, b;
+        if(!stylepathat(h, lastmillis - lag, a) || !stylepathat(h, lastmillis - lag - SSEEVEL, b)) return vec(0, 0, 0);
+        vec v = vec(a).sub(b).mul(1000.0f/SSEEVEL);
+        if(v.magnitude() > 400) return vec(0, 0, 0); // a teleport or a respawn on the way: no speed from it
+        return v.mul(lag/1000.0f).add(a).sub(e->o);
     }
 
     // how hard e is to hit for d, from his last second of movement (as measured on the reference player's demos:
@@ -554,7 +682,7 @@
     {
         s.oy = SOFF*rndgauss();
         s.op = SOFF*SOFFV*rndgauss();
-        s.flick = flickok && rndscale(1) < SFLICK;
+        s.flick = flickok && rndscale(1) < SFLICK + (s.formtired ? STIREDFLICK : 0);
         s.clic = lognormal(SCLIC, SCLICSD);
     }
 
@@ -590,16 +718,22 @@
     static void stylemove(fpsent *d, aistyle &s, float ty, float tp, float half, bool target, int dt)
     {
         float lagy, lagp, vy, vp, nowy, nowp, nvy, nvp;
-        stylepast(s, int(SLAG*styleslow(d)), d->yaw, lagy, lagp, vy, vp);
+        stylepast(s, target ? 0 : int(SLAG*styleslow(d)), d->yaw, lagy, lagp, vy, vp); // a target in sight: what its eyes see
         stylepast(s, 0, d->yaw, nowy, nowp, nvy, nvp);
         float err = styleerr(d, s), offy = target ? s.oy*s.spread*err*half : 0, offp = target ? s.op*s.spread*err*half : 0;
+        if(!target && SREPLAN > 0 && (s.phase == STYLE_WAIT || s.phase == STYLE_TRACK))
+        {
+            float ey = stylewrap(ty - d->yaw), ep = tp - d->pitch;
+            if(ey*ey + ep*ep > SREPLAN*SREPLAN) { s.phase = STYLE_NONE; s.ncorr = 0; }
+        }
         if(s.phase == STYLE_NONE) styleplan(d, s, ty, tp, nvy, nvp, target ? half : 0);
         if(s.phase == STYLE_GESTURE)
         {
             s.gt += dt;
-            float f = styleprofile(s.gt/s.gdur);
+            float f = styleprofile(s.gt/s.gdur), py = d->yaw, pp = d->pitch;
             d->yaw = s.gy0 + s.gdy*f;
             d->pitch = s.gp0 + s.gdp*f;
+            if(dt > 0) { s.hvy = stylewrap(d->yaw - py)*1000.0f/dt; s.hvp = (d->pitch - pp)*1000.0f/dt; }
             if(s.gt >= s.gdur)
             {
                 s.ncorr++;
@@ -614,9 +748,28 @@
         {
             float follow = s.phase == STYLE_TRACK ? 1.0f : 0.5f, k = 1 - powf(1 - STRACK, dt/5.0f),
                   shake = target ? SJITTER*0.05f*sqrtf(dt/5.0f)*err : 0.0f; // the hand trembles when aiming at someone
-            float ahead = SPRED*SLAG*styleslow(d)/1000.0f;
-            d->yaw += follow*vy*dt/1000.0f + k*stylewrap(lagy + vy*ahead + offy - d->yaw) + shake*rndgauss();
-            d->pitch += follow*vp*dt/1000.0f + k*(lagp + vp*ahead + offp - d->pitch) + shake*rndgauss();
+            float ahead = target ? 0.0f : SPRED*SLAG*styleslow(d)/1000.0f;
+            float sy = follow*vy*dt/1000.0f + k*stylewrap(lagy + vy*ahead + offy - d->yaw), sp = follow*vp*dt/1000.0f + k*(lagp + vp*ahead + offp - d->pitch);
+            if(dt > 0)
+            { // the hand's speed changes no faster than a hand does
+                float wy = sy*1000.0f/dt, wp = sp*1000.0f/dt, ay = wy - s.hvy, ap = wp - s.hvp, a = sqrtf(ay*ay + ap*ap),
+                      ey = stylewrap(lagy + offy - d->yaw), ep = lagp + offp - d->pitch,
+                      lim = (SHANDACC0 + SHANDACCK*sqrtf(ey*ey + ep*ep))*dt/1000.0f;
+                if(a > lim)
+                {
+                    s.hvy += ay*lim/a; s.hvp += ap*lim/a;
+                    sy = s.hvy*dt/1000.0f; sp = s.hvp*dt/1000.0f;
+                }
+                else { s.hvy = wy; s.hvp = wp; }
+                float v = sqrtf(s.hvy*s.hvy + s.hvp*s.hvp);
+                if(!target && SDRIFT > 0 && v > SDRIFT)
+                { // nobody in sight: a slow drift to a point close by
+                    s.hvy *= SDRIFT/v; s.hvp *= SDRIFT/v;
+                    sy = s.hvy*dt/1000.0f; sp = s.hvp*dt/1000.0f;
+                }
+            }
+            d->yaw += sy + shake*rndgauss();
+            d->pitch += sp + shake*rndgauss();
             if(s.phase == STYLE_WAIT && (s.wait -= dt) <= 0)
             {
                 float ey = stylewrap(ty + offy - d->yaw), ep = tp + offp - d->pitch;
@@ -638,17 +791,28 @@
         while(d->yaw >= 360.0f) d->yaw -= 360.0f;
     }
 
+    // just respawned, its bearings not found yet: it looks along its way (no gesture towards an enemy, no shot)
+    static void styleorient(fpsent *d, aistyle &s, int dt)
+    {
+        float ty = d->ai->targyaw, tp = clamp(d->ai->targpitch, SCALMLO, SCALMHI);
+        if(s.aimcn != -4) { s.aimcn = -4; s.phase = STYLE_NONE; s.histn = 0; }
+        stylehistory(s, ty, tp);
+        stylemove(d, s, ty, tp, 0, false, dt);
+    }
+
     static void styledose(fpsent *d, int except, float amount) // other events take attention from the others
     {
         aiperception *s = perception(d);
         if(s) loopv(s->seen) if(s->seen[i].cn != except && s->seen[i].aware) s->seen[i].dose -= amount;
     }
 
-    // something new about this enemy (kind 0 seen, 1 heard, 2 hit by him): full attention on him, a little less on
-    // the others ("a fixed dose that goes down with the number of events", in the reference player's words)
+    // something new about this enemy (kind 0 seen, 1 heard, 2 hit by him): full attention on him (a sound only brings
+    // it back to SHEARDDOSE: what it only hears does not bring him back to mind as a sight does), a little less on the
+    // others ("a fixed dose that goes down with the number of events", in the reference player's words)
+    static const float SHEARDDOSE = 0.5f;
     static void styleevent(fpsent *d, aiperceived &p, int kind)
     {
-        p.dose = 1;
+        p.dose = kind == 1 ? max(p.dose, SHEARDDOSE) : 1.0f;
         p.dosemillis = lastmillis;
         styledose(d, p.cn, kind == 1 ? 0.05f : 0.15f);
     }
@@ -687,7 +851,7 @@
             float mx = feet.x - s.escpos[0], my = feet.y - s.escpos[1];
             if(mx*mx + my*my < 4*4) return false;
         }
-        if((p.curexit < 0 && p.numexits <= 0 && lastmillis - s.seenmillis >= 1000) || lastmillis < s.holdcool || guess.squaredist(dp) > 700*700 || !clearview(dp, guess)) return false;
+        if((p.curexit < 0 && p.numexits <= 0 && lastmillis - p.linemillis >= 1000) || lastmillis < s.holdcool || guess.squaredist(dp) > 700*700 || !clearview(dp, guess)) return false;
         if(rnd(100) < 60)
         {
             s.holdseen = rnd(2) != 0;
@@ -741,6 +905,8 @@
             }
             float lost = lastmillis - p.knownmillis,
                   own = lost < SEXITOWNAFTER ? 0.0f : clamp(SEXITOWN + (lost - SEXITOWNAFTER)/3000.0f*(SEXITOWNMAX - SEXITOWN), SEXITOWN, SEXITOWNMAX);
+            // several enemies alive: its attention is shared, soon most looks go to the ways into its own place (stylepreaim)
+            if(aliveenemies(d) > 1) own = lost < SPRESWITCHM ? 0.0f : SPREOWNM*SPREGLANCEM;
             if(s.nplaceexits > 0 && rndscale(1) < own)
             { // a way into its own place: the one it has not looked at for the longest time, now and then another one
                 int k = 0;
@@ -865,6 +1031,13 @@
         return s.prenum > 0;
     }
 
+    // heard well away from where it lost him from sight, a good while after (he went elsewhere: that line no longer holds)
+    static bool styleheardaway(aiperceived &p, const vec &dp)
+    {
+        return p.knownsrc == AI_P_HEARD && p.knownmillis - p.linemillis >= SPREHEARD &&
+               p.knownpos.dist(p.linepos) > max(float(SPREHEARDDIST), 0.4f*p.knownpos.dist(dp));
+    }
+
     // what it watches for a lost enemy: his line (where he went out, a little ahead along his way, then the spot itself),
     // the view resting on it; now and then, once he has been gone SPRESWITCH ms, a short glance at his nearest way out or a
     // way into its own place, then back to his line (prepick: 0 his line, 1 a way out, 4 a way into its place); false: no
@@ -872,10 +1045,14 @@
     static bool stylepreaim(fpsent *d, aistyle &s, aiperceived &p, const vec &dp, fpsent *e, vec &at)
     {
         // where from: where it lost him from sight (a sound heard since does not move that: it only tells roughly where he is,
-        // often tens of units off); when it has not seen him in this life, where it knows him to be (a sound, its killer)
-        bool seen = s.seenmillis && s.aimcn == e->clientnum && s.aimlife == e->lifesequence;
-        vec base = seen ? vec(s.seenpos[0], s.seenpos[1], s.seenpos[2]) : p.knownpos;
-        int lost = lastmillis - (seen ? s.seenmillis : p.knownmillis);
+        // often tens of units off; unless it heard him well away from there a good while later, in a duel too);
+        // when it has not seen him in this life, where it knows him to be (a sound, its killer)
+        bool multi = aliveenemies(d) > 1, seen = p.linemillis && !styleheardaway(p, dp);
+        // only heard: not that spot behind a wall or under the floor, but where he can come into its view from there, his ways
+        // out one after the other (styleexitsweep, from human perception's guess)
+        if(!seen && p.knownsrc == AI_P_HEARD) { s.prepick = -1; return false; }
+        vec base = seen ? p.linepos : p.knownpos;
+        int lost = lastmillis - (seen ? p.linemillis : p.knownmillis);
         // where its killer was (just respawned): that spot itself first, as before (he is often still there)
         if(!seen && lost < SPREKNOWN && p.knownsrc == AI_P_HIT) { s.prepick = -1; return false; }
         int stamp = e->clientnum*16 + (e->lifesequence&15) + 1;
@@ -892,16 +1069,18 @@
         if(seen && lost < SPREPV)
         { // his line, carried on along his way (300 ms of his speed at most)
             float lead = min(lost, int(SLINELEAD))/1000.0f;
-            line.add(vec(s.seenvel[0], s.seenvel[1], 0).mul(lead));
+            line.add(vec(p.linevel.x, p.linevel.y, 0).mul(lead));
         }
         if(lastmillis >= s.preuntil || s.prepick < 0)
-        { // the next look: his line, or now and then (he has been gone a while) a glance elsewhere
+        { // the next look: his line, or now and then (he has been gone a while) a glance elsewhere; with several enemies
+          // alive its attention is shared: his line for shorter, and soon most looks at the ways into its own place
             s.prepick = 0;
-            s.preuntil = lastmillis + int(clamp(lognormal(SPREDWELL, SPREDWELLSD), 500.0f, 4000.0f));
-            if(lost >= SPRESWITCH && rndscale(1) < SPREGLANCE)
+            s.preuntil = lastmillis + int(multi ? clamp(lognormal(SPREDWELLM, SPREDWELLSD), 300.0f, 2000.0f) : clamp(lognormal(SPREDWELL, SPREDWELLSD), 500.0f, 4000.0f));
+            float glance = multi ? SPREGLANCEM : SPREGLANCE + (SPREGLANCEMAX - SPREGLANCE)*clamp((lost - SPRESWITCH)/SPREGLANCERISE, 0.0f, 1.0f);
+            if(lost >= (multi ? SPRESWITCHM : SPRESWITCH) && rndscale(1) < glance)
             {
                 s.preuntil = lastmillis + int(clamp(lognormal(SPREGLANCEMS, 0.4f), 250.0f, 1500.0f));
-                if(rnd(2))
+                if(multi ? rndscale(1) < SPREOWNM : rnd(2) != 0)
                 { // a way into its own place: the one it has not looked at for the longest time
                     float gx = dp.x - s.placeexitsfrom[0], gy = dp.y - s.placeexitsfrom[1];
                     if(!s.placeexitsat || lastmillis - s.placeexitsat > 2000 || gx*gx + gy*gy > 96*96) styleplaceexits(d, s, dp);
@@ -939,6 +1118,8 @@
         vec ahead = vec(dir).mul(24).add(feet).add(vec(0, 0, 4));
         float drop = raycube(ahead, vec(0, 0, -1), 64);
         if(drop > 22) return false;
+        if(navbotontrigger(vec(ahead.x, ahead.y, feet.z)) || navbotontrigger(vec(dir).mul(12).add(feet))) return false; // on the walk grid: a jump pad or a teleporter that way
+        if(navbotready()) for(int k = 8; k < 24; k += 8) { vec mid = vec(dir).mul(k).add(feet).add(vec(0, 0, 4)); if(raycube(mid, vec(0, 0, -1), 64) > 22) return false; } // on the walk grid: no narrow void on the way either (a step across a pit from a ledge it jumped to)
         int mat = lookupmaterial(vec(ahead.x, ahead.y, ahead.z - drop + 1));
         return !isdeadly(mat&MATF_VOLUME) && !(mat&MAT_DEATH);
     }
@@ -964,6 +1145,7 @@
             float drop = raycube(ahead, vec(0, 0, -1), 512);
             int mat = lookupmaterial(vec(ahead.x, ahead.y, ahead.z - drop + 1));
             if(isdeadly(mat&MATF_VOLUME) || mat&MAT_DEATH) continue;
+            if(navbotontrigger(vec(ahead.x, ahead.y, feet.z))) continue; // on the walk grid: not onto a jump pad or a teleporter
             bestlen = len;
             best = k;
         }
@@ -1054,6 +1236,22 @@
         if(s.reloadplan > lastmillis - 50) plan = s.reloadplan;
         if(s.threatat && s.threatplan > lastmillis - 50 && (!plan || s.threatplan < plan)) plan = s.threatplan;
         return plan;
+    }
+
+    // its shot is near: once for each approach, whether it moves for it (SSHOTMOVE)
+    static void stylesoon(fpsent *d, aistyle &s)
+    {
+        if(SSHOTMOVE <= 0) return;
+        if(!s.shotsoon || lastmillis - s.shotsoon > 100) s.shotmove = rndscale(1) < SSHOTMOVE;
+        s.shotsoon = lastmillis;
+    }
+
+    // a still Tiny Apa does not stand still for its shot: from when its shot is near until SSHOTAFTER ms after it
+    AI_HUMAN bool styleshotmove(fpsent *d)
+    {
+        aistyle *s = style(d);
+        if(!s || s->owner != d->ai || s->life != d->lifesequence || !s->shotmove) return false;
+        return (s->shotsoon && lastmillis - s->shotsoon <= 50) || (s->lastshot && lastmillis - s->lastshot < SSHOTAFTER);
     }
 
     // a style bot with nothing to do: a defender at its spot, or a bot holding a place while it searches; it moves
@@ -1160,7 +1358,8 @@
             }
             return;
         }
-        if(!iswaypoint(s.walkto) && d->ai->dontmove && d->ai->route.empty() && lastmillis >= s.holduntil &&
+        if(navbotready()) s.walkto = -1; // on the walk grid (Nav-2) the grid takes it off a spot the waypoints do not reach
+        else if(!iswaypoint(s.walkto) && d->ai->dontmove && d->ai->route.empty() && lastmillis >= s.holduntil &&
            (!iswaypoint(d->lastnode) || !waypoints[d->lastnode].haslinks()))
         { // off the waypoint graph wherever it is (whatever the base game tried): the nearest waypoint that leads somewhere
             s.nwalktried = 0;
@@ -1274,6 +1473,8 @@
         }
         else if(!(styleidle(d, b) || s.srmode == STYLE_SR_HOLD)) { s.mvmode = STYLE_MV_NONE; return; }
         bool guard = s.mvmode == STYLE_MV_GUARD;
+        bool shotmove = !guard && styleshotmove(d);
+        if(shotmove && lastmillis < s.holduntil) { s.holduntil = lastmillis; d->ai->dontmove = false; } // its shot is near: no line held still
         if(d->ai->dontmove && lastmillis < s.holduntil)
         { // a line held still on purpose (bounded); a step aside comes right after
             s.stepmove = s.stepstrafe = 0;
@@ -1291,14 +1492,16 @@
             turn = newleg = true;
             s.reloadplan = s.threatplan = 0;
         }
+        else if(s.steppause && shotmove) { turn = newleg = true; s.stopforshot = 0; } // standing still as its shot is near: a step aside
         else if(lastmillis >= s.dodgenext) { turn = true; newleg = s.steppause != 0; }
         else if(lastmillis < s.stepat || lastmillis - s.stepat >= 40) turn = !s.steppause; // 25 times a second: is the way still open?
         if(turn)
         {
             s.stepat = lastmillis;
             if(!s.steppause && !newleg && lastmillis >= s.dodgenext)
-            { // the end of a step: a pause, or the next step at once
-                if(!guard && s.stopforshot && s.reloadplan > lastmillis + 150 && s.reloadplan < lastmillis + SSTOPMAX)
+            { // the end of a step: a pause, or the next step at once (never a pause as its shot is near)
+                if(shotmove) newleg = true;
+                else if(!guard && s.stopforshot && s.reloadplan > lastmillis + 150 && s.reloadplan < lastmillis + SSTOPMAX)
                 { // he just shot: it stops to make its own shot sure, and steps aside just before he can shoot again
                     s.stopforshot = 0;
                     s.steppause = 1;
@@ -1511,10 +1714,14 @@
         aistyle &s = claimstyle(d);
         int dt = s.lastupdate ? clamp(lastmillis - s.lastupdate, 0, 100) : 0;
         s.lastupdate = lastmillis;
+        // its view comes back from elsewhere (a search, the spawn points, its way): a lost enemy's line starts again, as it
+        // always did; from another enemy it is kept (one line for each enemy)
+        if(s.aimcn < 0) p.linemillis = 0;
         if(lastmillis < s.orientuntil)
-        { // just respawned: it finds its bearings, its view does not move yet and it does not shoot
+        { // just respawned: it finds its bearings, it does not aim at him nor shoot yet; its view already moves
             if(insight) d->ai->enemyseen = lastmillis;
             s.fireat = 0;
+            if(lastmillis >= s.lookfrom) styleorient(d, s, dt);
             return insight ? 2 : 1;
         }
         if(!insight) stylesmooth(d, s, dp);
@@ -1564,23 +1771,23 @@
                 s.linedur = int(clamp(lognormal(SLINEMS, SLINESD), 1000.0f, 4000.0f)); // how long it will keep his line once he is gone
                 s.keeplost = !m_teammode && aliveenemies(d) == 1 ? int(clamp(lognormal(SKEEPDUEL, 0.5f), 1500.0f, 8000.0f)) : int(SKEEPLOST); // and its place
             }
-            s.seenmillis = lastmillis;
-            s.seenpos[0] = e->o.x; s.seenpos[1] = e->o.y; s.seenpos[2] = e->o.z;
+            p.linemillis = lastmillis;
+            p.linepos = e->o;
             vec v = vec(e->vel).add(e->falling);
             v.z = 0;
             if(v.magnitude() > 200) v.mul(200/v.magnitude());
-            s.seenvel[0] = v.x; s.seenvel[1] = v.y; s.seenvel[2] = 0;
+            p.linevel = v;
         }
         s.wassee = see;
-        int lost = lastmillis - s.seenmillis;
+        int lost = lastmillis - p.linemillis;
         // just lost (or seen again but not noticed yet): the line where he went out; then his nearest way out, then the way
         // he would take towards the bot (stylepreaim); without any known way, as before (his guessed ways out, the ways
         // into its own place)
-        bool seenline = !see && s.seenmillis && s.aimcn == e->clientnum && s.aimlife == e->lifesequence && (lost < SPRELINE || insight);
+        bool seenline = !see && p.linemillis && (lost < SPRELINE || insight);
         float lead = min(lost, int(SLINELEAD))/1000.0f;
         vec line;
         bool pre = false;
-        if(seenline) line = vec(s.seenpos[0] + s.seenvel[0]*lead, s.seenpos[1] + s.seenvel[1]*lead, s.seenpos[2]);
+        if(seenline) line = vec(p.linevel).mul(lead).add(p.linepos);
         else if(!insight && stylepreaim(d, s, p, dp, e, line)) pre = true;
         else line = !insight && p.numexits > 0 && lastmillis - p.knownmillis >= PNEARMS ? styleexitsweep(d, s, p, dp, e) :
                     (!insight && p.numexits <= 0 && lastmillis - p.knownmillis >= SEXITOWNAFTER ? styleownways(d, s, p, dp, guess) : guess);
@@ -1594,9 +1801,9 @@
             if(m_teammode || lastmillis >= s.coveruntil || (s.coverseen && lastmillis - s.coverseen > 300) || lastmillis - d->lastpain < 300) s.covermode = 0;
             else if(!insight)
             {
-                if(s.seenmillis > s.coverstart && s.aimcn == e->clientnum && s.aimlife == e->lifesequence)
+                if(p.linemillis > s.coverstart)
                 { // seen over its cover during this hold: the next jumps look where it last saw him (as the player does)
-                    s.coverlook[0] = s.seenpos[0]; s.coverlook[1] = s.seenpos[1]; s.coverlook[2] = s.seenpos[2];
+                    s.coverlook[0] = p.linepos.x; s.coverlook[1] = p.linepos.y; s.coverlook[2] = p.linepos.z;
                 }
                 line = vec(s.coverlook[0], s.coverlook[1], s.coverlook[2]);
             }
@@ -1604,13 +1811,13 @@
         else if(!m_teammode && pre && !insight && !quick && lastmillis >= s.covercheck && d->gunselect != GUN_FIST)
         {
             s.covercheck = lastmillis + 800 + rnd(400);
-            vec last(s.seenpos[0], s.seenpos[1], s.seenpos[2]), look = line;
+            vec last = p.linepos, look = line;
             float dd = line.dist(dp);
             bool found = false;
             if(rndscale(1) < SCOVERP)
             { // the line it watches, else where it lost him
                 if(dd > 96 && dd < 450 && stylecoverfind(d, s, line)) found = true;
-                else if(s.seenmillis && s.aimcn == e->clientnum && s.aimlife == e->lifesequence && last.dist(dp) > 96 && last.dist(dp) < 450 && stylecoverfind(d, s, last)) { found = true; look = last; }
+                else if(p.linemillis && last.dist(dp) > 96 && last.dist(dp) < 450 && stylecoverfind(d, s, last)) { found = true; look = last; }
             }
             if(found)
             {
@@ -1621,12 +1828,26 @@
                 s.coverseen = 0;
             }
         }
-        vec ep = see ? styleaimpoint(d, e) : guessaimpos(d, e, line);
+        // what it aims at: the middle of his body, or the part of him it sees when that middle is hidden (aihuman.h seenpart);
+        // vsize: how big that is (u), for the spread of its aim
+        float vsize = e->radius;
+        vec ep;
+        int part = -1;
+        if(!see) ep = guessaimpos(d, e, line);
+        else if(!seenpart(d, e, p, ep, vsize, part)) ep = styleaimpoint(d, e);
+        if(see) ep.add(styleseenshift(d, e)); // where its eyes put him now
+        if(see && part != s.aimpart)
+        { // it now aims at another part of him: no speed from that jump of the aimed point
+            s.aimpart = part;
+            s.histn = 0;
+        }
         float ty, tp, dist = dp.dist(ep);
         getyawpitch(dp, ep, ty, tp);
         if(!see)
         { // its view rests on the line it watches while it steps about (no drift with each step): set again when that line
           // moves away by more than SRESTDEG degrees or the bot moved SLOOKMOVED u (a guessed way out: SPREREST, SPREMOVED)
+            guesspitch(d, dp, ep, tp); // not at the floor or the ceiling towards a place it does not see
+            tp = clamp(tp, SCALMLO, SCALMHI); // nor further down or up than a player looks with nobody in sight
             float ry = stylewrap(ty - s.restyaw), rp = tp - s.restpitch, fx = dp.x - s.restfrom[0], fy = dp.y - s.restfrom[1],
                   rest = pre ? SPREREST : SRESTDEG, moved = pre ? SPREMOVED : SLOOKMOVED;
             if(ry*ry + rp*rp > rest*rest || fx*fx + fy*fy > moved*moved)
@@ -1638,7 +1859,6 @@
         }
         if(s.aimcn != e->clientnum || s.aimlife != e->lifesequence || (see && lastmillis - s.lastinsight > PGAPMS))
         { // a new target, or the same one seen again: a new gesture
-            if(s.aimcn != e->clientnum || s.aimlife != e->lifesequence) s.seenmillis = 0;
             s.aimcn = e->clientnum;
             s.aimlife = e->lifesequence;
             s.phase = STYLE_NONE;
@@ -1655,7 +1875,9 @@
             s.spread = styleunpred(d, e); // how hard he is to hit right now
         }
         stylehistory(s, ty, tp);
-        float half = see ? atan2f(e->radius, max(dist, 1.0f))/RAD : 0;
+        // half: the half width of what it aims at (the spread of its aim); its shot leaves within a tolerance of his whole
+        // body's half width (whole), around that point: a player shoots at the part he sees as soon as he is on him
+        float half = see ? atan2f(vsize, max(dist, 1.0f))/RAD : 0, whole = see ? atan2f(e->radius, max(dist, 1.0f))/RAD : 0;
         bool hold = !insight && !quick && !s.covermode && stylehold(d, s, p, dp, line);
         if(!see && s.phase == STYLE_TRACK)
         { // following a guess: a new gesture when the guess moves away
@@ -1680,24 +1902,30 @@
         }
         if(s.fireat)
         {
+            stylesoon(d, s);
             if(lastmillis < s.fireat) return 2;
             s.fireat = 0;
             if(!burst) stylenewaim(s, !automatic);
             s.lastshot = s.readyat = lastmillis;
-            s.reprise = automatic ? 0 : max(1, int(lognormal(SREPRISE, SREPRISESD)*styleslow(d)));
+            s.reprise = automatic ? 0 : max(1, int(lognormal(SREPRISE, SREPRISESD)*styleslow(d)*(s.formtired ? STIREDREPRISE : 1)));
             d->attacking = true;
             d->ai->lastaction = lastmillis;
             styledose(d, e->clientnum, 0.02f);
             return 3;
         }
-        // not before its eyes are on him again, nor in the middle of a big flick that is not to end in a shot, nor before
-        // the hand has settled after it
-        if(!see || lastmillis - s.onset < SMINSHOT*styleslow(d) || lastmillis < s.settleuntil || (s.phase == STYLE_GESTURE && !s.gflick)) return 2;
-        float ey = stylewrap(ty - d->yaw), ez = tp - d->pitch,
-              off = sqrtf(ey*ey + ez*ez)/max(half, 0.05f), // how far the crosshair is from the middle of the target
+        // at the top of a jump over its cover (the strong position) it takes its chance as the reference player does there:
+        // their shots leave at the top and on the way down, during the gesture, as soon as the crosshair is on him (a shot on
+        // the move, with the tolerance of their flick shots)
+        bool jumpshot = s.covermode == 2 && d->physstate == PHYS_FALL;
+        // not before its eyes are on him again, nor (out of such a jump) in the middle of a big flick that is not to end in
+        // a shot, nor before the hand has settled after it
+        if(!see || lastmillis - s.onset < SMINSHOT*styleslow(d) || (!jumpshot && (lastmillis < s.settleuntil || (s.phase == STYLE_GESTURE && !s.gflick)))) return 2;
+        float aerr = styleerr(d, s), ey = stylewrap(ty + s.oy*s.spread*aerr*half - d->yaw), ez = tp + s.op*s.spread*aerr*half - d->pitch,
+              off = sqrtf(ey*ey + ez*ez)/max(whole, 0.05f), // how far the crosshair is from the point it aims at on the target it sees
               waited = max(0, lastmillis - max(s.readyat, s.onset)),
-              tol = (s.flick ? SFLICKTOL : s.clic)*styleerr(d, s)*s.spread*(1 + waited/SPATIENCE);
+              tol = (s.flick || jumpshot ? SFLICKTOL : s.clic)*styleerr(d, s)*s.spread*(1 + waited/SPATIENCE);
         if(burst) tol = max(tol, 1.5f);
+        if(off < SSOON*tol) stylesoon(d, s);
         if(off < tol)
         {
             s.fireat = lastmillis + (burst ? 0 : max(1, int(lognormal(STRIG, STRIGSD)*styleslow(d))));
@@ -1808,13 +2036,47 @@
         }
     }
 
+    // a place it went to search from: reached, or gone (a waypoint, or a node of the walk grid on a map without waypoints)
+    static bool stylesrdone(fpsent *d, int n)
+    {
+        vec p;
+        if(iswaypoint(n)) p = waypoints[n].o;
+        else if(n >= -1 || !navnodepos(-2 - n, p)) return true;
+        return d->feetpos().squaredist(p) < 48*48;
+    }
+    // a map without waypoints: the same choice among nodes of the walk grid (-2 - node; -1 none)
+    static int stylegridvantage(fpsent *d, aistyle &s, const vec &dp)
+    {
+        if(!navbotready()) return -1;
+        int tag = stylespawntag(d), best = -1, tests = 0;
+        const vector<extentity *> &ents = entities::getents();
+        vec feet = d->feetpos();
+        float bestscore = 0;
+        loopk(24)
+        {
+            int n = navrandomnode(feet, 200, 700);
+            vec o;
+            if(n < 0 || -2 - n == s.srnode || !navnodepos(n, o)) continue;
+            if(tests > 200) break;
+            vec eye = vec(o).add(vec(0, 0, d->eyeheight));
+            int seen = 0;
+            loopv(ents) if(ents[i]->type == PLAYERSTART && ents[i]->attr2 == tag && ents[i]->o.dist(o) > 128 && ents[i]->o.dist(o) < 1200)
+            {
+                tests++;
+                if(clearview(eye, vec(ents[i]->o).add(vec(0, 0, d->eyeheight)))) seen++;
+            }
+            if(1 + seen > bestscore) { bestscore = 1 + seen; best = -2 - n; }
+        }
+        return best;
+    }
+
     // a place with a clear view to go to next: a waypoint 200 to 700 u away from which many spawn points are in sight,
     // not the same as before, a little away from the middle of the map
     static int stylevantage(fpsent *d, aistyle &s, const vec &dp)
     {
         static int cachemap = -1;
         static vec middle(0, 0, 0);
-        if(waypoints.length() <= 1) return -1;
+        if(waypoints.length() <= 1) return stylegridvantage(d, s, dp);
         if(cachemap != maptime)
         {
             cachemap = maptime;
@@ -2028,7 +2290,7 @@
                 if(lastmillis >= s.sruntil)
                 { // on to another place with a clear view
                     int node = stylevantage(d, s, dp);
-                    if(node >= 0 && makeroute(d, b, node))
+                    if(node != -1 && makeroute(d, b, node))
                     {
                         s.srmode = STYLE_SR_MOVE;
                         s.srnode = node;
@@ -2039,7 +2301,7 @@
                     else s.sruntil = lastmillis + 1000;
                 }
             }
-            else if(s.srmode == STYLE_SR_MOVE && (!iswaypoint(s.srnode) || lastmillis >= s.sruntil || d->feetpos().squaredist(waypoints[s.srnode].o) < 48*48))
+            else if(s.srmode == STYLE_SR_MOVE && (stylesrdone(d, s.srnode) || lastmillis >= s.sruntil))
             { // there: it holds that place
                 s.srmode = STYLE_SR_HOLD;
                 s.sruntil = lastmillis + int(clamp(lognormal(SSEARCHHOLD, SSEARCHHOLDSD), 800.0f, 8000.0f));
@@ -2089,7 +2351,7 @@
         aistyle &s = claimstyle(d);
         int dt = s.lastupdate ? clamp(lastmillis - s.lastupdate, 0, 100) : 0;
         s.lastupdate = lastmillis;
-        if(lastmillis < s.orientuntil) return 1; // just respawned: it finds its bearings, its view does not move yet
+        if(lastmillis < s.orientuntil) { if(lastmillis >= s.lookfrom) styleorient(d, s, dt); return 1; } // just respawned: it finds its bearings
         s.covermode = 0; // no enemy in mind: no cover held
         stylesmooth(d, s, dp);
         vec look;
@@ -2172,6 +2434,7 @@
                 if(ey*ey + ez*ez > 20*20) s.phase = STYLE_NONE;
             }
         }
+        tp = clamp(tp, SCALMLO, SCALMHI);
         stylehistory(s, ty, tp);
         stylemove(d, s, ty, tp, 0, false, dt);
         return 1;
@@ -2208,7 +2471,7 @@
     {
         if(!stylebot(d) || !style(d) || d->state != CS_ALIVE) return false;
         aistyle &s = claimstyle(d);
-        if(!iswaypoint(d->lastnode) || !waypoints[d->lastnode].haslinks())
+        if(!navbotready() && (!iswaypoint(d->lastnode) || !waypoints[d->lastnode].haslinks()))
         {
             if(!iswaypoint(s.walkto))
             {
@@ -2223,7 +2486,7 @@
             return true;
         }
         if(m_teammode || d->gunselect == GUN_FIST) return false;
-        d->ai->switchstate(b, AI_S_INTEREST, AI_T_NODE, s.srmode == STYLE_SR_MOVE && iswaypoint(s.srnode) ? s.srnode : d->lastnode);
+        d->ai->switchstate(b, AI_S_INTEREST, AI_T_NODE, s.srmode == STYLE_SR_MOVE && (iswaypoint(s.srnode) || s.srnode < -1) ? s.srnode : d->lastnode);
         return true;
     }
 
@@ -2237,6 +2500,7 @@
         if(m_teammode) return -1;
         if(s.srmode == STYLE_SR_HOLD) { b.idle = 2; return 1; }
         if(s.srmode == STYLE_SR_MOVE && iswaypoint(s.srnode)) return makeroute(d, b, waypoints[s.srnode].o) ? 1 : 0;
+        if(s.srmode == STYLE_SR_MOVE && s.srnode < -1) return makeroute(d, b, s.srnode) ? 1 : 0; // a node of the walk grid (no waypoints)
         return -1;
     }
 

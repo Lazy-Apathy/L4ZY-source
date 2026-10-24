@@ -15,10 +15,19 @@
     // loses an enemy from sight it guesses where he will come back into view from
     // what it saw or heard (never his real position), and forgets him after
     // botmemory seconds, unless he is the only enemy alive. The flag radar tells
-    // where a flag carrier is: where to go, never where to aim. Aim, moves and
-    // goals are unchanged. Online, the same for the bots this game plays. botperception 0
+    // where a flag carrier is: where to go, never where to aim. Moves and goals are
+    // unchanged; the aim is the same, on the part of him it sees when the middle of his body
+    // is hidden. Online, the same for the bots this game plays. botperception 0
     // (the default) runs none of this. botperception 2 adds, on top of it, the aim
     // and a few decisions of a measured reference player (aistyle.h).
+    // With several enemies alive its attention goes to one at a time: the one it sees, else the
+    // one it has in mind, kept until another one is clearly more pressing for a while or shoots
+    // at it (not a switch at each sound); a sound makes it watch where that enemy can come into
+    // its view, not the spot behind a wall; what it only heard stays in mind for less time than
+    // what it saw; an enemy passing under its crosshair does not take its eyes off the one it
+    // fights. In a duel what it heard is watched as before. In a duel too, it does not stare at the floor
+    // or the ceiling towards a place it does not see. What it hears is unchanged, but not who made it: with
+    // several enemies alive a sound is put down to the one most likely there (it may be wrong).
     VARP(botperception, 0, 0, 2);
     VARP(botfov, 60, 100, 150);      // degrees across, 16:9 view
     VARP(botreact, 150, 290, 1000);  // ms, median reaction of a skill 100 bot to an unexpected enemy
@@ -42,6 +51,13 @@
 
     static const int PSIGHTMS = 16, PGAPMS = 300, PNEARMS = 400, PHOLDMS = 1500, PEXITNODES = 96;
     static const float PECC = 30, PANTICIP = 8, PSPEED = 120, PEXITLEN = 1024;
+    // attention with several enemies (targethuman): another enemy it does not see takes the place of the one it has in
+    // mind when he is PFOCUSRATIO times as pressing (near, known for sure lately: see hiddenpressure) once the bot has kept
+    // its attention PFOCUSMS on the first one, at once when he shot at it in the last PFOCUSSHOT ms; a view on a place
+    // it supposes him without seeing it stays within PGUESSPITCH degrees of level (guesspitch)
+    // (PFOCUSMS is not waited for when the other one is believed closer than PFOCUSNEAR u: he is right there)
+    static const int PFOCUSMS = 1500, PFOCUSSHOT = 1500, PFOCUSNEAR = 160;
+    static const float PFOCUSRATIO = 1.5f, PHEARDSURE = 0.6f, PFOCUSAGE = 6000, PFOCUSDIST = 256, PGUESSPITCH = 20;
 
     // The entry points of human perception are kept out of line, so that the Classic code
     // that calls them compiles exactly as before (same inlining, same float rounding, hence
@@ -69,6 +85,11 @@
         vec cuepos;
         int knownmillis, knownsrc;          // where the bot believes he is, and since when
         vec knownpos, knownvel;
+        int seenmillis, shotmillis;         // when it last saw him (noticed), and where: kept through what it heard since;
+        vec seenpos;                        //   when a shot of his last hit it or nearly did (reacted to)
+        int linemillis;                     // style bots (aistyle.h): the line where he went out of its view and how he
+        vec linepos, linevel;               //   moved then, kept for each enemy when its attention goes to another one
+        int seengun;                        // the weapon it last saw him with (-1: none)
         int radarmillis;                    // flag carrier shown by the radar: where to go, never where to aim
         vec radarpos;
         int numexits, curexit, exitstamp, exitsince, exitarrive; // where he may come back into view
@@ -77,6 +98,10 @@
         bool exitchecked[AI_P_EXITS];
         float dose;                         // style bots: attention left for him (aistyle.h)
         int dosemillis;
+        int vismask, visid;                 // which of the 7 points of his body it saw at its last look (lookat), the part of him to aim at
+        bool vispart;                       // only a part of him to aim at (visiblepart): where from his eye, how big (u)
+        vec visoff;
+        float vissize;
 
         aiperceived() { reset(-1, 0); }
 
@@ -87,10 +112,17 @@
             visible = tracking = aware = reachedlost = false;
             visstart = vislast = reactat = cueat = cuesrc = cuemillis = knownmillis = knownsrc = radarmillis = 0;
             cuepos = knownpos = knownvel = radarpos = vec(0, 0, 0);
+            seenmillis = shotmillis = linemillis = 0;
+            seenpos = linepos = linevel = vec(0, 0, 0);
+            seengun = -1;
             numexits = exitstamp = exitsince = exitarrive = 0;
             curexit = -1;
             dose = 0;
             dosemillis = 0;
+            vismask = visid = 0;
+            vispart = false;
+            visoff = vec(0, 0, 0);
+            vissize = 0;
         }
     };
 
@@ -107,6 +139,9 @@
 
     // style bots (botperception 2): defined in aistyle.h
     static float stylereactshift(fpsent *d);
+    static float stylereactscale(fpsent *d);
+    static int styletiredlate(fpsent *d, float ecc);
+    static float stylereflex(fpsent *d);
     static void styleperceive(fpsent *d);
     static void styleevent(fpsent *d, aiperceived &p, int kind);
     static bool styleforget(fpsent *d, aiperceived &p);
@@ -189,11 +224,12 @@
     static int reactiontime(fpsent *d, bool anticipated, float ecc, float sizeratio, bool busy)
     {
         float skill = clamp(d->skill, 1, 100), base, median, sigma, extra = 0;
-        if(anticipated) { base = 100; median = botreflex + (100 - skill)*1.0f; sigma = 0.35f; }
+        // a style bot's reflex follows its level, not the skill it was added with (as its full reaction does)
+        if(anticipated) { base = 100; median = botmode(d) == 2 ? stylereflex(d)*stylereactscale(d) : botreflex + (100 - skill)*1.0f; sigma = 0.35f; }
         else
         {
             base = 120; median = botreact + (100 - skill)*2.2f; sigma = 0.75f;
-            if(botmode(d) == 2) median += stylereactshift(d);
+            if(botmode(d) == 2) median = (median + stylereactshift(d))*stylereactscale(d);
             extra += 40*clamp(ecc/(botfov*0.5f), 0.0f, 1.0f);
             extra += 80*clamp((3 - sizeratio)*0.5f, 0.0f, 1.0f);
             if(busy) extra += 150;
@@ -215,9 +251,10 @@
     // (head, chest and its two sides, hips, knees, feet) are in its view with a clear line
     // of sight, when the visible part is big enough to be noticed: botminpx pixels of a
     // 1440-line screen with this view (same size estimate as the kill feed reaction times),
-    // more in the corner of the eye where sight is not sharp
-    static int lookat(fpsent *d, fpsent *e, float &ecc, float &sizeratio)
+    // more in the corner of the eye where sight is not sharp; mask: which of the 7 points (bit i: point i)
+    static int lookat(fpsent *d, fpsent *e, float &ecc, float &sizeratio, int &mask)
     {
+        mask = 0;
         ecc = 180;
         sizeratio = 0;
         const vec &eye = d->o;
@@ -253,26 +290,81 @@
             vec v = vec(p).sub(eye);
             float z = v.dot(f);
             if(z < 1 || fabs(v.dot(rt)) > z*th || fabs(v.dot(up)) > z*tv) continue;
-            if(clearview(eye, p)) seen++;
+            if(clearview(eye, p)) { seen++; mask |= 1<<i; }
         }
         if(seen < need) return 0;
         sizeratio = sqrtf(0.42f*seen/7)*bodyang/minsize;
         return seen;
     }
 
+    // What it aims at on an enemy it sees (botperception 1 and 2): a player aims at the part of the enemy he sees (a head
+    // over an edge, a side at a corner, a chest over a low wall), not at the middle of a body hidden behind the decor.
+    // From what it saw of e at this look (lookat's 7 points): false when it saw the middle of his body (chest and hips) and
+    // both his sides or neither (it aims as before); when one side of him shows (a corner), the middle of what shows of
+    // him across, at the height it aims at (2 more sight tests at most); otherwise, of the points it saw, the one nearest to
+    // the middle of them. off: from his eye; size: how big that part is (u, his radius for the whole body); id: which part
+    static bool visiblepart(fpsent *d, fpsent *e, int mask, vec &off, float &size, int &id)
+    {
+        bool mid = (mask&0x11) == 0x11, l = (mask&4) != 0, r = (mask&8) != 0;
+        if(!mask || (mid && l == r)) return false;
+        vec tc = vec(e->o.x, e->o.y, e->o.z - e->eyeheight*0.3f).sub(d->o), side(tc.y, -tc.x, 0);
+        float sl = side.magnitude();
+        if(sl > 1e-3f) side.mul(1/sl);
+        else side = vec(0, 0, 0);
+        if(l != r)
+        { // one side of him shows (a corner): the span of him that shows across, from that side inwards, at chest height
+            float s = r ? 1 : -1, inner;
+            vec chest(e->o.x, e->o.y, e->o.z - e->eyeheight*0.3f);
+            if(!clearview(d->o, vec(side).mul(0.4f*s*e->radius).add(chest))) { inner = 0.62f; id = 8; }
+            else if(!(mask&1)) { inner = 0.2f; id = 9; }
+            else if(!clearview(d->o, vec(side).mul(-0.4f*s*e->radius).add(chest))) { inner = -0.2f; id = 10; }
+            else { inner = -0.62f; id = 11; }
+            if(r) id += 4;
+            off = vec(side).mul(s*(1 + inner)*0.5f*e->radius);
+            off.z = mid ? (e->aboveeye - e->eyeheight)*0.5f : -e->eyeheight*0.3f;
+            size = (1 - inner)*0.5f*e->radius;
+            return true;
+        }
+        static const int band[7] = { 1, 0, 1, 1, 2, 3, 4 };
+        float bandz[5] = { 0.5f, -e->eyeheight*0.3f, -e->eyeheight*0.55f, -e->eyeheight*0.8f, -e->eyeheight + 1 };
+        vec pts[7], c(0, 0, 0);
+        int n = 0;
+        loopi(7) if(mask&(1<<i))
+        {
+            pts[i] = vec(0, 0, bandz[band[i]]);
+            if(i == 2) pts[i].sub(vec(side).mul(0.85f*e->radius));
+            else if(i == 3) pts[i].add(vec(side).mul(0.85f*e->radius));
+            c.add(pts[i]);
+            n++;
+        }
+        c.div(n);
+        float best = 1e16f;
+        loopi(7) if(mask&(1<<i))
+        {
+            float dd = pts[i].squaredist(c);
+            if(dd < best) { best = dd; off = pts[i]; id = i; }
+        }
+        size = e->radius*sqrtf(n/7.0f);
+        return true;
+    }
+
     static void sight(fpsent *d, fpsent *e, aiperceived &p, bool busy)
     {
         float ecc, sizeratio;
-        if(lookat(d, e, ecc, sizeratio))
+        int mask;
+        if(lookat(d, e, ecc, sizeratio, mask))
         {
             if(!p.visible && (!p.vislast || lastmillis - p.vislast > PGAPMS))
             { // a new sighting, noticed after a reaction time (a reflex if it was looking there for him)
                 p.visstart = lastmillis;
                 p.tracking = false;
                 p.reactat = lastmillis + reactiontime(d, p.aware && ecc <= PANTICIP, ecc, sizeratio, busy);
+                if(botmode(d) == 2) p.reactat += styletiredlate(d, ecc);
             }
             p.visible = true;
             p.vislast = lastmillis;
+            p.vismask = mask;
+            p.vispart = visiblepart(d, e, mask, p.visoff, p.vissize, p.visid);
         }
         else
         {
@@ -318,6 +410,9 @@
                     p.knownvel = vec(e->vel).add(e->falling);
                     p.knownmillis = lastmillis;
                     p.knownsrc = AI_P_SEEN;
+                    p.seenmillis = lastmillis;
+                    p.seenpos = e->o;
+                    p.seengun = e->gunselect;
                     p.numexits = 0;
                     p.curexit = -1;
                     p.reachedlost = false;
@@ -333,14 +428,16 @@
                     p.knownvel = vec(0, 0, 0);
                     p.knownmillis = p.cuemillis;
                     p.knownsrc = p.cuesrc;
+                    if(p.cuesrc == AI_P_HIT) p.shotmillis = p.cuemillis;
                     p.numexits = 0;
                     p.curexit = -1;
                     p.reachedlost = false;
                     if(botmode(d) == 2) styleevent(d, p, p.cuesrc == AI_P_HIT ? 2 : 1);
                 }
             }
-            if(p.aware && !p.visible && alive > 1 && (botmode(d) == 2 ? styleforget(d, p) : lastmillis - p.knownmillis > botmemory*1000))
-            { // attention shared between several enemies: one not seen nor heard for a while is forgotten
+            if(p.aware && !p.visible && alive > 1 && (botmode(d) == 2 ? styleforget(d, p) : lastmillis - p.knownmillis > (p.knownsrc == AI_P_HEARD ? botmemory*500 : botmemory*1000)))
+            { // attention shared between several enemies: one not seen nor heard for a while is forgotten (sooner
+              // when it only heard him: a sound does not bring him back to mind as a sight does)
                 p.aware = p.tracking = false;
                 p.numexits = 0;
                 p.curexit = -1;
@@ -356,6 +453,42 @@
         p.cuepos = pos;
         p.cuesrc = src;
         p.cuemillis = lastmillis;
+    }
+
+    // who a sound the bot heard at "at" (roughly located) is put down to: a player hears that someone is there, not who,
+    // and does not try to find out: it is a threat at that place. One enemy it sees there made it (he is seen shooting or
+    // jumping); otherwise it is kept in mind as the danger it deals with (the enemy it has in mind, out of its sight),
+    // or, when it fights one in sight elsewhere or has none in mind, as one it has no news of (the one it knows least about).
+    // In a duel, the only enemy alive. Team mates are never taken for a threat (the minimap tells where they are).
+    static fpsent *heardwho(fpsent *d, fpsent *src, int n, const vec &at)
+    {
+        if(aliveenemies(d) <= 1) return src;
+        float hear = 16 + 0.4f*d->o.dist(at);
+        fpsent *cur = getclient(d->ai->enemy), *seen = NULL, *least = NULL;
+        float seend = hear*hear;
+        int oldest = 0x7FFFFFFF;
+        loopv(players)
+        {
+            fpsent *e = players[i];
+            if(e == d || e->state != CS_ALIVE || !targetable(d, e)) continue;
+            aiperceived *p = findperceived(d, e);
+            if(p && p->lifesequence != e->lifesequence) p = NULL;
+            if(p && p->visible && p->tracking)
+            { // in its sight: he made it if he stands there
+                float dd = at.squaredist(e->o);
+                if(dd < seend) { seend = dd; seen = e; }
+                continue;
+            }
+            int known = p && p->aware ? p->knownmillis : -1;
+            if(known < oldest) { oldest = known; least = e; }
+        }
+        if(seen) return seen;
+        if(cur && cur->state == CS_ALIVE && targetable(d, cur))
+        {
+            aiperceived *p = findperceived(d, cur);
+            if(!(p && p->lifesequence == cur->lifesequence && p->visible && p->tracking)) return cur;
+        }
+        return least ? least : src;
     }
 
     // a sound player src makes at pos, as the game plays it: heard up to the distance where
@@ -382,7 +515,7 @@
             vec at;
             vecfromyawpitch(yaw, pitch, 1, 0, at);
             at.mul(dist*expf((0.15f + 0.35f*farness)*rndgauss())).add(d->o);
-            cue(d, src, at, AI_P_HEARD);
+            cue(d, heardwho(d, src, n, at), at, AI_P_HEARD);
         }
     }
 
@@ -559,12 +692,14 @@
         p.exitarrive = p.knownmillis + int(1000*p.exitlen[pick]/max(speed, PSPEED));
     }
 
-    // where the bot believes e is now: just after losing him, where it saw or heard him (a
-    // little further along his way); later the exit it guesses he will come out from
+    // where the bot believes e is now: just after losing him, where it saw him (a little further
+    // along his way) or where a hit came from; later, and at once for a sound with several enemies
+    // alive (not the spot behind a wall or under the floor: where he can come into its view from
+    // there; in a duel the sound itself is a good guess), the exit it guesses he will come out from
     static vec guesspos(fpsent *d, fpsent *e, aiperceived &p)
     {
         int since = lastmillis - p.knownmillis;
-        if(since < PNEARMS || waypoints.empty())
+        if((since < PNEARMS && (p.knownsrc != AI_P_HEARD || aliveenemies(d) <= 1)) || waypoints.empty())
         {
             vec v(p.knownvel.x, p.knownvel.y, 0);
             float speed = v.magnitude();
@@ -576,12 +711,46 @@
         return p.knownpos;
     }
 
+    // the view on a place where it supposes him but does not see (behind a wall, under the floor): a player does not stare
+    // at the floor or the ceiling towards someone he heard or lost there, he looks that way within PGUESSPITCH degrees of
+    // level (where he can come from, his ways out, are what it watches when it knows them); in a duel as well
+    static void guesspitch(fpsent *d, const vec &dp, const vec &at, float &pitch)
+    {
+        if(fabs(pitch) > PGUESSPITCH && !clearview(dp, at)) pitch = clamp(pitch, -PGUESSPITCH, PGUESSPITCH);
+    }
+
     static vec guessaimpos(fpsent *d, fpsent *e, const vec &at) // like getaimpos, on the guessed place
     {
         vec o = at;
         if(d->gunselect == GUN_RL) o.z += (e->aboveeye*0.2f)-(0.8f*d->eyeheight);
         else if(d->gunselect != GUN_GL) o.z += (e->aboveeye-e->eyeheight)*0.5f;
         return o;
+    }
+
+    // What it aims at on an enemy it sees, with a gun that shoots straight (shotgun, chaingun, rifle, pistol): rockets and
+    // grenades keep their aim (splash, lobs). With the whole body in sight, the aim is as before. It shoots as before: as a
+    // player does, some of its shots at an enemy who shows little of himself end in the edge he hides behind.
+    static inline bool straightgun(int gun) { return gun > GUN_FIST && gun <= GUN_PISTOL && !guns[gun].projspeed; }
+
+    // the part of e to aim at, from its last look at him (visiblepart): where, how big (u), which part; false: aim as before
+    static bool seenpart(fpsent *d, fpsent *e, aiperceived &p, vec &at, float &size, int &which)
+    {
+        if(!p.vispart || !straightgun(d->gunselect)) return false;
+        at = vec(e->o).add(p.visoff);
+        size = p.vissize;
+        which = p.visid;
+        return true;
+    }
+
+    // where a human-perception bot (botperception 1) aims at e it sees: where Classic aims (getaimpos, with its random
+    // offset), on the part of him it sees when the middle of his body is hidden (the same offset, scaled to that part)
+    static vec humanaim(fpsent *d, fpsent *e, aiperceived &p)
+    {
+        vec o = getaimpos(d, e), at;
+        float size;
+        int which;
+        if(!seenpart(d, e, p, at, size, which)) return o;
+        return o.sub(guessaimpos(d, e, e->o)).mul(size/e->radius).add(at);
     }
 
     // where a bot chasing e goes: where it saw or heard him, then the exit it guesses; for a
@@ -637,7 +806,19 @@
         return true;
     }
 
-    // the enemy the bot goes for: the nearest one it sees, else the nearest one it remembers or heard
+    // how pressing an enemy it does not see is (more: higher): near, and known for sure lately (it saw him, he shot at it)
+    // rather than only heard or long ago
+    static float hiddenpressure(aiperceived &p, const vec &dp)
+    {
+        float age = max(lastmillis - p.knownmillis, 0), dd = p.knownpos.squaredist(dp)/(PFOCUSDIST*PFOCUSDIST);
+        return (p.knownsrc == AI_P_HEARD ? PHEARDSURE : 1.0f)*expf(-age/PFOCUSAGE)/(1 + dd);
+    }
+
+    // the enemy the bot goes for: the nearest one it sees (a style bot: one aiming at it first); else the one it has in
+    // mind stays so (a player keeps his attention on one enemy, he does not jump to each sound): another one it does not
+    // see either takes his place only when he is clearly more pressing (PFOCUSRATIO) once the bot has kept its attention
+    // PFOCUSMS on the first one, or at once when he just shot at it (a hit, a shot that nearly hit it); with none in
+    // mind (dead, forgotten), the most pressing one
     AI_HUMAN bool targethuman(fpsent *d, aistate &b, int pursue, float mindist)
     {
         static vector<fpsent *> tried;
@@ -645,8 +826,10 @@
         vec dp = d->headpos();
         for(;;)
         {
-            fpsent *t = NULL;
-            float best = 1e30f;
+            fpsent *t = NULL, *h = NULL, *cur = NULL, *shot = NULL;
+            float best = 1e30f, press = -1, curpress = 0;
+            int shotat = -1;
+            bool hnear = false;
             aiperception *s = perception(d);
             if(s) loopv(s->seen)
             {
@@ -657,9 +840,24 @@
                 bool insight = p.visible && p.tracking;
                 float v = (insight ? e->o : p.knownpos).squaredist(dp);
                 if(mindist > 0 && v > mindist) continue;
-                if(!insight) v += 1e12f;
-                else if(botmode(d) == 2 && stylethreat(d, e)) v *= 0.25f;
-                if(v < best) { best = v; t = e; }
+                if(insight)
+                {
+                    if(botmode(d) == 2 && stylethreat(d, e)) v *= 0.25f;
+                    if(v < best) { best = v; t = e; }
+                    continue;
+                }
+                float pr = hiddenpressure(p, dp);
+                if(pr > press) { press = pr; h = e; hnear = p.knownpos.squaredist(dp) < float(PFOCUSNEAR*PFOCUSNEAR); }
+                if(e->clientnum == d->ai->enemy) { cur = e; curpress = pr; }
+                // a shot of his that hit it or nearly did (not the memory of its killer once respawned: that one is only
+                // where he was, see stylerespawn)
+                if(p.shotmillis && lastmillis - p.shotmillis < PFOCUSSHOT && p.shotmillis > shotat) { shotat = p.shotmillis; shot = e; }
+            }
+            if(!t)
+            { // nobody in sight
+                if(shot) t = shot;
+                else if(cur && (h == cur || (lastmillis - d->ai->enemymillis < PFOCUSMS && !hnear) || press < curpress*PFOCUSRATIO)) t = cur;
+                else t = h;
             }
             if(!t) return false;
             if(violence(d, b, t, pursue)) return true;

@@ -779,6 +779,7 @@ namespace game
     extern fpsent *newclient(int cn);
     extern const char *colorname(fpsent *d, const char *name = NULL, const char *prefix = "", const char *suffix = "", const char *alt = NULL);
     extern const char *teamcolorname(fpsent *d, const char *alt = "you");
+    extern bool personalcolorname(fpsent *d, char *dst, const char *alt = "you");
     extern const char *teamcolor(const char *name, bool sameteam, const char *alt = NULL);
     extern const char *teamcolor(const char *name, const char *team, const char *alt = NULL);
     extern void teamsound(bool sameteam, int n, const vec *loc = NULL);
@@ -874,6 +875,7 @@ namespace game
     extern int selfrgb();
     extern char selfcolcode();
     extern bool demoxrayallowed();
+    extern int demohitboxcolor(fpsent *d);
     extern void demoxrayreset();
     extern void toggledemoxray();
     extern int showscoreboard;
@@ -1009,6 +1011,25 @@ namespace demohd
     void notevis(int cn, int bits, float vispx, float bodypx, float xhang, float dist, float sx, float sy);
     void visend();
     void visnone();
+    void noteshot(fpsent *s, int gun, const vec &from, const vec &to, int id);
+    void drawhitboxes(int w, int h);
+    void notedeath(fpsent *victim, fpsent *actor);
+    void notedamage(fpsent *target, fpsent *actor);
+    bool hitboxactive();
+    void togglehitbox();
+    void povopen(const char *dmo);
+    void povclose();
+    bool povshownnow();
+    bool truepos(fpsent *d, vec &o, float &yaw, float &pitch);
+    bool clientview(fpsent *target, fpsent *viewer, vec &o);
+    extern bool povmoving;
+    bool freefly();
+    bool recorderview();
+    bool lookkey(int code, bool isdown);
+    bool looking();
+    bool lookcursor(int &x, int &y);
+    void seekkeep();
+    void seekrefollow();
 }
 
 namespace server
@@ -1020,6 +1041,7 @@ namespace server
     extern void timeupdate(int secs);
     extern const char *getdemofile(const char *file, bool init);
     extern int demotime();
+    extern int demopackettime();
     extern void seekdemoms(int millis);
     extern void forcemap(const char *map, int mode);
     extern void forcepaused(bool paused);

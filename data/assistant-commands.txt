@@ -72,6 +72,10 @@ action demorewind INT? | while watching a demo: go back, in milliseconds (defaul
 action demoforward INT? | while watching a demo: go ahead, in milliseconds (default 10000 = 10 s) | demo avancer
 action toggledemohd | while watching a demo: switch between the exact HD aim and the vanilla aim | demo hd visee
 action toggledemobar | while watching a demo: hide or show the demo controls and the player list, to watch or film the demo cleanly | demo cacher masquer barre controles filmer
+action toggledemohitbox | while watching a demo played on this computer: show or hide the real hitboxes of the players (the cylinder the game tests for a hit) and the shots (also the HITBOX button of the demo bar) | demo hitbox hit box boite cylindre zone touche tir
+action toggledemopov | while watching a demo played on this computer: when you follow a player, show the others where that player's game showed them (estimated for a player without exact aim), or the demo's positions (also the VIEW line of the demo bar) | demo pov point de vue vue joueur vraie vision positions estimee
+action demonextview | while watching a demo played on this computer with the free camera: show the real positions (in a local demo, its recorder's game), then the game of each player in turn (also the VIEW line of the demo bar) | demo vue libre camera libre vision joueur vraie vision suivant view estimee
+action demogotoprompt | while watching a demo played on this computer: type a time to go to, to the millisecond, the demo paused there, for example 9:00.842 (also the GO TO button of the demo bar, or a click on its time) | demo aller a temps precis milliseconde moment seek goto taper temps compteur clic
 action toggledemoxray | while watching a demo played on this computer: show every player through the walls in their colour, or not (also the X-RAY button of the demo bar) | demo rayons x xray travers murs silhouettes
 action allowspedit | hold it to enter edit mode in single player modes (Ctrl by default) | edition editer solo ctrl
 action editcopy | edit mode: copy the selection | edition copier

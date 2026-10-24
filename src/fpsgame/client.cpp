@@ -1712,7 +1712,7 @@ namespace game
                 s->lastattackgun = s->gunselect;
                 s->lastfiredgun = s->gunselect;
                 s->lastfiredmillis = lastmillis;
-                shoteffects(s->gunselect, from, to, s, false, id, prevaction);
+                shoteffects(s->gunselect, from, to, s, false, id, prevaction); if(demoplayback) demohd::noteshot(s, s->gunselect, from, to, id);
                 break;
             }
 
@@ -1741,6 +1741,7 @@ namespace game
                 target->health = health;
                 if(target->state == CS_ALIVE && actor != player1) target->lastpain = lastmillis;
                 damaged(damage, target, actor, false);
+                if(demoplayback) demohd::notedamage(target, actor); // demo hitboxes: what the shooter's game touched
                 break;
             }
 
@@ -1774,7 +1775,7 @@ namespace game
                     particle_textcopy(actor->abovehead(), ds, PART_TEXT, 2000, 0x32FF64, 4.0f, -8);
                 }
                 if(!victim) break;
-                killed(victim, actor);
+                killed(victim, actor); if(demoplayback) demohd::notedeath(victim, actor);
                 break;
             }
 

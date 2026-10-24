@@ -1,0 +1,724 @@
+# Explanation of each option, shown when the mouse rests on it in the settings
+# menus (Options > Display > Advanced > Menus: "Explanation after", default 1.5 s).
+#
+#   KEY: text                  what the option does (short, English, for players)
+#   cost KEY: Level - detail   what it costs (Level: None, Low, Medium, High, Very high)
+#
+# KEY is one of:
+#   variable                   a setting: hwrtsoftshadows
+#   variable=value             one choice of it (a radio button): hwrtsoftshadowrays=8
+#   @Label                     a button, or the name written before a row of controls
+#   >action                    what a button runs: >showgui ammobar ; a final * matches the
+#                              start: ">screenres *" for every screen size button
+#   #keyfield / #field         general line added to every key field / text field
+# A label or action with a colon is quoted: @"Demo: X-ray": text
+# Costs: per frame, RTX 4070 Ti SUPER, 2560x1440 unless written otherwise; "measured" =
+# from the measurement lots, "estimated" = no measurement (the classic options use the
+# game's own speed colours). The source of each measured cost is listed by the lot that adds it.
+# /settingsearchreload reads this file again. menuhelptext VAR [VALUE] shows a text.
+
+# --- general lines ---
+#keyfield: Click it, press the key or keys (several are fine), then Esc. Empty = no key.
+
+# --- Options page ---
+>showgui "display": Window or fullscreen, resolution, field of view, brightness, V-Sync and latency.
+>showgui "gfx": Lighting (classic or ray tracing), anti-aliasing, shadows, performance profiles, HDR screen.
+>showgui "audio": Volumes, sound mix, 3D sound and the sound device.
+>showgui "mouse": Sensitivity, DPI, cm/360 and the menu cursor speed.
+>showgui "keys": Every key of the game: click a field and press the keys.
+>showgui "hud": What is shown on screen while you play.
+>showgui "friends": Friends by nick or clan tag, and the colours of teammates, enemies and friends.
+>showgui "traduction": Translation of the chat, the AI model and the commands.
+>showgui "console": The console, the chat box and the full-screen chat.
+>showgui "record": Match videos, demos with HD aim, and demo playback.
+@Search settings: Find any setting by a word, in English or French (sound, souris, shadows...).
+@Settings assistant (AI): Ask the local AI how to change a setting. Nothing changes until you click Apply.
+@Import settings from another client: Copy keys, name, options, servers and friends from Sauerbraten or an older L4ZY.
+@Edit autoexec.cfg: Your own commands, run at every start.
+@Restore defaults (clears all settings): Puts every setting back to its default. You are asked to confirm.
+@Yes, restore defaults: Clears all your settings now (keys, graphics, sound, HUD...).
+
+# --- Import settings ---
+importdir: Type the folder of another client here: the folder that holds its config.cfg (for example C:\Games\Sauerbraten).
+@Another folder (type it below): Import from a folder you type in the field below.
+@Import and restart: Copies the settings, then restarts. Your current settings are kept as config.cfg.before-import.bak.
+@Import at next start: Copies the settings when the game starts next time. Your current settings are kept as config.cfg.before-import.bak.
+@Pick a client above: Choose where to import from: a client found in My Games, or a folder you type.
+
+# --- Search, assistant ---
+settingsquery: Type one or more words; several words narrow the search. The results are the real controls.
+@Ask the assistant (AI): Sends what you typed to the settings assistant.
+assistq: Ask in any language, for example "my game is too dark" or "less latency".
+@Send: Sends your question to the local AI.
+@New conversation: Forgets the conversation so far.
+assistantthink: The AI thinks before answering: slower, but better on hard questions. Off again when you leave the page.
+
+# --- HUD ---
+@Move HUD parts (drag and drop): Drag the frames with the mouse. Right click puts one back, Esc when done.
+@Put everything back in place: Every HUD part goes back to its default place and size.
+>showgui ammobar: Layout, size and place of the ammo bar.
+>showgui gameclock: Look, size and place of the game clock.
+>showgui hudscore: Look, size and place of the score.
+>showgui killfeed: What the kill feed shows, its look, size and place.
+>showgui killstreak: What kill streaks show, their look, size and place.
+@Crosshair: Size, colour, picture and effects of the crosshair.
+@Weapons and trails: Your gun, muzzle flashes and the colours of the weapon trails.
+@Scoreboard (Tab): The board shown while you hold Tab: its opacity and its columns.
+@Player colours: Colours of teammates, enemies and friends.
+ammobar: All your weapons and their ammo on screen.
+gameclock: Time left in the match.
+hudscore: Team scores, or your score, on screen during the match.
+killfeed: Recent frags on screen: who killed who.
+killstreak: Announces killing sprees on screen. Display only, no bonus.
+showfps: Frames per second, at the bottom right.
+wallclock: The real time of day on screen.
+wallclock24: 24 hour clock instead of AM / PM.
+wallclocksecs: The clock shows seconds too.
+damagescreen: The screen flashes red when you are hit.
+damagecompass: Arrows around the crosshair show where the damage came from.
+radarteammates: Your teammates are shown on the minimap.
+basenumbers: Capture bases show their number.
+outlinemeters: A dark outline around the capture meters, easier to read.
+flagtimer: CTF: a timer while you (or the player you watch) carry a flag stolen from the enemy base.
+flagfeed: CTF: big messages when a flag is taken, dropped, returned or scored (with the run time).
+
+# --- Scoreboard ---
+scoreboardalpha: Opacity of the board's background. Lower = you see the game through it.
+deathscore: The scoreboard opens by itself when you die.
+spectatorlist: While you spectate: the players on the right. Hold Tab, then click a name to follow that player.
+showservinfo: Server name and info at the top of the board.
+showfrags: Frags column.
+hidefrags: Frags column in CTF and Collect too (else flags or skulls count instead).
+showdeaths: Deaths column.
+showkd: Kills / deaths ratio column.
+showflags: Flags or skulls column.
+showaccuracy: Accuracy column.
+showlang: The chat languages of each player (from the translation).
+showvs: Your kills - deaths against each player this match.
+showstatus: Dead / lagging status column.
+showping: Ping column.
+showpj: Packet jump column (lag spikes).
+showclientnum: Client number column.
+showspectators: List of spectators under the board.
+highlightscore: Your own line is highlighted.
+showconnecting: Players still connecting are listed.
+
+# --- Graphics > General ---
+hwrt: The lighting of the game.
+hwrt=0: The original Sauerbraten lighting. Fastest, any graphics card. Its settings: Classic tab.
+hwrt=1: Ray-traced lamps, sun, sky light, soft shadows, reflections and weapon lights. Needs a graphics card with hardware ray tracing and an up-to-date driver. Its settings: Ray tracing tab.
+cost hwrt=0: None - the fastest lighting
+cost hwrt=1: Very high - about 3 to 8 ms more per frame than Classic (measured, Native)
+lookfxaa: Softens the edges in Native, but also the textures. Off (default) keeps Native sharp. Not used with DLAA, DLSS or FSR.
+cost lookfxaa: Low - a light full-screen filter (estimated)
+fsaa: Smooth edges, sharp textures (the original game's anti-aliasing). Classic lighting with Native only. A change restarts the graphics.
+cost fsaa: Medium - more with 4x and 8x (estimated)
+hwrtngxmode: Anti-aliasing and upscaling. Native = every pixel drawn. Quality = more internal pixels: sharper, slower.
+hwrtngxmode=0: Native: every pixel drawn by the game, no AI.
+hwrtngxmode=1: DLAA: NVIDIA AI anti-aliasing at full resolution, the best picture. NVIDIA RTX only.
+hwrtngxmode=2: DLSS Quality: fewer pixels drawn, rebuilt by the AI. Faster, nearly as sharp.
+hwrtngxmode=3: DLSS Balanced: fewer pixels than Quality. Faster, a bit softer.
+hwrtngxmode=4: DLSS Performance: half the pixels in each direction. Fastest DLSS, softest.
+hwrtngxmode=5: FSR Native: AMD's open anti-aliasing at full resolution. Any graphics card.
+hwrtngxmode=6: FSR Quality: fewer pixels drawn, rebuilt by FSR. Faster, nearly as sharp.
+hwrtngxmode=7: FSR Balanced: fewer pixels than Quality. Faster, a bit softer.
+hwrtngxmode=8: FSR Performance: half the pixels in each direction. Fastest, softest.
+cost hwrtngxmode=0: None - the reference
+cost hwrtngxmode=1: High - about 1.4 to 1.5 ms more than Native (measured, ray tracing)
+cost hwrtngxmode=2: None - faster than Native: 0.5 to 2.8 ms less (measured, ray tracing)
+cost hwrtngxmode=3: None - faster than DLSS Quality (estimated)
+cost hwrtngxmode=4: None - the fastest DLSS (estimated)
+cost hwrtngxmode=5: Medium - the FSR pass alone takes 0.5 to 0.9 ms (measured)
+cost hwrtngxmode=6: None - faster than Native (estimated)
+cost hwrtngxmode=7: None - faster than FSR Quality (estimated)
+cost hwrtngxmode=8: None - the fastest FSR (estimated)
+hwrtfsrsharpness: Extra sharpening after FSR upscaling. 0 = off, 10 = about like DLSS.
+cost hwrtfsrsharpness: Low (estimated)
+hwrtdlsssharpness: Sharpening after DLAA or DLSS (AMD's open filter). 20 is crisper; higher can show bright or dark specks. Not in native HDR.
+cost hwrtdlsssharpness: Low (estimated)
+hwrtupscalemipbias: With DLSS or FSR Quality / Balanced / Performance: textures as detailed as the screen resolution. Can shimmer a bit more in motion.
+cost hwrtupscalemipbias: None (estimated)
+fullbrightmodels: Players are lit whatever the light of the map, easier to see.
+forceplayermodels: Everyone is shown with your player model.
+teamskins: Blue (your team) and red (others) skins, even outside team games.
+blood: Blood when players are hit.
+hidedead: Dead players disappear at once.
+ragdoll: Bodies fall with physics.
+ragdollmillis: Dead bodies stay a while after the player respawns.
+@Ragdoll push (velocity multiplier): How far explosions push dead bodies.
+deadpush: How far explosions push dead bodies.
+
+# --- Graphics > Ray tracing ---
+hwrtteleportlight: Teleporters glow and light the room around them.
+cost hwrtteleportlight: Low (estimated)
+hwrtjumppadlight: Jump pads glow and light the room around them.
+cost hwrtjumppadlight: Low (estimated)
+hwrtdynlights: Muzzle flashes, rockets, grenades and explosions light the walls, floor, players and your gun. Custom trail colours tint the light.
+cost hwrtdynlights: Low - nothing when nobody shoots, up to 0.34 ms in a fight (measured)
+hwrtshadowself: Which lights draw your own shadow in first person.
+hwrtshadowself=0: No shadow of yourself.
+hwrtshadowself=1: The sun only: the one that always looks right.
+hwrtshadowself=2: The sun and glowing lights (teleporters, lava...).
+hwrtshadowself=3: Also the nearest lamps: the shadow stretches and breaks up next to a lamp.
+hwrtshadowself=4: Also the sky: a dark patch around you.
+cost hwrtshadowself: Low (estimated)
+hwrtshadowothers: Which lights draw the shadows of players, bots, rockets and pickups.
+hwrtshadowothers=0: No shadows of the others.
+hwrtshadowothers=1: Shadows from the sun and the sky.
+hwrtshadowothers=2: Also from teleporters, lava and jump pads.
+hwrtshadowothers=3: Also from the map's lamps. A hidden lamp can add a second shadow.
+cost hwrtshadowothers: Low - up to 0.2 ms (measured)
+cost hwrtshadowothers=3: Low - 0.2 to 0.3 ms more (measured)
+hwrtsmokeshadow: Weapon smoke (rifle trails, rockets, grenades) casts soft shadows.
+cost hwrtsmokeshadow: Low - nothing without smoke, up to 0.1 to 0.2 ms with a lot of smoke (measured)
+hwrtsmokeshadowdensity: How dark the smoke shadows are, in percent (default 100).
+hwrtsoftshadows: Shadows of the sun, lamps, torches and teleporters get soft edges that blur with distance, sharp at the contact.
+hwrtsoftshadows=0: Sharp shadows. Faster.
+hwrtsoftshadows=2: Soft shadows for the sun and the lamps.
+cost hwrtsoftshadows: High - 1.1 to 2.5 ms, 17 to 25 % fewer fps (measured, DLAA)
+cost hwrtsoftshadows=0: None
+hwrtsoftshadowrays: Rays per light for soft shadows. More = truer, less grainy edges, slower.
+hwrtsoftshadowrays=1: Fast, but grainy edges.
+hwrtsoftshadowrays=2: Truer edges for a moderate cost.
+hwrtsoftshadowrays=4: Nearly perfect edges.
+hwrtsoftshadowrays=8: As good as it gets, very slow.
+cost hwrtsoftshadowrays=1: Low - the base of soft shadows
+cost hwrtsoftshadowrays=2: Medium - 0.2 to 1.2 ms more than 1 ray (measured)
+cost hwrtsoftshadowrays=4: High - 1.3 to 3.4 ms more than 1 ray (measured)
+cost hwrtsoftshadowrays=8: Very high - more than 4 rays (estimated)
+hwrtsoftsigma: Smooths the soft shadow edges (NVIDIA's open NRD SIGMA denoiser): clean even with 1 ray. Grainy shadows: turn it on first. Needs the NRD denoiser.
+cost hwrtsoftsigma: Medium - 0.65 to 1.3 ms (measured)
+hwrtsoftsigmahistory: Frames the denoiser keeps. 0 follows motion at once but is grainier; 7 is the calmest. If shadows smear when you move, lower it.
+cost hwrtsoftsigmahistory: Low - 0 is 0.1 to 0.4 ms faster than 5 (measured)
+hwrtreflections: Sharp ray-traced reflections on water and reflective surfaces.
+cost hwrtreflections: Low - 0 to 0.4 ms (measured, with the shine below)
+hwrtwaterwaves: Animated waves: the RT reflections ripple like real water. The water stays flat for the game. Needs the reflections.
+cost hwrtwaterwaves: Low - 0.05 to 0.15 ms (measured)
+waterwaveamp: Strength of the animated waves (0.25 to 3, default 1). Shared by RT and classic water.
+waterwavespeed: Speed of the animated waves (0.25 to 3, default 1). Shared by RT and classic water.
+waterwavesize: Detail of the animated waves. Shared by RT and classic water.
+cost waterwavesize: Low - about 0.06 ms whatever the size (measured)
+hwrtspecular: Shine of the lamps and the sun on glossy surfaces.
+cost hwrtspecular: Low - 0 to 0.4 ms (measured, with the reflections)
+hwrtsmoothnormals: Smooth light across faceted floors, slopes and rocks, like classic lighting.
+cost hwrtsmoothnormals: Low (estimated)
+
+# --- Graphics > Performance ---
+GFX_prof: Sets every option of this tab and the soft shadows at once, from the best picture to the fastest. Changing one option yourself gives Custom.
+GFX_prof=0: Ultra: the full picture (default). Slow and pretty.
+GFX_prof=1: High: nearly the same picture, faster: CNN model, solid leaves for the sky light, still models from depth.
+GFX_prof=2: Medium: also sky light on half the pixels, 3 lamps, adaptive rays, 1 soft shadow ray.
+GFX_prof=3: Low: also 2 lamps, 1 glowing light, softer far away, no soft shadows. Darker, fastest.
+GFX_prof=4: Custom: your own mix.
+cost GFX_prof=0: Very high - the slowest: about 38 % fewer fps than Low on a heavy map (measured, DLAA)
+cost GFX_prof=1: High - about 26 % fewer fps than Low on a heavy map (measured, DLAA)
+cost GFX_prof=2: Medium - about 15 % fewer fps than Low on a heavy map (measured, DLAA)
+cost GFX_prof=3: Low - the fastest profile (measured)
+@RT quality: How much of the sky light and of the glowing lights is traced.
+hwrtquality: How much of the sky light and of the glowing lights is traced.
+hwrtquality=2: Full: sky light on every pixel.
+hwrtquality=1: Sky light on half the pixels: a bit grainier.
+hwrtquality=0: Also only 1 glowing light, softer textures far away.
+cost hwrtquality: Low - about 0.1 ms between Full and Half sky (measured)
+hwrtdlsscnn: Which DLSS model DLAA and DLSS use.
+hwrtdlsscnn=0: Transformer: sharper and steadier.
+hwrtdlsscnn=1: CNN: softer, faster. Blurry picture: choose Transformer.
+cost hwrtdlsscnn=0: Medium - 0.35 to 0.55 ms more than CNN (measured)
+cost hwrtdlsscnn=1: None - the faster model
+hwrtskyopaque: Leaves for the sky light. Solid gives a denser shade below trees.
+hwrtskyopaque=0: See-through: exact shade below leaves.
+hwrtskyopaque=1: Solid: denser shade below trees, faster on maps with many trees.
+cost hwrtskyopaque=0: Medium - up to 1.4 ms more on maps with many trees (measured)
+cost hwrtskyopaque=1: None - the faster choice
+hwrtnrdlight: How much work the NRD sky denoiser does. Lighter = a little more flicker in sky shadows.
+cost hwrtnrdlight: Low - about 0.1 ms between Full and Lightest (measured)
+hwrtvelstatic: How the motion of still map models is found, for DLAA, DLSS and FSR. Same picture.
+hwrtvelstatic=0: Drawn again: exact.
+hwrtvelstatic=1: From depth: less work for the processor on maps with many models.
+cost hwrtvelstatic=0: Medium - 0.2 to 0.8 ms more processor time on maps with many models (measured)
+hwrtskyrange: How far the sky rays look. Shorter is faster; a hall higher than that gets some sky light.
+cost hwrtskyrange: Low - under 0.1 ms (measured)
+hwrtrtadapt: Fewer rays at the screen edges, far away, in dark spots and while turning fast. Slightly softer in motion.
+cost hwrtrtadapt=0: Low - about 0.3 ms more than On (measured)
+hwrtnrd: Cleans the grain of the sky light. NRD is also needed by the soft shadow denoiser.
+hwrtnrd=0: Built-in filter: always 4 rays, more grain in motion.
+hwrtnrd=1: NRD (NVIDIA's open denoiser): cleaner, 1 ray per pixel.
+cost hwrtnrd=0: Medium - 4 rays per pixel (estimated)
+cost hwrtnrd=1: Low (estimated)
+@Sky light denoiser: Cleans the grain of the sky light. NRD is also needed by the soft shadow denoiser.
+hwrtskyrays: Sky rays per pixel with NRD. More = less grain in sky shadows, slower. The built-in filter always uses 4.
+cost hwrtskyrays: Low - with 1 ray; 4 rays add about 0.5 ms (measured)
+cost hwrtskyrays=2: Low (estimated, between 1 and 4)
+cost hwrtskyrays=3: Medium (estimated, between 1 and 4)
+cost hwrtskyrays=4: Medium - about 0.5 ms more than 1 ray (measured)
+@Rays per pixel (NRD): Sky rays per pixel with NRD. More = less grain in sky shadows, slower.
+hwrtskytemporal: Built-in filter only: how many frames the sky light is smoothed over (default 32, 0 = off). Higher = smoother, slower to react.
+cost hwrtskytemporal: None - no speed cost (measured)
+hwrtskyfilter: Blurs the sky light between neighbouring pixels: less grain. Needed by the half-pixel sky of Medium and Low.
+cost hwrtskyfilter: Low (estimated)
+hwrtsundisk: Draws the sun as a plain disk instead of the map's sky picture. A look choice.
+cost hwrtsundisk: None (measured)
+hwrtdlights: Map lamps per pixel that cast a shadow. Fewer = faster, but rooms get darker near many lamps.
+@Lamps with a shadow: Map lamps per pixel that cast a shadow. Fewer = faster, but rooms get darker near many lamps.
+cost hwrtdlights: Medium - 4 lamps cost up to 0.9 ms more than 1 (measured)
+hwrtglowdlights: Glowing lights traced (teleporters, lava, jump pads; default 8). Fewer = a bit faster, fewer glows light the room.
+cost hwrtglowdlights: Low - about 0.25 ms between 8 and 2 (measured)
+hwrtdiffupscale: How small wall textures are enlarged up close with ray tracing.
+hwrtdiffupscale=2: Bicubic: smooth, no blocks.
+hwrtdiffupscale=3: Lanczos: a little sharper up close (slower map load only).
+hwrtdiffupscale=0: Nearest: blocky, like old games.
+cost hwrtdiffupscale: None - no cost per frame (measured)
+hwrtdiffmipbias: Detail of far textures with ray tracing.
+hwrtdiffmipbias=0: Stable: less shimmer in motion.
+hwrtdiffmipbias=-0.5: Sharper far away, more shimmer in motion.
+cost hwrtdiffmipbias: None (estimated)
+
+# --- Graphics > HDR screen ---
+hdroutpref: What the game sends to the screen. Native HDR needs an HDR screen with Windows HDR already on (it is never changed here).
+hdroutpref=0: SDR: the usual picture.
+hdroutpref=1: Native HDR: a real HDR picture on an HDR screen.
+cost hdroutpref=1: Low (estimated)
+@Exposure: Native HDR only: brighter or darker picture. Kept across maps, outputs, anti-aliasing and lighting.
+hdroutref: Native HDR only: brightness of normal white, in nits (default 80).
+hdroutmax: Native HDR only: the brightest the screen shows. Automatic = what the screen reports.
+@Manual peak: Native HDR only: set the brightest value yourself.
+hdrouthud: Native HDR only: brightness of the HUD and menus, in nits.
+@Custom HUD brightness: Native HDR only: set the brightness of the HUD and menus yourself.
+
+# --- Graphics > Classic ---
+gtao: Slightly darker corners and wall bases (ambient occlusion). Players are never darkened. Classic lighting only: ray tracing already traces the sky light.
+gtao=0: No ambient occlusion: the old corner shading is used instead.
+gtao=1: Low: small, close shading.
+gtao=2: High: wider shading.
+cost gtao: Medium - 0.5 to 1.3 ms (measured, Native or DLAA)
+cost gtao=0: None
+lookao: The old corner shading, used when Ambient Occlusion is Off.
+cost lookao: None (estimated)
+lookaoscale: Strength of the old corner shading (default 0.48).
+lookaoradius: Size of the old corner shading (default 1.15).
+@"Speed: Fast, Moderate, Slow and Pretty": The colour of each option below tells how much it costs: green fast, yellow moderate, red slow and pretty.
+shaderdetail: Level of detail of the shaders. Lower is faster on old graphics cards.
+cost shaderdetail=1: Low (estimated)
+cost shaderdetail=3: Medium (estimated)
+waterrefract: Water bends what is under it (classic lighting).
+cost waterrefract: Medium (estimated)
+waterreflect: Water reflects the room (classic lighting).
+cost waterreflect: High (estimated)
+caustics: Moving light patterns on the floor under water.
+cost caustics: Low (estimated)
+vertwater: The water surface moves (classic lighting).
+cost vertwater: Medium (estimated)
+waterwaves: Animated waves on classic water: reflection, refraction and shine ripple. The water stays flat for the game.
+cost waterwaves: Low - about 0.06 ms (measured)
+waterfallrefract: Waterfalls bend what is behind them.
+cost waterfallrefract: Medium (estimated)
+waterfallenv: Waterfalls reflect their surroundings.
+cost waterfallenv: Low (estimated)
+shadowmap: Shadows of players and models from the sun (classic lighting only).
+cost shadowmap: High (estimated)
+shadowmapsize: Sharpness of the classic shadows.
+cost shadowmapsize=9: Medium (estimated)
+cost shadowmapsize=10: High (estimated)
+blobs: A round dark shadow under players and items, when classic shadows are off.
+cost blobs: Medium (estimated)
+lookselfshadow: Your own body casts a sun shadow in first person (needs classic shadows). With ray tracing: Ray tracing tab.
+glare: A glow around bright lights.
+glarepreset: How wide and strong the glow is.
+cost glare: High (estimated)
+cost glarepreset=1: Medium (estimated)
+cost glarepreset=2: Medium (estimated)
+cost glarepreset=3: High (estimated)
+cost glarepreset=4: High (estimated)
+motionblur: The picture blurs when you turn fast.
+motionblurscale: How strong the motion blur is.
+cost motionblur: High (estimated)
+grass: Grass on the floors that have it.
+grassdist: How far away grass is still drawn.
+cost grass: High (estimated)
+cost grassdist=128: Medium (estimated)
+cost grassdist=256: Medium (estimated)
+cost grassdist=512: High (estimated)
+maxdynlights: Muzzle flashes and explosions light the room (classic lighting).
+cost maxdynlights=3: Low (estimated)
+cost maxdynlights=5: Medium (estimated)
+depthfx: Smoke and explosions fade where they touch walls and floor instead of cutting into them.
+depthfxsize: Quality of the soft particles.
+cost depthfxsize=7: Low (estimated)
+cost depthfxsize=10: Medium (estimated)
+cost depthfxsize=12: High (estimated)
+glassenv: Reflections on glass.
+cost glassenv: Low (estimated)
+decals: Bullet holes, scorch marks and blood splats on walls and floor.
+decalfade: How long the marks stay.
+cost decalfade=10000: Low (estimated)
+cost decalfade=60000: Medium (estimated)
+maxtexsize: Size of the textures. Lower uses less video memory.
+cost maxtexsize=256: Low (estimated)
+cost maxtexsize=512: Low (estimated)
+cost maxtexsize=0: Medium (estimated)
+envmapmodels: Shiny reflections on weapons and items.
+cost envmapmodels: Low (estimated)
+bumpmodels: Surface relief on models.
+cost bumpmodels: Medium (estimated)
+
+# --- Display ---
+windowmode: How the game window is shown.
+windowmode=1: Exclusive Fullscreen: the monitor switches to the resolution you pick.
+windowmode=2: Borderless: Alt+Tab and a second screen work without closing the game.
+windowmode=0: Windowed: a normal window.
+borderlessres: Borderless, but the game draws at the size of the Resolution tab and stretches it over the screen. Windows is not changed. Needs FSAA at -1 or 0.
+borderlessaspect: Keeps the proportions of the chosen resolution, with black bars.
+fov: How wide you see, in degrees.
+cost fov: Low - a wider view draws more of the map (estimated)
+gamma: Brightness of the picture (100 = normal). Not applied when Windows HDR is on for this screen. HDR: Graphics > HDR screen.
+vsync: No tearing, a little more input lag.
+lowlatency: The mouse is read once the graphics card catches up: less delay between your hand and the screen.
+lowlatency=0: Off.
+lowlatency=1: On: no fps cost, helps most with ray tracing, native HDR or V-Sync.
+lowlatency=2: Strict: the lowest latency, fewer fps.
+cost lowlatency=2: Medium - fewer fps (estimated)
+>screenres *: The size the game draws at. More pixels = sharper, slower: the ray tracing cost grows with the number of pixels.
+cost >screenres *: High - at 2560x1440 most of the ray tracing time follows the pixels (measured)
+screenres: Your own size, width and height in pixels.
+aniso: Sharper textures seen at an angle (anisotropic filtering).
+cost aniso: Low (estimated)
+bilinear: Smooths textures up close.
+trilinear: Smooths the change between texture sizes in the distance.
+depthbits: Precision of the depth buffer in bits (0 = automatic). Applied after a restart.
+gui2d: Menus drawn flat on the screen. Off: menus float in the 3D world.
+guiclicktab: Menu tabs switch on click instead of when the mouse is over them.
+guifadein: Menus fade in when they open.
+menuhelpdelay: How long the mouse must rest on an option before its explanation shows. Never = no explanations.
+menuhelpplace: Where the explanation shows: next to the mouse, or at the bottom of the screen.
+
+# --- Sound ---
+soundvol: Volume of every sound.
+musicvol: Volume of the music.
+hitsound: A ping when you hit someone. Its volume: Hits, below.
+mixweapons: Loudness of shots and explosions. 100 = normal, 0 = mute, 200 = twice as loud.
+mixhits: Loudness of the hit ping. 100 = normal, 0 = mute, 200 = twice as loud.
+mixpain: Loudness of pain and death sounds. 100 = normal, 0 = mute, 200 = twice as loud.
+mixitems: Loudness of item pickups. 100 = normal, 0 = mute, 200 = twice as loud.
+mixannounce: Loudness of announcements (quad, fight). 100 = normal, 0 = mute, 200 = twice as loud.
+mixflags: Loudness of flag and skull sounds. 100 = normal, 0 = mute, 200 = twice as loud.
+mixmove: Loudness of jumps and landings. 100 = normal, 0 = mute, 200 = twice as loud.
+mixworld: Loudness of the map's ambient sounds. 100 = normal, 0 = mute, 200 = twice as loud.
+@Reset Mix to 100: Every mix slider back to 100.
+son3d: 3D sound (Steam Audio). Your own sounds, menus, announcements and music are never changed.
+son3d=0: Usual left / right sound.
+son3d=1: Headphones: you hear if a sound is ahead or behind, above or below (HRTF). Sets 44100 Hz.
+son3d=2: Speakers: usual left / right sound, with walls muffling sounds if Occlusion is on.
+cost son3d=1: Low - no visible processor cost, about 1.3 ms more sound delay (measured)
+cost son3d=2: Low - no visible processor cost (measured)
+son3docclusion: Walls between you and a sound muffle it (never muted). Needs Headphones or Speakers.
+soundchans: How many sounds can play at once. Applied when the sound restarts.
+soundfreq: Sound quality in Hz. 3D sound sets 44100. Applied when the sound restarts.
+soundbufferlen: Bigger if the sound crackles, smaller for less delay. Applied when the sound restarts.
+mumble: Voice chat in Mumble comes from the player's position.
+
+# --- Mouse ---
+invmouse: Moving the mouse up looks down.
+sensitivity: Mouse speed in the game. Type a value, then Enter.
+mousedpi: The DPI of your mouse, used to show cm/360.
+setcm360: Type how many cm of mouse movement turn you around once; the sensitivity is set for you. Turn off Windows' Enhance pointer precision, or cm/360 is wrong.
+guisens: Speed of the mouse cursor in the menus.
+
+# --- Keys ---
+@Forward: Walk forward.
+@Backward: Walk backward.
+@Left: Step left.
+@Right: Step right.
+@Jump: Jump.
+@Attack: Shoot.
+@Zoom: Zoom in (rifle and others).
+@Best weapon: The strongest weapon that has ammo.
+@Next weapon: The next weapon, in order.
+@Previous weapon: The previous weapon, in order.
+@Wheel up: What the mouse wheel up does: change weapon.
+@Wheel down: What the mouse wheel down does: change weapon.
+@Chainsaw: Take the chainsaw.
+@Shotgun: Take the shotgun.
+@Chaingun: Take the chaingun.
+@Rocket: Take the rocket launcher.
+@Rifle: Take the rifle.
+@Grenade: Take the grenade launcher.
+@Pistol: Take the pistol.
+@Drop flag: Drop the flag you carry.
+@Suicide: Kill yourself (respawn at once).
+@Chat: Write to everyone.
+@Team chat: Write to your team.
+@Command line: Type a command (starts with /).
+@Taunt: Play a taunt.
+@Expanded chat: The big chat window with numbered lines (F10).
+@Console: Show more console lines.
+@Scroll back: Scroll the console back, or the expanded chat and kill log when open.
+@Scroll to newest: Back to the newest lines.
+@Mute translation: Chat translation off or on (F7). The chat is still shown.
+@Retranslate last: Translate the last chat line again (F9).
+@Say translated: Write to everyone, sent translated into your send language.
+@"Team, translated": Write to your team, sent translated.
+@"Say, careful": Careful translation: slower (a few seconds), sent only if it works.
+@"Team, careful": Careful translation to your team.
+@Reply translated: Reply in the language of the last chat line.
+@"Team, reply": Reply to your team in the language of the last chat line.
+@Scoreboard: Show the scoreboard while held.
+@Kills / deaths: The kills and deaths log (F8).
+@Main menu: Open the main menu.
+@Settings: Open these settings.
+@Move HUD parts: Drag the HUD parts with the mouse.
+@Screenshot: Save a picture of the screen.
+@Spectate on / off: Watch the game or play again.
+@Pause: Pause local games and demos.
+@Third person: See yourself from behind (offline and edit mode only).
+@Add bot: Add a bot to a local game.
+@Delete bot: Remove a bot.
+@Match record: Video recording of matches on or off.
+@Demo record: Demo + HD aim recording on or off.
+@"Demo: back 10 s": In a demo: go back 10 seconds.
+@"Demo: ahead 10 s": In a demo: go ahead 10 seconds.
+@"Demo: HD aim": In a demo: exact aim on or off.
+@"Demo: X-ray": In a demo: players seen through walls on or off.
+@"Demo: hitboxes": In a demo: real hitboxes on or off.
+@"Demo: player's view": In a demo: what the followed player's game showed them.
+@"Demo: next view": In a demo: the next camera view.
+@"Demo: go to a time": In a demo: type a time to jump to.
+@"Demo: hide controls": In a demo: hide or show the playback controls.
+demolookkey: In a demo: hold this key to look around with the mouse.
+@"Demo: look (hold)": In a demo: hold this key to look around with the mouse.
+@Next player: While spectating: follow the next player.
+@Previous player: While spectating: follow the previous player.
+@Follow / free: While spectating: follow a player or fly freely.
+@Edit mode: Map editing on or off.
+@Allow edit (hold): Hold it to enter edit mode in single player.
+@In edit mode only: These keys work in edit mode only. Other editing keys: see the editing guide (editbind).
+@Copy: Copy the selection.
+@Paste: Paste.
+@Undo: Undo the last change.
+@Redo: Redo.
+@Delete: Delete the selection.
+@Flip: Flip the selection.
+@Light (calc): Calculate the map's lighting.
+
+# --- Console and chat ---
+consize: Number of console lines shown at the top left.
+confilter: What the console at the top left shows.
+@What it shows: Tick what this console shows.
+miniconfilter: Chat goes to its own box at the bottom left. Kill feed and frag messages: HUD > Kill feed.
+fullconsize: Size of the full console (F11), in percent of the screen.
+fullconfilter: What the full console (F11) shows.
+@Open expanded chat (F10): Chat only, numbered lines, mouse wheel to scroll. Ctrl+C copies all, Ctrl+Shift+C what is visible; drag to copy a range.
+fullchatsize: Size of the expanded chat (F10), in percent of the screen.
+
+# --- Recording ---
+@"Match Recording: ON": Video recording of every match is on. Click to turn it off.
+@"Match Recording: OFF": Video recording of every match is off. Click to turn it on.
+matchrecquality: Quality of the match videos.
+matchkeep: How many match videos to keep. The oldest is deleted.
+@Open Folder: Opens the folder of your recordings.
+@Extract: Copies the file (for a demo: the .dmo and the HD file together).
+@"Demo + HD Aim: ON": Your demos also record your exact aim (recorded on this machine, not server truth). Click to turn it off.
+@"Demo + HD Aim: OFF": Your demos do not record your exact aim. Click to turn it on.
+demohdvis: Your HD demos also record which enemies were really on your screen, to study them later. Never shown in game.
+cost demohdvis: None - nothing changes in game; about 10 KB more per minute of demo (measured)
+demoxraystart: Whether the X-ray view is already on when a demo opens. Demos only.
+demoxraystyle: Look of the X-ray: players seen through walls in their colour. Demos played on this computer only.
+cost demoxraystyle: Medium - 0.7 to 0.9 ms with ray tracing while the X-ray shows, nothing when it is off (measured)
+demokeep: How many of your recorded matches to keep, 1 to 200: type the number, then Enter. The oldest are deleted when your next match ends. Demos you received or copied in are never deleted.
+hdlivedelay: When spectating live on a compatible server: how far in the past the exact aim is shown, so it plays smooth. Same delay for every player.
+>openfolder demo: Put both files of a demo here (same names, not in a subfolder). The game's demo folder works too.
+@Play: Watch this demo.
+demopov: What you see while you follow a player in a demo.
+demopov=1: The others where that player's game showed them (from their ping and what the demo has; estimated without HD aim).
+demopov=0: Everyone at their real position.
+cost demopov: None - no measurable cost (measured)
+demohitbox: Draws the real hitbox a shot must touch around every player. Demos only.
+cost demohitbox: None - no measurable cost (measured)
+demohitboxshots: Each shot shows its line and the hitboxes near it, to judge hits and misses.
+demohitboxdeath: How long the hitbox of a killed player stays where it was hit, with the shot that killed.
+demohitboxuncertain: In a player's view: how close to the edge a shot must pass to be shown pink (uncertain) instead of red.
+demohitboxothercolour: In a player's view: colour of the victims of the other players' shots.
+
+# --- HUD parts (ammo bar, game clock, score, kill feed, kill streak) ---
+ammobaralign: Where the ammo bar lines up.
+ammobarhorizontal: The ammo bar lies flat instead of standing.
+ammobarflip: The ammo count goes on the other side of the icon.
+ammobarhideempty: Weapons without ammo are not shown.
+ammobarsep: Space between the weapons.
+ammobarcountsep: Space between the icon and the ammo count.
+ammobarcountscale: Size of the ammo numbers.
+ammobarscale: Size of the ammo bar. Easier: HUD > Move HUD parts.
+ammobarx: Place from left (0) to right (1). Easier: HUD > Move HUD parts.
+ammobary: Place from top (0) to bottom (1). Easier: HUD > Move HUD parts.
+gameclockalign: Where the game clock lines up.
+gameclockalpha: Opacity of the game clock (0 to 255).
+gameclockscale: Size of the game clock. Easier: HUD > Move HUD parts.
+gameclockx: Place from left (0) to right (1). Easier: HUD > Move HUD parts.
+gameclocky: Place from top (0) to bottom (1). Easier: HUD > Move HUD parts.
+hudscorealign: Where the score lines up.
+hudscorealpha: Opacity of the score (0 to 255).
+hudscoresep: Space between the two scores.
+hudscorescale: Size of the score. Easier: HUD > Move HUD parts.
+hudscorex: Place from left (0) to right (1). Easier: HUD > Move HUD parts.
+hudscorey: Place from top (0) to bottom (1). Easier: HUD > Move HUD parts.
+killfeedfilter: Which frags the kill feed shows: all, your team's, or only yours.
+reacttime: After each of your frags and deaths: how long the enemy was on your screen / under your crosshair before the killing shot, in ms.
+reacttimeall: Also the reaction times of frags between other players (compatible server, the killer has it on).
+killfeedvs: Your kills - deaths against each player, next to their name.
+killfeedconsole: Frags are also written in the console.
+killfeedalign: Where the kill feed lines up.
+killfeedfade: Seconds before a line fades.
+killfeedmax: Lines shown at most.
+killfeedscale: Size of the kill feed. Easier: HUD > Move HUD parts.
+killfeedx: Place from left (0) to right (1). Easier: HUD > Move HUD parts.
+killfeedy: Place from top (0) to bottom (1). Easier: HUD > Move HUD parts.
+@Open the log (F8): The list of the kills and deaths of the match.
+fullkilllogsize: Size of the kills / deaths log (F8), in percent of the screen.
+killstreakothers: Other players' sprees are announced too.
+killstreaktk: Killing a teammate ends your spree.
+killstreakstep: An announcement every N frags (5 = at 5, 10, 15...).
+killstreakfade: Seconds the announcement stays.
+killstreakalign: Where the announcement lines up.
+killstreakscale: Size of the announcement. Easier: HUD > Move HUD parts.
+killstreakx: Place from left (0) to right (1). Easier: HUD > Move HUD parts.
+killstreaky: Place from top (0) to bottom (1). Easier: HUD > Move HUD parts.
+
+# --- Friends and colours, player model ---
+friendaddname: Type a nick, then Add: that player is shown as a friend.
+@Add: Adds the nick as a friend.
+clantag: Your clan tag: players with this tag in their nick count as friends.
+@Refresh: Looks again for your friends on the servers.
+@x: Removes this friend.
+teamcolorally: Colour of every teammate's body, bots too. None: blue.
+teamcolorenemy: Colour of every enemy's body, bots too. None: red. Free for all: everyone else is an enemy.
+friendallycolor: Colour of your friends on your team: body, name and minimap.
+friendenemycolor: Colour of your friends on the other team: body and name.
+friendsfollowteamcolor: Friends' bodies take the teammate / enemy colour; their names keep the friend colours.
+mycolor: Colour of your own body and name.
+customplayermodel: Your own model files from the custom folder, with nothing on top (no colour skin).
+@Open custom folder: Opens the folder for your own player model.
+
+# --- Weapons and trails ---
+hudgun: Your weapon in first person.
+hudgunsway: Your weapon sways when you move.
+muzzleflash: A flash at the gun barrel when shooting.
+muzzlelight: Shots light the walls and players around (every player).
+cost muzzlelight: Low (estimated)
+muzzlelightshotgun: Light of the shotgun shots on walls, floor and players.
+muzzlelightchaingun: Light of the chaingun shots on walls, floor and players.
+muzzlelightrifle: Light of the rifle shots on walls, floor and players.
+muzzlelightgrenadelauncher: Light of the grenade launcher shots on walls, floor and players.
+muzzlelightpistol: Light of the pistol shots on walls, floor and players.
+@Me: Colours of your own shots.
+@Others: Colours of everyone else's shots (players, bots, any team).
+@All: Colours of every shot that has no Me / Others colour.
+trailbrightness: Brightness of your custom trail colours (the stock ones never change). Your view only: nothing is sent.
+@Back to stock colours: Every trail colour back to the game's own.
+@Projectiles and explosions back to stock: Rocket and grenade glow and explosion colours back to the game's own.
+@same as All: Use the colour set in All.
+>settrailcolor *: Use this colour.
+>crosshairhex *: Use this colour for the crosshair.
+>cleargui 1; playermodel *: Play with this model.
+>hdroutexpstep *: Native HDR only: picture a step brighter (+) or darker (-).
+@stock: The game's own colour.
+trailcolorshotgun: Shotgun trail colour of every shot without its own Me / Others colour. Your view only.
+trailcolorchaingun: Chaingun trail colour of every shot without its own Me / Others colour. Your view only.
+trailcolorrifle: Rifle smoke colour of every shot without its own Me / Others colour. Your view only.
+trailcolorrocketlauncher: Smoke behind rockets, for every shot without its own Me / Others colour. Your view only.
+trailcolorgrenadelauncher: Smoke behind grenades, for every shot without its own Me / Others colour. Your view only.
+trailcolorpistol: Pistol trail colour of every shot without its own Me / Others colour. Your view only.
+projcolorrocketlauncher: Glow of rockets in flight and colour of their explosion. With ray tracing their light takes it too.
+projcolorgrenadelauncher: Glow of grenades in flight and colour of their explosion. With ray tracing their light takes it too.
+trailmycolorshotgun: Shotgun trail colour of your own shots. same as All = the All colour.
+trailmycolorchaingun: Chaingun trail colour of your own shots. same as All = the All colour.
+trailmycolorrifle: Rifle smoke colour of your own shots. same as All = the All colour.
+trailmycolorrocketlauncher: Smoke behind your own rockets. same as All = the All colour.
+trailmycolorgrenadelauncher: Smoke behind your own grenades. same as All = the All colour.
+trailmycolorpistol: Pistol trail colour of your own shots. same as All = the All colour.
+projmycolorrocketlauncher: Glow and explosion colour of your own rockets. same as All = the All colour.
+projmycolorgrenadelauncher: Glow and explosion colour of your own grenades. same as All = the All colour.
+trailothercolorshotgun: Shotgun trail colour of everyone else (players, bots). same as All = the All colour.
+trailothercolorchaingun: Chaingun trail colour of everyone else. same as All = the All colour.
+trailothercolorrifle: Rifle smoke colour of everyone else. same as All = the All colour.
+trailothercolorrocketlauncher: Smoke behind everyone else's rockets. same as All = the All colour.
+trailothercolorgrenadelauncher: Smoke behind everyone else's grenades. same as All = the All colour.
+trailothercolorpistol: Pistol trail colour of everyone else. same as All = the All colour.
+projothercolorrocketlauncher: Glow and explosion colour of everyone else's rockets. same as All = the All colour.
+projothercolorgrenadelauncher: Glow and explosion colour of everyone else's grenades. same as All = the All colour.
+
+# --- Crosshair ---
+crosshairsize: Size of the crosshair. 0 = hidden.
+crosshairhex: Resting colour of the crosshair, as hex RRGGBB. Hit, teammate and low-health colours still show over it.
+crosshaircolour: Resting colour of the crosshair. Hit, teammate and low-health colours still show over it.
+crosshairfx: Hit marker, teammate crosshair and health colours. Off: always the plain crosshair.
+crosshaircolors: The crosshair turns orange then red when your health is low.
+teamcrosshair: Another crosshair when you aim at a teammate.
+hitcrosshair: The crosshair shows a hit marker, in the colour of the player hit.
+crosshairreloaddim: The crosshair is dimmer while the weapon reloads.
+
+# --- Bots ---
+botmatchcount: How many bots the match starts with.
+cost botmatchcount: Low - more bots use more processor (estimated)
+botmatchminskill: Skill of the weakest bot (bots get a skill between the minimum and the maximum).
+botmatchmaxskill: Skill of the strongest bot.
+botperception: How the bots play.
+botperception=0: Classic: the normal Sauerbraten bots.
+botperception=2: Tiny Apa (work in progress): bots modelled on one real player's play.
+botstylelevel: How good the Tiny Apa bots are. 100 = a strong player, 50 = half the accuracy, slower.
+botstyleform: Tiny Apa bots have a different form each game, as a real player does.
+@form settings: How often Tiny Apa bots play tired, and their warm-up.
+botstyletired: How often a game is played very tired (late at night): a bit less accurate and slower.
+botstylewarmup: Tiny Apa bots are a little less accurate in the first two minutes. Off: their full level from the first second.
+botnet: Tiny Apa bots take their steps, stops and jumps from a small network learned from one real player's recorded games (work in progress). Off: the rules, as before.
+cost botnet: Low - about 0.001 to 0.003 ms of processor per bot and per frame (measured)
+botnavgrid: Tiny Apa bots find their way on a walk grid the game makes of each map. Off: the map's waypoints, as before (none: they stand still).
+cost botnavgrid: Low - the first time on a map, about 0.6 ms for about 12 s while the grid is made (measured)
+@walk grid settings: How the walk grid is made and kept, and how varied the bots' ways are.
+botnavsafe: Bots keep clear of death pits, lava and the void. Off: they can fall, as before.
+navbuildshare: How much of each frame may be spent making the walk grid. More = ready sooner; on a processor-limited PC, fewer fps meanwhile.
+cost navbuildshare: Low - up to about 10 % fewer fps while the grid is made, on a processor-limited PC (measured)
+navcachemb: Disk space for the walk grids of the maps played lately. 0 = no cache: each map's grid is made again when loaded.
+navvariety: 0 = always the shortest way; more = more varied ways.
+@start match: Choose the mode and the map, then the bots join.
+
+# --- Chat translation ---
+@"No AI loaded: chat translation is off": It starts once you install a model (Model tab) or an API key.
+translatechat: Incoming chat is translated into the language you read.
+translateteamchat: Team chat is translated too.
+translatepreview: Shows the translation while you type.
+translatefemme: Feminine grammar in the translations of what you send. Also shows the feminine examples.
+translateauto: The language of what you send.
+translateauto=0: Sent as typed.
+translateauto=1: Translated into the language set in I send in.
+translateauto=2: Translated into the language last spoken to you.
+>translatelang *: Read the chat in this language.
+>translateoutlang *: Send what you write in this language.
+>texamplesetlang *: Show the examples of this language.
+translatelang: The language you read. The active language is green. Other codes: Shortcuts and codes tab.
+translateoutlang: The language you send in. The active language is green. Other codes: Shortcuts and codes tab.
+@Open custom model folder: Drop a custom .gguf model here. Large needs about 12 GB of video memory.
+@Use: Use this custom model.
+>tmodeldelete *: Deletes this model from the disk.
+>tmodelcustomdel *: Deletes this custom model file.
+>tmodelclick *: Installs this model, or uses it if it is already installed.
+tmodelurl: Address of an Internet AI with an OpenAI-compatible API.
+tmodelkey: Your API key. Save does not show the key again.
+tmodelapimodel: The model name. Empty = automatic.
+@Save API: Saves the address, key and model.
+@Clear API Key: Forgets the saved API key.
+texamplelang: The language of the examples shown below.
+texampledir: Which way the example goes: chat you read, or what you send.
+texamplekind: How the phrase is saved. Keep as many as you want. = means leave untranslated. /tfix makes the same choice.
+texamplekind=0: Exact translation: this phrase only. Does not slow the AI.
+texamplekind=1: Few-shot example: teaches the AI a way to translate. More = more work for the AI (slower).
+cost texamplekind=1: Low - each example makes the AI a little slower (estimated)
+texamplesrc: The phrase as it is written.
+texampledst: How it should read.
+@Save: Saves the phrase and its translation.
+@Forget This Original: Forgets every saved translation of this phrase.
+@Reload List: Reads the list again.
+@Edit: Puts this line in the fields above to change it.
+@Forget: Forgets this line.
+@Mute Translation (F7): Chat translation off or on. The chat is still shown. Keys: Options > Keys > Chat.
+@Expanded Chat (F10): The big chat window with numbered lines.
+@Retranslate Last Line (F9): Translates the last chat line again.
+@Service Status: Writes in the console whether the translation service runs.

@@ -5,7 +5,8 @@
   python sauerrt_publish.py verify  --url https://.../channels/test/latest.json
   python sauerrt_publish.py publish-github --version <v> --channel stable --pointer-only
       (passage en stable : pointeur stable, puis page GitHub de la version
-       promue : plus de "Pre-release", texte "Channel: stable", "Latest")
+       promue : plus de "Pre-release", texte "Channel: stable", "Latest" ;
+       toute page de release finit par "Source code: <tag des sources publiques>")
 
 Regles (identiques depuis n'importe quel PC de dev) :
   1. une version publiee est immuable : si releases/<v>/manifest.json existe
@@ -256,7 +257,7 @@ def cmd_publish_github(a):
     if not rel:
         rel = gh("POST", f"/repos/{repo}/releases", tok, data={
             "tag_name": tag, "target_commitish": "main", "name": f"L4ZY {ver}",
-            "body": (man.get("notes") or "") + f"\n\nChannel: {channel}. Install with L4ZY-Setup-{ver}.exe; updates come through the in-game Updates menu.",
+            "body": with_source_line((man.get("notes") or "") + f"\n\nChannel: {channel}. Install with L4ZY-Setup-{ver}.exe; updates come through the in-game Updates menu.", ver, tok),
             "prerelease": channel != "stable"})
 
     # composants : reutilises s'ils existent deja dans une release, sinon envoyes ici
@@ -285,18 +286,36 @@ def cmd_publish_github(a):
     push_readme(repo, tok, f"README: L4ZY {ver}")
 
 
+SOURCE_REPO = "Lazy-Apathy/L4ZY-source"
+
+
+def with_source_line(body, ver, tok):
+    """Ajoute a la fin du texte d'une release la ligne "Source code: <lien du
+    tag v<ver> des sources publiques>", seulement si ce tag existe (sinon le
+    texte est rendu tel quel, avec un avertissement). Rien si deja present."""
+    url = f"https://github.com/{SOURCE_REPO}/tree/v{ver}"
+    if url in body:
+        return body
+    if not gh("GET", f"/repos/{SOURCE_REPO}/git/ref/tags/v{ver}", tok):
+        print(f"  attention : tag v{ver} absent de {SOURCE_REPO}, pas de ligne Source code")
+        return body
+    return body.rstrip("\n") + f"\nSource code: {url}"
+
+
 def promote_release(repo, tok, ver, latest=True):
     """Passage en stable d'une version publiee d'abord en test : sa release
-    perd "Pre-release", son texte dit "Channel: stable" et elle devient
-    "Latest". Ni tag, ni fichier joint, ni autre texte ne changent."""
+    perd "Pre-release", son texte dit "Channel: stable" (+ ligne "Source code"
+    si elle manque) et elle devient "Latest". Ni tag, ni fichier joint, ni
+    autre texte ne changent."""
     tag = f"v{ver}"
     rel = gh("GET", f"/repos/{repo}/releases/tags/{tag}", tok)
     if not rel:
         die(f"release {tag} introuvable")
     body = rel.get("body") or ""
     patch = {"prerelease": False, "make_latest": "true" if latest else "false"}
-    if "Channel: test" in body:
-        patch["body"] = body.replace("Channel: test", "Channel: stable", 1)
+    new = with_source_line(body.replace("Channel: test", "Channel: stable", 1), ver, tok)
+    if new != body:
+        patch["body"] = new
     res = gh("PATCH", f"/repos/{repo}/releases/{rel['id']}", tok, data=patch)
     if res.get("prerelease") or "Channel: test" in (res.get("body") or ""):
         die(f"page {tag} pas mise a jour")

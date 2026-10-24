@@ -142,6 +142,7 @@ CLIENT_OBJS= \
 	engine/world.o \
 	engine/worldio.o \
 	fpsgame/ai.o \
+	fpsgame/ainav.o \
 	fpsgame/client.o \
 	fpsgame/demohd.o \
 	fpsgame/translate.o \
@@ -528,6 +529,9 @@ engine/worldio.o: engine/texture.h engine/model.h
 fpsgame/ai.o: fpsgame/game.h shared/cube.h shared/tools.h shared/geom.h
 fpsgame/ai.o: shared/ents.h shared/command.h shared/glexts.h shared/glemu.h
 fpsgame/ai.o: shared/iengine.h shared/igame.h fpsgame/ai.h
+fpsgame/ainav.o: fpsgame/game.h shared/cube.h shared/tools.h shared/geom.h
+fpsgame/ainav.o: shared/ents.h shared/command.h shared/glexts.h shared/glemu.h
+fpsgame/ainav.o: shared/iengine.h shared/igame.h fpsgame/ai.h fpsgame/ainavbot.h
 fpsgame/client.o: fpsgame/game.h shared/cube.h shared/tools.h shared/geom.h
 fpsgame/client.o: shared/ents.h shared/command.h shared/glexts.h
 fpsgame/client.o: shared/glemu.h shared/iengine.h shared/igame.h fpsgame/ai.h

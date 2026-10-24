@@ -864,6 +864,14 @@ struct ctfclientmode : clientmode
         return m_hold ? "the flag" : teamcolor("your flag", ctfflagteam(f.team), "the enemy flag");
     }
 
+    // a name in a flag message: your colour or a friend's colour, else the team colours as before
+    const char *flagcolorname(fpsent *d)
+    {
+        static string buf;
+        if(personalcolorname(d, buf)) return buf;
+        return teamcolorname(d);
+    }
+
     // a flag event: the vanilla console line, also shown as a big flag message
     void flagannounce(flag &f, const char *msg)
     {
@@ -886,7 +894,7 @@ struct ctfclientmode : clientmode
             f.droploc = vec(-1, -1, -1);
             f.interptime = 0;
         }
-        defformatstring(msg, "%s dropped %s", teamcolorname(d), teamcolorflag(f));
+        defformatstring(msg, "%s dropped %s", flagcolorname(d), teamcolorflag(f));
         flagannounce(f, msg);
         teamsound(d, S_FLAGDROP);
     }
@@ -930,7 +938,7 @@ struct ctfclientmode : clientmode
         f.interptime = 0;
         returnflag(i);
         if(m_protect && d->feetpos().dist(f.spawnloc) < FLAGRADIUS) d->flagpickup |= 1<<f.id;
-        defformatstring(msg, "%s returned %s", teamcolorname(d), teamcolorflag(f));
+        defformatstring(msg, "%s returned %s", flagcolorname(d), teamcolorflag(f));
         flagannounce(f, msg);
         teamsound(d, S_FLAGRETURN);
     }
@@ -993,10 +1001,10 @@ struct ctfclientmode : clientmode
             particle_textcopy(d->abovehead(), ds, PART_TEXT, 2000, 0x32FF64, 4.0f, -8);
         }
         d->flags = dflags;
-        conoutf(CON_GAMEINFO, "%s scored for %s", teamcolorname(d), teamcolor("your team", ctfflagteam(team), "the enemy team"));
+        conoutf(CON_GAMEINFO, "%s scored for %s", flagcolorname(d), teamcolor("your team", ctfflagteam(team), "the enemy team"));
         {
             string msg;
-            formatstring(msg, "%s scored for %s", teamcolorname(d), teamcolor("your team", ctfflagteam(team), "the enemy team"));
+            formatstring(msg, "%s scored for %s", flagcolorname(d), teamcolor("your team", ctfflagteam(team), "the enemy team"));
             if(runms >= 0) concformatstring(msg, " \f7in %d.%ds", runms/1000, (runms/100)%10);
             addflagfeed(msg, feedicon);
         }
@@ -1015,9 +1023,9 @@ struct ctfclientmode : clientmode
         // the timer only runs for a steal from the base, not for a flag picked up from the ground
         f.stealtime = !m_hold && !m_protect && !f.droptime ? lastmillis : 0;
         string msg;
-        if(m_hold) formatstring(msg, "%s picked up the flag for %s", teamcolorname(d), teamcolor("your team", d->team, "the enemy team"));
-        else if(m_protect || f.droptime) formatstring(msg, "%s picked up %s", teamcolorname(d), teamcolorflag(f));
-        else formatstring(msg, "%s stole %s", teamcolorname(d), teamcolorflag(f));
+        if(m_hold) formatstring(msg, "%s picked up the flag for %s", flagcolorname(d), teamcolor("your team", d->team, "the enemy team"));
+        else if(m_protect || f.droptime) formatstring(msg, "%s picked up %s", flagcolorname(d), teamcolorflag(f));
+        else formatstring(msg, "%s stole %s", flagcolorname(d), teamcolorflag(f));
         flagannounce(f, msg);
         ownflag(i, d, lastmillis, m_hold ? ctfteamflag(d->team) : -1);
         teamsound(d, S_FLAGPICKUP);

@@ -701,7 +701,7 @@ namespace entities
 
     void editent(int i, bool local)
     {
-        extentity &e = *ents[i];
+        extentity &e = *ents[i]; ai::naventchanged(i);
         if(e.type == ET_MAPMODEL && validtrigger(e.attr3))
         {
             fpsentity &f = (fpsentity &)e;

@@ -39,25 +39,20 @@
 1. button "Screen" : concat displaytab "=" 0 | button "Resolution" : concat displaytab "=" 1 | button "Advanced" : concat displaytab "=" 2
 == Window {only if tab "Screen" open}
 1. choice windowmode: "Exclusive Fullscreen"=1, "Borderless"=2, "Windowed"=0 (one under the other)
-2. note: Borderless: Alt+Tab and a second screen work without closing the game.
-3. {if "Borderless" chosen (windowmode 2) and fsaa > 0} note: Borderless at a chosen resolution needs FSAA at -1 or 0 (Advanced).
-4. {if "Borderless" chosen (windowmode 2) and not (fsaa > 0)} checkbox "Borderless at the chosen resolution (stretched, Windows unchanged)" borderlessres
-5. {if "Borderless" chosen (windowmode 2) and not (fsaa > 0) and "Borderless at the chosen resolution (stretched, Windows unchanged)" ticked (borderlessres)} checkbox "Keep proportions (black bars)" borderlessaspect
-6. {if "Borderless" chosen (windowmode 2) and not "Borderless at the chosen resolution (stretched, Windows unchanged)" ticked (borderlessres) or fsaa > 0} status: Borderless: the game uses the monitor size (<desktopw>x<desktoph>).
-7. {if not ("Borderless" chosen (windowmode 2) and not "Borderless at the chosen resolution (stretched, Windows unchanged)" ticked (borderlessres) or fsaa > 0)} text "Resolution: <scr_w>x<scr_h> (Resolution tab)" (computed)
+2. {if "Borderless" chosen (windowmode 2) and fsaa > 0} status: Borderless at a chosen resolution needs FSAA at -1 or 0 (Advanced).
+3. {if "Borderless" chosen (windowmode 2) and not (fsaa > 0)} checkbox "Borderless at the chosen resolution (stretched, Windows unchanged)" borderlessres
+4. {if "Borderless" chosen (windowmode 2) and not (fsaa > 0) and "Borderless at the chosen resolution (stretched, Windows unchanged)" ticked (borderlessres)} checkbox "Keep proportions (black bars)" borderlessaspect
+5. {if "Borderless" chosen (windowmode 2) and not "Borderless at the chosen resolution (stretched, Windows unchanged)" ticked (borderlessres) or fsaa > 0} status: Borderless: the game uses the monitor size (<desktopw>x<desktoph>).
+6. {if not ("Borderless" chosen (windowmode 2) and not "Borderless at the chosen resolution (stretched, Windows unchanged)" ticked (borderlessres) or fsaa > 0)} text "Resolution: <scr_w>x<scr_h> (Resolution tab)" (computed)
 == Picture {only if tab "Screen" open}
 1. slider "Field of View (default: 100)" fov
 2. slider "Gamma (default: 100)" gamma
-3. {if Windows HDR on for this screen} note: Windows HDR is on for this screen: gamma is not applied.
-4. note: HDR: Options > Graphics > HDR screen
+3. {if Windows HDR on for this screen} status: Windows HDR is on for this screen: gamma is not applied.
 == Speed and latency
 1. {if tab "Screen" open} checkbox "V-Sync" vsync
 2. {if tab "Screen" open} "Low Latency (mouse read once the GPU catches up)" choice lowlatency: "Off"=0, "On"=1, "Strict (lowest latency, fewer FPS)"=2
 3. {if tab "Resolution" open and "Borderless" chosen (windowmode 2) and not "Borderless at the chosen resolution (stretched, Windows unchanged)" ticked (borderlessres) or fsaa > 0} status: Borderless: the game uses the monitor size (<desktopw>x<desktoph>).
-4. {if tab "Resolution" open and "Borderless" chosen (windowmode 2) and not "Borderless at the chosen resolution (stretched, Windows unchanged)" ticked (borderlessres) or fsaa > 0} note: The resolution below applies in Exclusive Fullscreen or Windowed,
-5. {if tab "Resolution" open and "Borderless" chosen (windowmode 2) and not "Borderless at the chosen resolution (stretched, Windows unchanged)" ticked (borderlessres) or fsaa > 0} note: or in Borderless at the chosen resolution (Screen tab).
-6. {if tab "Resolution" open and "Exclusive Fullscreen" chosen (windowmode 1)} note: Exclusive Fullscreen: the monitor switches to the resolution you pick.
-7. {if tab "Resolution" open} ([ text "4:3" / button "320x240" : screenres 320 240 / button "640x480" : screenres 640 480 / button "800x600" : screenres 800 600 / button "1024x768" : screenres 1024 768 / button "1152x864" : screenres 1152 864 / button "1280x960" : screenres 1280 960 / button "1400x1050" : screenres 1400 1050 / button "1600x1200" : screenres 1600 1200 / button "1792x1344" : screenres 1792 1344 / button "1856x1392" : screenres 1856 1392 / button "1920x1440" : screenres 1920 1440 / button "2048x1536" : screenres 2048 1536 / button "2800x2100" : screenres 2800 2100 / button "3200x2400" : screenres 3200 2400 ] | [ text "16:10" / button "320x200" : screenres 320 200 / button "640x400" : screenres 640 400 / button "1024x640" : screenres 1024 640 / button "1280x800" : screenres 1280 800 / button "1440x900" : screenres 1440 900 / button "1600x1000" : screenres 1600 1000 / button "1680x1050" : screenres 1680 1050 / button "1920x1200" : screenres 1920 1200 / button "2048x1280" : screenres 2048 1280 / button "2560x1600" : screenres 2560 1600 / button "2880x1800" : screenres 2880 1800 / button "3200x2000" : screenres 3200 2000 / button "3840x2400" : screenres 3840 2400 ] | [ text "16:9" / button "1024x600" : screenres 1024 600 / button "1280x720" : screenres 1280 720 / button "1366x768" : screenres 1366 768 / button "1600x900" : screenres 1600 900 / button "1920x1080" : screenres 1920 1080 / button "2048x1152" : screenres 2048 1152 / button "2560x1440" : screenres 2560 1440 / button "2880x1620" : screenres 2880 1620 / button "3200x1800" : screenres 3200 1800 / button "3840x2160" : screenres 3840 2160 ] | [ text "5:4" / button "600x480" : screenres 600 480 / button "1280x1024" : screenres 1280 1024 / button "1600x1280" : screenres 1600 1280 / button "2560x2048" : screenres 2560 2048 ] | [ text "5:3" / button "800x480" : screenres 800 480 / button "1280x768" : screenres 1280 768 / text "Custom" / field -> screenres | field -> screenres ])
+4. {if tab "Resolution" open} ([ text "4:3" / button "320x240" : screenres 320 240 / button "640x480" : screenres 640 480 / button "800x600" : screenres 800 600 / button "1024x768" : screenres 1024 768 / button "1152x864" : screenres 1152 864 / button "1280x960" : screenres 1280 960 / button "1400x1050" : screenres 1400 1050 / button "1600x1200" : screenres 1600 1200 / button "1792x1344" : screenres 1792 1344 / button "1856x1392" : screenres 1856 1392 / button "1920x1440" : screenres 1920 1440 / button "2048x1536" : screenres 2048 1536 / button "2800x2100" : screenres 2800 2100 / button "3200x2400" : screenres 3200 2400 ] | [ text "16:10" / button "320x200" : screenres 320 200 / button "640x400" : screenres 640 400 / button "1024x640" : screenres 1024 640 / button "1280x800" : screenres 1280 800 / button "1440x900" : screenres 1440 900 / button "1600x1000" : screenres 1600 1000 / button "1680x1050" : screenres 1680 1050 / button "1920x1200" : screenres 1920 1200 / button "2048x1280" : screenres 2048 1280 / button "2560x1600" : screenres 2560 1600 / button "2880x1800" : screenres 2880 1800 / button "3200x2000" : screenres 3200 2000 / button "3840x2400" : screenres 3840 2400 ] | [ text "16:9" / button "1024x600" : screenres 1024 600 / button "1280x720" : screenres 1280 720 / button "1366x768" : screenres 1366 768 / button "1600x900" : screenres 1600 900 / button "1920x1080" : screenres 1920 1080 / button "2048x1152" : screenres 2048 1152 / button "2560x1440" : screenres 2560 1440 / button "2880x1620" : screenres 2880 1620 / button "3200x1800" : screenres 3200 1800 / button "3840x2160" : screenres 3840 2160 ] | [ text "5:4" / button "600x480" : screenres 600 480 / button "1280x1024" : screenres 1280 1024 / button "1600x1280" : screenres 1600 1280 / button "2560x2048" : screenres 2560 2048 ] | [ text "5:3" / button "800x480" : screenres 800 480 / button "1280x768" : screenres 1280 768 / text "Custom" / field -> screenres | field -> screenres ])
 == Texture filtering {only if tab "Advanced" open}
 1. slider "Anisotropic Filtering (default: 0)" aniso (values 0 2 4 8 16)
 2. checkbox "Bilinear Filtering" bilinear
@@ -69,32 +64,27 @@
 1. checkbox "2D Menus" gui2d
 2. checkbox "Click Tab" guiclicktab
 3. checkbox "Menu Fade In" guifadein
+4. "Explanation after" choice menuhelpdelay: "Never"=0, "0.5 s"=500, "1 s"=1000, "1.5 s (default)"=1500, "2 s"=2000, "3 s"=3000, "5 s"=5000
+5. "Explanation shown" choice menuhelpplace: "Next to the mouse (default)"=0, "At the bottom"=1
 
 ## gfx | Graphics | Options > Graphics
 == (top)
 1. button "General" : concat gfxtab "=" 0 | button "Ray tracing" : concat gfxtab "=" 1 | button "Performance" : concat gfxtab "=" 5 | button "HDR screen" : concat gfxtab "=" 3 | button "Classic" : concat gfxtab "=" 4
 == Lighting {only if tab "General" open}
-1. note: Classic: original lighting, any GPU. Ray tracing: RT lights, sun and sky.
-2. choice hwrt: "Classic (no RT)"=0, "Ray tracing"=1
-3. {if hwrtraison() != ""} status: <hwrtraison>
-4. {if hwrtraison() != ""} note: It needs a graphics card with hardware ray tracing and an up-to-date driver.
-5. {if "Ray tracing" chosen (hwrt 1) and RT lighting running} status: Ray-traced lighting is running. Its settings: Ray tracing tab.
-6. {if "Ray tracing" chosen (hwrt 1) and not (RT lighting running)} status: Ray tracing chosen, but not running yet (no map, or it failed: see console).
-7. {if not ("Ray tracing" chosen (hwrt 1))} note: Classic lighting settings: Classic tab.
+1. choice hwrt: "Classic (no RT)"=0, "Ray tracing"=1
+2. {if hwrtraison() != ""} status: <hwrtraison>
+3. {if "Ray tracing" chosen (hwrt 1) and RT lighting running} status: Ray-traced lighting is running. Its settings: Ray tracing tab.
+4. {if "Ray tracing" chosen (hwrt 1) and not (RT lighting running)} status: Ray tracing chosen, but not running yet (no map, or it failed: see console).
 == Anti-Aliasing {only if tab "General" open}
 1. checkbox "FXAA in Native (softer)" lookfxaa | "MSAA (Classic only)" choice fsaa: "Off"=<fsaa>, "2x"=2, "4x"=4, "8x"=8
-2. {if fsaa > 0 and not "Ray tracing" chosen (hwrt 1) and hwrtngxmodeapplied() = 0} note: MSAA: smooth edges, sharp textures. A change restarts the graphics.
-3. {if DLSS/FSR built in and hwrtngxmodeapplied() != 0} note: FXAA unused while DLAA, DLSS or FSR is on.
-4. {if DLSS/FSR built in and hwrtngxmodeapplied() = 0} note: FXAA off (default) keeps Native sharp. Quality = more internal pixels.
-5. {if DLSS/FSR built in} choice hwrtngxmode: "Native"=0, "DLAA"=1, "DLSS Quality"=2, "DLSS Balanced"=3, "DLSS Performance"=4
-6. {if DLSS/FSR built in and FSR built in} choice hwrtngxmode: "FSR Native"=5, "FSR Quality"=6, "FSR Balanced"=7, "FSR Performance"=8
-7. {if DLSS/FSR built in and FSR built in and hwrtdlssraison() != ""} status: <hwrtdlssraison>
-8. {if DLSS/FSR built in and FSR built in and hwrtfsrraison() != ""} status: <hwrtfsrraison>
-9. {if DLSS/FSR built in and FSR built in and hwrtngxmode >= 6 and hwrtfsrraison() = ""} note: FSR sharpening after upscaling (0 = off, 10 = like DLSS):
-10. {if DLSS/FSR built in and FSR built in and hwrtngxmode >= 6 and hwrtfsrraison() = ""} slider hwrtfsrsharpness
-11. {if DLSS/FSR built in and hwrtngxmode >= 1 and hwrtngxmode <= 4 and hwrtdlssraison() = "" or hwrtngxmode >= 2 and hwrtngxmode <= 4 or hwrtngxmode >= 6 and hwrtngxmode >= 1 and hwrtngxmode <= 4 and hwrtdlssraison() = ""} "DLAA/DLSS sharpening" choice hwrtdlsssharpness: "Off"=0, "10"=10, "20"=20, "40"=40 | {if DLSS/FSR built in and hwrtngxmode >= 1 and hwrtngxmode <= 4 and hwrtdlssraison() = "" or hwrtngxmode >= 2 and hwrtngxmode <= 4 or hwrtngxmode >= 6 and hwrtngxmode >= 2 and hwrtngxmode <= 4 or hwrtngxmode >= 6} checkbox "Sharper textures (may shimmer)" hwrtupscalemipbias
-12. {if DLSS/FSR built in and hwrtngxfallback() = 1} status: Using Native: <AA_modename $hwrtngxmode> did not start. Your choice is kept.
-13. {if DLSS/FSR built in and hwrtngxfallback() = 1 and hwrtngxreason() != ""} note: <hwrtngxreason>
+2. {if DLSS/FSR built in} choice hwrtngxmode: "Native"=0, "DLAA"=1, "DLSS Quality"=2, "DLSS Balanced"=3, "DLSS Performance"=4
+3. {if DLSS/FSR built in and FSR built in} choice hwrtngxmode: "FSR Native"=5, "FSR Quality"=6, "FSR Balanced"=7, "FSR Performance"=8
+4. {if DLSS/FSR built in and FSR built in and hwrtdlssraison() != ""} status: <hwrtdlssraison>
+5. {if DLSS/FSR built in and FSR built in and hwrtfsrraison() != ""} status: <hwrtfsrraison>
+6. {if DLSS/FSR built in and FSR built in and hwrtngxmode >= 6 and hwrtfsrraison() = ""} slider "FSR sharpening" hwrtfsrsharpness
+7. {if DLSS/FSR built in and hwrtngxmode >= 1 and hwrtngxmode <= 4 and hwrtdlssraison() = "" or hwrtngxmode >= 2 and hwrtngxmode <= 4 or hwrtngxmode >= 6 and hwrtngxmode >= 1 and hwrtngxmode <= 4 and hwrtdlssraison() = ""} "DLAA/DLSS sharpening" choice hwrtdlsssharpness: "Off"=0, "10"=10, "20"=20, "40"=40 | {if DLSS/FSR built in and hwrtngxmode >= 1 and hwrtngxmode <= 4 and hwrtdlssraison() = "" or hwrtngxmode >= 2 and hwrtngxmode <= 4 or hwrtngxmode >= 6 and hwrtngxmode >= 2 and hwrtngxmode <= 4 or hwrtngxmode >= 6} checkbox "Sharper textures (may shimmer)" hwrtupscalemipbias
+8. {if DLSS/FSR built in and hwrtngxfallback() = 1} status: Using Native: <AA_modename $hwrtngxmode> did not start. Your choice is kept.
+9. {if DLSS/FSR built in and hwrtngxfallback() = 1 and hwrtngxreason() != ""} note: <hwrtngxreason>
 == Players {only if tab "General" open}
 1. checkbox "Fullbright player models" fullbrightmodels on=60 | {if "Fullbright player models" ticked (fullbrightmodels)} choice fullbrightmodels: "Subtle"=60, "Bright"=100, "Overbright"=150, "Max"=200
 2. checkbox "Everyone uses my player model" forceplayermodels
@@ -104,96 +94,71 @@
 2. {if tab "General" open} checkbox "Ragdoll deaths" ragdoll | {if tab "General" open and "Ragdoll deaths" ticked (ragdoll)} checkbox "Keep after respawn" ragdollmillis on=10000
 3. {if tab "General" open} slider "Ragdoll push (velocity multiplier)" deadpush
 4. {if tab "Ray tracing" open and not "Ray tracing" chosen (hwrt 1)} status: Ray tracing is off: choose it in General > Lighting.
-5. {if tab "Ray tracing" open and not "Ray tracing" chosen (hwrt 1)} note: These settings only act with ray tracing.
 == Lights {only if tab "Ray tracing" open and not (not "Ray tracing" chosen (hwrt 1))}
 1. checkbox "Teleporters glow and light the room" hwrtteleportlight
 2. checkbox "Jump pads glow and light the room" hwrtjumppadlight
 3. checkbox "Weapons light the scene (flashes, rockets, explosions)" hwrtdynlights
 == Shadows {only if tab "Ray tracing" open and not (not "Ray tracing" chosen (hwrt 1))}
-1. note: My own shadow (first person): which lights draw it.
-2. choice hwrtshadowself: "None"=0, "The sun only (default)"=1, "+ glowing lights"=2
-3. choice hwrtshadowself: "+ nearby lamps (stretched)"=3, "+ the sky (dark patch around you)"=4
-4. note: Shadows of the others (players, bots, rockets, pickups): which lights.
-5. choice hwrtshadowothers: "None"=0, "The sun and the sky"=1, "+ glowing lights (default)"=2
-6. choice hwrtshadowothers: "+ the map's lamps (a hidden lamp can add a 2nd shadow)"=3
-7. checkbox "Weapon smoke casts shadows" hwrtsmokeshadow
-8. {if "Weapon smoke casts shadows" ticked (hwrtsmokeshadow)} note: Smoke shadow density (percent, default: 100):
-9. {if "Weapon smoke casts shadows" ticked (hwrtsmokeshadow)} slider hwrtsmokeshadowdensity
-10. "Soft shadows" choice hwrtsoftshadows: "Off"=0, "On (default)"=2
-11. {if hwrtsoftshadows = 1} note: Sun only (set in the console): choose On or Off to change it.
-12. {if "On (default)" chosen (hwrtsoftshadows 2)} note: Sun, lamps, torches, teleporters: blur with distance. ~1-2.5 ms (1440p).
-13. {if "On (default)" chosen (hwrtsoftshadows 2)} "Soft shadow rays" choice hwrtsoftshadowrays: "1"=1, "2 (default)"=2, "4"=4, "8"=8
-14. {if "On (default)" chosen (hwrtsoftshadows 2)} "Soft shadow denoiser" choice hwrtsoftsigma: "Off"=0, "On (NRD SIGMA, default)"=1
-15. {if "On (default)" chosen (hwrtsoftshadows 2) and "On (NRD SIGMA, default)" chosen (hwrtsoftsigma 1) and not "NRD (stronger, with Native, DLSS and FSR)" chosen (hwrtnrd 1)} note: Needs the NRD denoiser (Performance > Advanced).
-16. {if "On (default)" chosen (hwrtsoftshadows 2) and "On (NRD SIGMA, default)" chosen (hwrtsoftsigma 1)} "Denoiser steadiness" choice hwrtsoftsigmahistory: "0"=0, "3"=3, "5 (default)"=5, "7"=7
+1. "My own shadow (first person)" choice hwrtshadowself: "None"=0, "Sun (default)"=1, "+ glows"=2, "+ nearby lamps"=3, "+ sky"=4
+2. "Shadows of the others" choice hwrtshadowothers: "None"=0, "Sun and sky"=1, "+ glows (default)"=2, "+ map lamps"=3
+3. checkbox "Weapon smoke casts shadows" hwrtsmokeshadow
+4. {if "Weapon smoke casts shadows" ticked (hwrtsmokeshadow)} slider "Smoke shadow density (percent)" hwrtsmokeshadowdensity
+5. "Soft shadows" choice hwrtsoftshadows: "Off"=0, "On (default)"=2
+6. {if hwrtsoftshadows = 1} status: Sun only (set in the console): choose On or Off to change it.
+7. {if "On (default)" chosen (hwrtsoftshadows 2)} "Soft shadow rays" choice hwrtsoftshadowrays: "1"=1, "2 (default)"=2, "4"=4, "8"=8
+8. {if "On (default)" chosen (hwrtsoftshadows 2)} "Soft shadow denoiser" choice hwrtsoftsigma: "Off"=0, "On (NRD SIGMA, default)"=1
+9. {if "On (default)" chosen (hwrtsoftshadows 2) and "On (NRD SIGMA, default)" chosen (hwrtsoftsigma 1) and not "NRD (stronger, with Native, DLSS and FSR)" chosen (hwrtnrd 1)} status: Needs the NRD denoiser (Performance > Advanced).
+10. {if "On (default)" chosen (hwrtsoftshadows 2) and "On (NRD SIGMA, default)" chosen (hwrtsoftsigma 1)} "Denoiser steadiness" choice hwrtsoftsigmahistory: "0"=0, "3"=3, "5 (default)"=5, "7"=7
 == Surfaces
 1. {if tab "Ray tracing" open and not (not "Ray tracing" chosen (hwrt 1))} checkbox "Reflections on water and reflective surfaces" hwrtreflections
 2. {if tab "Ray tracing" open and not (not "Ray tracing" chosen (hwrt 1))} checkbox "Animated waves on water (ripples in the RT reflections)" hwrtwaterwaves
-3. {if tab "Ray tracing" open and not (not "Ray tracing" chosen (hwrt 1)) and "Animated waves on water (ripples in the RT reflections)" ticked (hwrtwaterwaves) and not "Reflections on water and reflective surfaces" ticked (hwrtreflections)} note: Needs the reflections above.
+3. {if tab "Ray tracing" open and not (not "Ray tracing" chosen (hwrt 1)) and "Animated waves on water (ripples in the RT reflections)" ticked (hwrtwaterwaves) and not "Reflections on water and reflective surfaces" ticked (hwrtreflections)} status: Needs the reflections above.
 4. {if tab "Ray tracing" open and not (not "Ray tracing" chosen (hwrt 1)) and "Animated waves on water (ripples in the RT reflections)" ticked (hwrtwaterwaves)} (field "Wave strength" waterwaveamp | button "-" : waterwaveamp (+fround $waterwaveamp -0.25) | button "+" : waterwaveamp (+fround $waterwaveamp 0.25) | field "Speed" waterwavespeed | button "-" : waterwavespeed (+fround $waterwavespeed -0.25) | button "+" : waterwavespeed (+fround $waterwavespeed 0.25))
 5. {if tab "Ray tracing" open and not (not "Ray tracing" chosen (hwrt 1)) and "Animated waves on water (ripples in the RT reflections)" ticked (hwrtwaterwaves)} "Wave detail" choice waterwavesize: "64"=64, "128 (default)"=128, "256"=256
-6. {if tab "Ray tracing" open and not (not "Ray tracing" chosen (hwrt 1)) and "Animated waves on water (ripples in the RT reflections)" ticked (hwrtwaterwaves)} note: Shared by RT and classic water. The water stays flat for the game.
-7. {if tab "Ray tracing" open and not (not "Ray tracing" chosen (hwrt 1))} checkbox "Shine of lamps and sun on glossy surfaces" hwrtspecular
-8. {if tab "Ray tracing" open and not (not "Ray tracing" chosen (hwrt 1))} checkbox "Smooth lighting across faceted floors and walls" hwrtsmoothnormals
-9. {if tab "Performance" open and not "Ray tracing" chosen (hwrt 1)} status: Ray tracing is off: choose it in General > Lighting.
-10. {if tab "Performance" open and not "Ray tracing" chosen (hwrt 1)} note: These settings only act with ray tracing.
+6. {if tab "Ray tracing" open and not (not "Ray tracing" chosen (hwrt 1))} checkbox "Shine of lamps and sun on glossy surfaces" hwrtspecular
+7. {if tab "Ray tracing" open and not (not "Ray tracing" chosen (hwrt 1))} checkbox "Smooth lighting across faceted floors and walls" hwrtsmoothnormals
+8. {if tab "Performance" open and not "Ray tracing" chosen (hwrt 1)} status: Ray tracing is off: choose it in General > Lighting.
 == Profile
 1. {if tab "Performance" open and not (not "Ray tracing" chosen (hwrt 1))} choice GFX_prof: "Ultra"=0, "High"=1, "Medium"=2, "Low"=3, "Custom"=4
-2. {if tab "Performance" open and not (not "Ray tracing" chosen (hwrt 1)) and <GFX_prof> = 0} note: Ultra: the full picture (default). Slow and pretty.
-3. {if tab "Performance" open and not (not "Ray tracing" chosen (hwrt 1)) and <GFX_prof> = 1} note: High: nearly the same picture, faster: CNN, solid leaves, still models.
-4. {if tab "Performance" open and not (not "Ray tracing" chosen (hwrt 1)) and <GFX_prof> = 2} note: Medium: + half-pixel sky, 3 lamps, adaptive rays, 1 soft shadow ray.
-5. {if tab "Performance" open and not (not "Ray tracing" chosen (hwrt 1)) and <GFX_prof> = 3} note: Low: + 2 lamps, 1 glow, softer far, no soft shadows. Darker, fastest.
-6. {if tab "Performance" open and not (not "Ray tracing" chosen (hwrt 1)) and <GFX_prof> = 4} note: Custom: your own mix. A profile sets both views below and soft shadows.
-7. {if tab "Performance" open} (button "Main choices" : concat gfxperftab "=" 0 | button "Advanced: sky, lamps, textures" : concat gfxperftab "=" 1)
-8. {if tab "Performance" open and tab "Main choices" open and "Ray tracing" chosen (hwrt 1)} "RT quality" choice hwrtquality: "Full (best)"=2, "Half sky"=1, "Half sky, 1 glow"=0
-9. {if tab "Performance" open and tab "Main choices" open and "Ray tracing" chosen (hwrt 1)} "DLSS model" choice hwrtdlsscnn: "Transformer (sharper, slower)"=0, "CNN (faster, softer)"=1
-10. {if tab "Performance" open and tab "Main choices" open and "Ray tracing" chosen (hwrt 1) and not hwrtngxmode >= 1 and hwrtngxmode <= 4} note: DLSS model: used with DLAA or DLSS (General > Anti-Aliasing).
-11. {if tab "Performance" open and tab "Main choices" open and "Ray tracing" chosen (hwrt 1)} "Leaves" choice hwrtskyopaque: "See-through (exact)"=0, "Solid (faster under trees)"=1
-12. {if tab "Performance" open and tab "Main choices" open and "Ray tracing" chosen (hwrt 1)} note: For sky light only: solid leaves give a denser shade below trees.
-13. {if tab "Performance" open and tab "Main choices" open and "Ray tracing" chosen (hwrt 1)} "NRD denoiser" choice hwrtnrdlight: "Full"=0, "Light (faster)"=1, "Lightest (more flicker)"=2
-14. {if tab "Performance" open and tab "Main choices" open and "Ray tracing" chosen (hwrt 1)} "Still models" choice hwrtvelstatic: "Drawn again (exact)"=0, "From depth (less CPU)"=1
-15. {if tab "Performance" open and tab "Main choices" open and "Ray tracing" chosen (hwrt 1)} note: Motion of still map models, used by DLAA, DLSS and FSR.
-16. {if tab "Performance" open and tab "Main choices" open and "Ray tracing" chosen (hwrt 1)} "Sky reach" choice hwrtskyrange: "Full"=0, "1024"=1024, "512"=512, "256"=256
-17. {if tab "Performance" open and tab "Main choices" open and "Ray tracing" chosen (hwrt 1)} note: Shorter is faster; a hall higher than that gets some sky light.
-18. {if tab "Performance" open and tab "Main choices" open and "Ray tracing" chosen (hwrt 1)} "Adaptive rays" choice hwrtrtadapt: "Off"=0, "On (fewer rays at edges, far, in motion)"=1
+2. {if tab "Performance" open} (button "Main choices" : concat gfxperftab "=" 0 | button "Advanced: sky, lamps, textures" : concat gfxperftab "=" 1)
+3. {if tab "Performance" open and tab "Main choices" open and "Ray tracing" chosen (hwrt 1)} "RT quality" choice hwrtquality: "Full (best)"=2, "Half sky"=1, "Half sky, 1 glow"=0
+4. {if tab "Performance" open and tab "Main choices" open and "Ray tracing" chosen (hwrt 1)} "DLSS model" choice hwrtdlsscnn: "Transformer (sharper, slower)"=0, "CNN (faster, softer)"=1
+5. {if tab "Performance" open and tab "Main choices" open and "Ray tracing" chosen (hwrt 1)} "Leaves" choice hwrtskyopaque: "See-through (exact)"=0, "Solid (faster under trees)"=1
+6. {if tab "Performance" open and tab "Main choices" open and "Ray tracing" chosen (hwrt 1)} "NRD denoiser" choice hwrtnrdlight: "Full"=0, "Light (faster)"=1, "Lightest (more flicker)"=2
+7. {if tab "Performance" open and tab "Main choices" open and "Ray tracing" chosen (hwrt 1)} "Still models" choice hwrtvelstatic: "Drawn again (exact)"=0, "From depth (less CPU)"=1
+8. {if tab "Performance" open and tab "Main choices" open and "Ray tracing" chosen (hwrt 1)} "Sky reach" choice hwrtskyrange: "Full"=0, "1024"=1024, "512"=512, "256"=256
+9. {if tab "Performance" open and tab "Main choices" open and "Ray tracing" chosen (hwrt 1)} "Adaptive rays" choice hwrtrtadapt: "Off"=0, "On (fewer rays at edges, far, in motion)"=1
 == Sky light {only if tab "Performance" open and tab "Advanced: sky, lamps, textures" open}
-1. {if NRD built in} note: Denoiser (cleans the grain of the sky light):
-2. {if NRD built in} choice hwrtnrd: "Built-in filter"=0, "NRD (stronger, with Native, DLSS and FSR)"=1
-3. {if NRD built in and hwrtnrdfallback() = 1 and RT lighting running} status: NRD is unavailable here: the built-in filter is used.
-4. {if "Ray tracing" chosen (hwrt 1)} "Rays per pixel (NRD)" choice hwrtskyrays: "1"=1, "2"=2, "3"=3, "4"=4
-5. {if "Ray tracing" chosen (hwrt 1)} note: With NRD only: more = less grain, slower. Built-in filter: always 4.
-6. {if "Ray tracing" chosen (hwrt 1)} slider "Built-in filter: smoothing over frames (default: 32, 0 = off)" hwrtskytemporal
-7. {if "Ray tracing" chosen (hwrt 1)} checkbox "Blur between neighbouring pixels (both denoisers)" hwrtskyfilter
-8. {if "Ray tracing" chosen (hwrt 1)} checkbox "Draw the sun as a disk (instead of the map's sky picture)" hwrtsundisk
+1. {if NRD built in} "Sky light denoiser" choice hwrtnrd: "Built-in filter"=0, "NRD (stronger, with Native, DLSS and FSR)"=1
+2. {if NRD built in and hwrtnrdfallback() = 1 and RT lighting running} status: NRD is unavailable here: the built-in filter is used.
+3. {if "Ray tracing" chosen (hwrt 1)} "Rays per pixel (NRD)" choice hwrtskyrays: "1"=1, "2"=2, "3"=3, "4"=4
+4. {if "Ray tracing" chosen (hwrt 1)} slider "Built-in filter: smoothing over frames (default: 32, 0 = off)" hwrtskytemporal
+5. {if "Ray tracing" chosen (hwrt 1)} checkbox "Blur between neighbouring pixels (both denoisers)" hwrtskyfilter
+6. {if "Ray tracing" chosen (hwrt 1)} checkbox "Draw the sun as a disk (instead of the map's sky picture)" hwrtsundisk
 == Lamps and textures {only if tab "Performance" open and tab "Advanced: sky, lamps, textures" open and "Ray tracing" chosen (hwrt 1)}
 1. "Lamps with a shadow" choice hwrtdlights: "1"=1, "2"=2, "3"=3, "4"=4
 2. slider "Glowing lights traced (teleporters, lava; default: 8)" hwrtglowdlights
 3. "Texture upscaling" choice hwrtdiffupscale: "Bicubic"=2, "Lanczos (sharper)"=3, "Nearest"=0
 4. "Texture detail far" choice hwrtdiffmipbias: "Stable (less shimmer)"=0, "Sharper"=-0.5
 == Display output {only if tab "HDR screen" open}
-1. note: Native HDR sends a real HDR picture to an HDR screen.
-2. note: Windows HDR must already be on (it is never changed here).
-3. choice hdroutpref: "SDR"=0, "Native HDR"=1
-4. {if Native HDR in use} status: In use: Native HDR
-5. {if not (Native HDR in use) and HDR preview in use} status: In use: HDR preview shown in SDR (diagnostic, not native HDR)
-6. {if not (Native HDR in use) and not (HDR preview in use)} text "In use: SDR"
-7. {if hdroutpref != 0 and hdroutdispo() = 0} note: <hdroutraison>
+1. choice hdroutpref: "SDR"=0, "Native HDR"=1
+2. {if Native HDR in use} status: In use: Native HDR
+3. {if not (Native HDR in use) and HDR preview in use} status: In use: HDR preview shown in SDR (diagnostic, not native HDR)
+4. {if not (Native HDR in use) and not (HDR preview in use)} text "In use: SDR"
+5. {if hdroutpref != 0 and hdroutdispo() = 0} note: <hdroutraison>
 == HDR calibration {only if tab "HDR screen" open}
-1. note: Native HDR only. Kept across maps, outputs, anti-aliasing and lighting.
-2. text "Exposure: <hwrthdrexp> EV (default 0)" (computed)
-3. button "-0.5" : hdroutexpstep -0.5 | button "-0.1" : hdroutexpstep -0.1 | button "+0.1" : hdroutexpstep 0.1 | button "+0.5" : hdroutexpstep 0.5 | button "Reset" : hwrthdrexp 0
-4. slider "Reference white: <hdroutref> nits (default 80)" hdroutref
-5. text "<hdroutpeaklabel>"
-6. choice hdroutmax: "Automatic peak"=0 | {if "Automatic peak" chosen (hdroutmax 0)} button "Manual peak" : hdroutmax (max 400 (hdroutpeakauto)) | {if not ("Automatic peak" chosen (hdroutmax 0))} (button "-100" : hdroutmax (max 100 (- $hdroutmax 100)) | button "+100" : hdroutmax (min 10000 (+ $hdroutmax 100)))
-7. text "<hdrouthudlabel>"
-8. choice hdrouthud: "HUD follows reference white"=0 | {if "HUD follows reference white" chosen (hdrouthud 0)} button "Custom HUD brightness" : hdrouthud (max 40 $hdroutref)
-9. {if hdrouthud > 0} slider hdrouthud
+1. text "Exposure: <hwrthdrexp> EV (default 0)" (computed)
+2. button "-0.5" : hdroutexpstep -0.5 | button "-0.1" : hdroutexpstep -0.1 | button "+0.1" : hdroutexpstep 0.1 | button "+0.5" : hdroutexpstep 0.5 | button "Reset" : hwrthdrexp 0
+3. slider "Reference white: <hdroutref> nits (default 80)" hdroutref
+4. text "<hdroutpeaklabel>"
+5. choice hdroutmax: "Automatic peak"=0 | {if "Automatic peak" chosen (hdroutmax 0)} button "Manual peak" : hdroutmax (max 400 (hdroutpeakauto)) | {if not ("Automatic peak" chosen (hdroutmax 0))} (button "-100" : hdroutmax (max 100 (- $hdroutmax 100)) | button "+100" : hdroutmax (min 10000 (+ $hdroutmax 100)))
+6. text "<hdrouthudlabel>"
+7. choice hdrouthud: "HUD follows reference white"=0 | {if "HUD follows reference white" chosen (hdrouthud 0)} button "Custom HUD brightness" : hdrouthud (max 40 $hdroutref)
+8. {if hdrouthud > 0} slider hdrouthud
 == Shading (classic lighting) {only if tab "Classic" open}
-1. note: Slightly darker corners and wall bases; players are never darkened.
-2. "Ambient Occlusion" choice gtao: "Off"=0, "Low"=1, "High"=2
-3. {if gtao on and RT lighting running} note: Not used with ray tracing: RT already traces the sky light.
-4. {if "Off" chosen (gtao 0)} checkbox "Old corner shading" lookao | {if "Off" chosen (gtao 0) and "Old corner shading" ticked (lookao)} (field "Strength" lookaoscale | button "-" : lookaoscale (+fround $lookaoscale -0.05) | button "+" : lookaoscale (+fround $lookaoscale 0.05) | field "Size" lookaoradius | button "-" : lookaoradius (+fround $lookaoradius -0.05) | button "+" : lookaoradius (+fround $lookaoradius 0.05))
-5. {if "Off" chosen (gtao 0)} note: Used when Ambient Occlusion is Off (on by default).
+1. "Ambient Occlusion" choice gtao: "Off"=0, "Low"=1, "High"=2
+2. {if gtao on and RT lighting running} status: Not used with ray tracing: RT already traces the sky light.
+3. {if "Off" chosen (gtao 0)} checkbox "Old corner shading" lookao | {if "Off" chosen (gtao 0) and "Old corner shading" ticked (lookao)} (field "Strength" lookaoscale | button "-" : lookaoscale (+fround $lookaoscale -0.05) | button "+" : lookaoscale (+fround $lookaoscale 0.05) | field "Size" lookaoradius | button "-" : lookaoradius (+fround $lookaoradius -0.05) | button "+" : lookaoradius (+fround $lookaoradius 0.05))
 == Detail {only if tab "Classic" open}
 1. text "Speed: Fast, Moderate, Slow and Pretty"
 2. "Shaders" choice shaderdetail: "Low Detail"=1, "High Detail"=3
@@ -201,19 +166,18 @@
 4. text "Water waves" | checkbox "Animated (ripples in reflections and refraction)" waterwaves
 5. {if "Animated (ripples in reflections and refraction)" ticked (waterwaves)} (field "Wave strength" waterwaveamp | button "-" : waterwaveamp (+fround $waterwaveamp -0.25) | button "+" : waterwaveamp (+fround $waterwaveamp 0.25) | field "Speed" waterwavespeed | button "-" : waterwavespeed (+fround $waterwavespeed -0.25) | button "+" : waterwavespeed (+fround $waterwavespeed 0.25))
 6. {if "Animated (ripples in reflections and refraction)" ticked (waterwaves)} "Wave detail" choice waterwavesize: "64"=64, "128 (default)"=128, "256"=256
-7. {if "Animated (ripples in reflections and refraction)" ticked (waterwaves)} note: Shared by RT and classic water. The water stays flat for the game.
-8. text "Waterfalls" | checkbox "Refraction" waterfallrefract | checkbox "Reflection" waterfallenv
-9. status: Classic shadows | checkbox "On" shadowmap | {if shadowmap on} choice shadowmapsize: "Medium Quality"=9, "High Quality"=10 | {if not (shadowmap on)} checkbox "Blob Shadows" blobs
-10. text "My Shadow" | checkbox "Mine too, from the sun (with Classic shadows; RT: Ray tracing tab)" lookselfshadow
-11. status: Glare | checkbox "On" glare | {if glare on} choice glarepreset: "Subtle"=1, "Glowy"=2, "Soft"=3, "Intense"=4
-12. status: Motion Blur | checkbox "On" motionblur | {if motionblur on} choice motionblurscale: "Subtle"=0.5, "Moderate"=0.65, "Intense"=0.8
-13. status: Grass | checkbox "On" grass | {if grass on} choice grassdist: "Quick Fade"=128, "Moderate Fade"=256, "Slow Fade"=512
-14. status: Dynamic Lights | checkbox "On" maxdynlights on=3 | {if maxdynlights on} choice maxdynlights: "Medium Quality"=3, "High Quality"=5
-15. status: Soft Particles | checkbox "On" depthfx | {if depthfx on} choice depthfxsize: "Low Quality"=7, "Medium Quality"=10, "High Quality"=12
-16. status: Glass Reflection | checkbox "On" glassenv
-17. status: Decals | checkbox "On" decals | {if decals on} choice decalfade: "Quick Fade"=10000, "Slow Fade"=60000
-18. "Textures" choice maxtexsize: "Low Quality"=256, "Medium Quality"=512, "High Quality"=0
-19. text "Models" | checkbox "Reflection" envmapmodels | checkbox "Bump Map" bumpmodels
+7. text "Waterfalls" | checkbox "Refraction" waterfallrefract | checkbox "Reflection" waterfallenv
+8. status: Classic shadows | checkbox "On" shadowmap | {if shadowmap on} choice shadowmapsize: "Medium Quality"=9, "High Quality"=10 | {if not (shadowmap on)} checkbox "Blob Shadows" blobs
+9. text "My Shadow" | checkbox "Mine too, from the sun (with Classic shadows; RT: Ray tracing tab)" lookselfshadow
+10. status: Glare | checkbox "On" glare | {if glare on} choice glarepreset: "Subtle"=1, "Glowy"=2, "Soft"=3, "Intense"=4
+11. status: Motion Blur | checkbox "On" motionblur | {if motionblur on} choice motionblurscale: "Subtle"=0.5, "Moderate"=0.65, "Intense"=0.8
+12. status: Grass | checkbox "On" grass | {if grass on} choice grassdist: "Quick Fade"=128, "Moderate Fade"=256, "Slow Fade"=512
+13. status: Dynamic Lights | checkbox "On" maxdynlights on=3 | {if maxdynlights on} choice maxdynlights: "Medium Quality"=3, "High Quality"=5
+14. status: Soft Particles | checkbox "On" depthfx | {if depthfx on} choice depthfxsize: "Low Quality"=7, "Medium Quality"=10, "High Quality"=12
+15. status: Glass Reflection | checkbox "On" glassenv
+16. status: Decals | checkbox "On" decals | {if decals on} choice decalfade: "Quick Fade"=10000, "Slow Fade"=60000
+17. "Textures" choice maxtexsize: "Low Quality"=256, "Medium Quality"=512, "High Quality"=0
+18. text "Models" | checkbox "Reflection" envmapmodels | checkbox "Bump Map" bumpmodels
 
 ## audio | Sound | Options > Sound
 == (top)
@@ -222,19 +186,13 @@
 1. slider "Master Volume" soundvol
 2. slider "Music Volume" musicvol
 3. checkbox "Hit Sound" hitsound
-4. note: Ping when you hit someone. Its volume: Hits, below.
 == Mix {only if tab "Volume and mix" open}
-1. note: 100 = normal. 0 = mute. 200 = twice as loud.
-2. [ slider "Weapons (shots, explosions)" mixweapons / slider "Hits (hit ping)" mixhits / slider "Pain and Deaths" mixpain / slider "Items (pickups)" mixitems ] | [ slider "Announcements (quad, fight)" mixannounce / slider "Flags (CTF / collect)" mixflags / slider "Movement (jump, land)" mixmove / slider "Map (ambient loops)" mixworld ]
-3. button "Reset Mix to 100" : mixreset
+1. [ slider "Weapons (shots, explosions)" mixweapons / slider "Hits (hit ping)" mixhits / slider "Pain and Deaths" mixpain / slider "Items (pickups)" mixitems ] | [ slider "Announcements (quad, fight)" mixannounce / slider "Flags (CTF / collect)" mixflags / slider "Movement (jump, land)" mixmove / slider "Map (ambient loops)" mixworld ]
+2. button "Reset Mix to 100" : mixreset
 == 3D Sound {only if tab "3D sound and device" open}
-1. note: Headphones: hear if a sound is ahead or behind, above or below.
-2. note: (Steam Audio HRTF, sets 44100 Hz)
-3. note: Speakers: usual left/right sound.
-4. note: Your own sounds, menus, announcements and music are never changed.
-5. choice son3d: "Off"=0, "Headphones (HRTF)"=1, "Speakers"=2
-6. checkbox "Occlusion: walls muffle sounds (needs Headphones or Speakers)" son3docclusion
-7. {if son3d on and son3deffectif() = 0} status: 3D sound unavailable: <son3derreur>
+1. choice son3d: "Off"=0, "Headphones (HRTF)"=1, "Speakers"=2
+2. checkbox "Occlusion: walls muffle sounds (needs Headphones or Speakers)" son3docclusion
+3. {if son3d on and son3deffectif() = 0} status: 3D sound unavailable: <son3derreur>
 == Device {only if tab "3D sound and device" open}
 1. slider "Sound Channels" soundchans
 2. slider "Sound Frequency" soundfreq (values 11025 22050 44100)
@@ -248,47 +206,37 @@
 3. field "Mouse DPI" mousedpi
 4. text "<getcm360text>"
 5. field "Set cm/360" -> setcm360
-6. note: Windows: turn off Enhance pointer precision, or cm/360 is wrong.
 == Menus
 1. field "Menu cursor speed" guisens
 == Crosshair
 1. button "Crosshair..." > page crosshair | button "image" > page crosshair
-2. note: Also in Options > HUD.
 
 ## keys | Keys | Options > Keys
 == (top)
 1. button "Play" : concat keystab "=" 0 | button "Chat" : concat keystab "=" 1 | button "Game and demos" : concat keystab "=" 3 | button "Spectate and edit" : concat keystab "=" 2
-2. note: Click a field, press the keys (several are fine), then Esc.
 == Movement {only if tab "Play" open}
 1. [ key "Forward" -> forward / key "Backward" -> backward / key "Left" -> left ] | [ key "Right" -> right / key "Jump" -> jump ]
 == Weapons {only if tab "Play" open}
 1. [ key "Attack" -> attack / key "Zoom" -> togglezoom / key "Best weapon" -> weapon / key "Next weapon" -> nextweapon / key "Previous weapon" -> nextweapon -1 / key "Wheel up" -> universaldelta 1 / key "Wheel down" -> universaldelta -1 / key "Chainsaw" -> setweapon FI ] | [ key "Shotgun" -> setweapon SG / key "Chaingun" -> setweapon CG / key "Rocket" -> setweapon RL / key "Rifle" -> setweapon RI / key "Grenade" -> setweapon GL / key "Pistol" -> setweapon PI / key "Drop flag" -> dropflag / key "Suicide" -> suicide ]
-2. note: Best weapon: the strongest one with ammo. Next / previous: in order.
 == Communication {only if tab "Chat" open}
 1. [ key "Chat" -> saycommand / key "Team chat" -> sayteamcommand / key "Command line" -> saycommand / / key "Taunt" -> taunt ] | [ key "Expanded chat" -> togglechat / key "Console" -> toggleconsole / key "Scroll back" -> conskip 5 / key "Scroll to newest" -> conskip -1000 ]
-2. note: Scroll back / to newest: the console, or F10 and F8 when open.
 == Chat translation {only if tab "Chat" open}
 1. [ key "Mute translation" -> toggletranslate / key "Retranslate last" -> tretry / key "Say translated" -> saycommand "/tsay " / key "Team, translated" -> saycommand "/tsayteam " ] | [ key "Say, careful" -> saycommand "/tsayr " / key "Team, careful" -> saycommand "/tsayteamr " / key "Reply translated" -> saycommand "/trep " / key "Team, reply" -> saycommand "/trepteam " ]
-2. note: Reply: translated into the language of the last chat line (/trep).
 == Game {only if tab "Game and demos" open}
 1. [ key "Scoreboard" -> showscores / key "Kills / deaths" -> togglekilllog / key "Main menu" -> togglemainmenu / key "Settings" -> showgui options / key "Move HUD parts" -> hudedit / key "Screenshot" -> screenshot ] | [ key "Spectate on / off" -> spectator (! (isspectator (getclientnum))) / key "Pause" -> set paused (= $paused 0) / key "Third person" -> if (allowthirdperson) [togglevar thirdperson] / key "Add bot" -> addbot / key "Delete bot" -> delbot ]
-2. note: Pause: local games and demos. Third person: offline and edit mode.
 == Recording and demos {only if tab "Game and demos" open}
-1. [ key "Match record" -> togglematchrecord / key "Demo record" -> toggledemorecord / key "Demo: back 10 s" -> demorewind / key "Demo: ahead 10 s" -> demoforward ] | [ key "Demo: HD aim" -> toggledemohd / key "Demo: X-ray" -> toggledemoxray / key "Demo: hide controls" -> toggledemobar ]
-2. note: The Demo keys work while you watch a demo.
+1. [ key "Match record" -> togglematchrecord / key "Demo record" -> toggledemorecord / key "Demo: back 10 s" -> demorewind / key "Demo: ahead 10 s" -> demoforward / key "Demo: HD aim" -> toggledemohd / key "Demo: X-ray" -> toggledemoxray ] | [ key "Demo: hitboxes" -> toggledemohitbox / key "Demo: player's view" -> toggledemopov / key "Demo: next view" -> demonextview / key "Demo: go to a time" -> demogotoprompt / key "Demo: hide controls" -> toggledemobar ]
+2. key "Demo: look (hold)" -> 
 == Spectating (only while you spectate) {only if tab "Spectate and edit" open}
 1. [ key "Next player" -> nextfollow / key "Previous player" -> nextfollow -1 ] | key "Follow / free" -> follow
 == Editing {only if tab "Spectate and edit" open}
 1. key "Edit mode" -> edittoggle | key "Allow edit (hold)" -> allowspedit
-2. note: Allow edit: hold it to enter edit mode in single player.
-3. note: These keys work in edit mode only:
-4. [ key "Copy" -> editcopy / key "Paste" -> editpaste / key "Undo" -> undo; passthroughsel 0 / key "Redo" -> redo ] | [ key "Delete" -> editdel / key "Flip" -> editflip / key "Light (calc)" -> calclight ]
-5. note: Other map editing keys: see the editing guide (editbind).
+2. text "In edit mode only"
+3. [ key "Copy" -> editcopy / key "Paste" -> editpaste / key "Undo" -> undo; passthroughsel 0 / key "Redo" -> redo ] | [ key "Delete" -> editdel / key "Flip" -> editflip / key "Light (calc)" -> calclight ]
 
 ## hud | HUD | Options > HUD
 == (top)
 1. button "Move HUD parts (drag and drop)..." : hudedit | button "Put everything back in place" : hudlayoutreset
-2. note: Drag the frames with the mouse, right click puts one back, Esc when done.
 == On screen
 1. checkbox "Ammo bar" ammobar | button "Adjust..." > page ammobar
 2. checkbox "Game clock" gameclock | button "Adjust..." > page gameclock
@@ -310,24 +258,21 @@
 ## friends | FRIENDS AND COLOURS | Options > Friends and colours
 == (top)
 1. button "Friends" : concat friendsview "=" 0 | button "Player colours" : concat friendsview "=" 1
-2. {if tab "Friends" open} note: Friends are found by nick or clan tag. Colours: see Player colours.
 == Friends {only if tab "Friends" open}
 1. field "Nick" friendaddname (Enter runs addfriend) | {if friendaddname != "" or textfocus() = "friendaddname" and textcurrentline() != ""} button "Add" : addfriend
 2. field "Clan" clantag
-3. note: Tag in the nick counts too
-4. {if numfriends on and repeated for each i (count known in game: <min $numfriends 12>)} (text "<getfriend $i>" | button "x" : concat delfriend <i>)
-5. {if numfriends on and numfriends > 12} note: ...
-6. {if numfriendshere on} note: Here
-7. {if numfriendshere on and repeated for each i (count known in game: <numfriendshere>)} (text "<getfriendhere $i>" | text "<getfriendhererel $i>")
-8. text "Online" | button "Refresh" : friendrefresh
-9. {if numfriendsonline on and repeated for each i (count known in game: <min $numfriendsonline 10>)} button "<getfriendonlinename $i>" : concat joinfriend <i> | {if numfriendsonline on and repeated for each i (count known in game: <min $numfriendsonline 10>) and getfriendonlinemap(<i>) != ""} note: <getfriendonlinemap $i>
-10. {if not (numfriendsonline on) and numfriends on or clantag != ""} text "<friendscanmsg>"
-11. {if not (numfriendsonline on) and not (numfriends on or clantag != "")} note: Nobody yet
+3. {if numfriends on and repeated for each i (count known in game: <min $numfriends 12>)} (text "<getfriend $i>" | button "x" : concat delfriend <i>)
+4. {if numfriends on and numfriends > 12} note: ...
+5. {if numfriendshere on} note: Here
+6. {if numfriendshere on and repeated for each i (count known in game: <numfriendshere>)} (text "<getfriendhere $i>" | text "<getfriendhererel $i>")
+7. text "Online" | button "Refresh" : friendrefresh
+8. {if numfriendsonline on and repeated for each i (count known in game: <min $numfriendsonline 10>)} button "<getfriendonlinename $i>" : concat joinfriend <i> | {if numfriendsonline on and repeated for each i (count known in game: <min $numfriendsonline 10>) and getfriendonlinemap(<i>) != ""} note: <getfriendonlinemap $i>
+9. {if not (numfriendsonline on) and numfriends on or clantag != ""} text "<friendscanmsg>"
+10. {if not (numfriendsonline on) and not (numfriends on or clantag != "")} note: Nobody yet
 == Team colours {only if not (tab "Friends" open)}
-1. [ text "Teammates" / note: Body, bots too. None: blue. / colours "Teammates colour" teamcolorally | player preview ] | [ text "Enemies" / note: Body, bots too. None: red. / colours "Enemies colour" teamcolorenemy | player preview ]
-2. note: Free for all: everyone else is an enemy.
+1. [ text "Teammates" / colours "Teammates colour" teamcolorally | player preview ] | [ text "Enemies" / colours "Enemies colour" teamcolorenemy | player preview ]
 == Friends colours {only if not (tab "Friends" open)}
-1. [ text "Same team" / note: Body, Name, Minimap / colours "Friends colour, same team" friendallycolor | player preview ] | [ text "Other team" / note: Body, Name. / colours "Friends colour, other team" friendenemycolor | player preview ]
+1. [ text "Same team" / colours "Friends colour, same team" friendallycolor | player preview ] | [ text "Other team" / colours "Friends colour, other team" friendenemycolor | player preview ]
 2. checkbox "Friends' bodies use the team colours" friendsfollowteamcolor
 
 ## traduction | Chat Translation | Options > Chat Translation
@@ -343,12 +288,11 @@ also: Chat Translation
 8. {if tab "Translation" open and not (tupdateavail = 3) and not (tupdateavail = 2) and tupdateavail on} text "<tupdatemsg>"
 == Translate {only if tab "Translation" open}
 1. {if translateai() = 0} status: No AI loaded: chat translation is off.
-2. {if translateai() = 0} note: It starts once you install a model (Model tab) or an API key.
-3. checkbox "Translate incoming chat" translatechat
-4. checkbox "Translate team chat" translateteamchat
-5. checkbox "Preview while typing" translatepreview
-6. checkbox "I am a woman (feminine grammar)" translatefemme
-7. "Auto-translate" choice translateauto: "Off"=0, "Base language"=1, "Last spoken"=2
+2. checkbox "Translate incoming chat" translatechat
+3. checkbox "Translate team chat" translateteamchat
+4. checkbox "Preview while typing" translatepreview
+5. checkbox "I am a woman (feminine grammar)" translatefemme
+6. "Auto-translate" choice translateauto: "Off"=0, "Base language"=1, "Last spoken"=2
 == I read in {only if tab "Translation" open}
 1. button "English" : concat translatelang en | button "French" : concat translatelang fr | button "German" : concat translatelang de | button "Spanish" : concat translatelang es | button "Russian" : concat translatelang ru
 2. button "Portuguese" : concat translatelang pt | button "Italian" : concat translatelang it | button "Polish" : concat translatelang pl | button "Dutch" : concat translatelang nl | button "Swedish" : concat translatelang sv
@@ -357,49 +301,38 @@ also: Chat Translation
 1. button "English" : concat translateoutlang en | button "French" : concat translateoutlang fr | button "German" : concat translateoutlang de | button "Spanish" : concat translateoutlang es | button "Russian" : concat translateoutlang ru
 2. button "Portuguese" : concat translateoutlang pt | button "Italian" : concat translateoutlang it | button "Polish" : concat translateoutlang pl | button "Dutch" : concat translateoutlang nl | button "Swedish" : concat translateoutlang sv
 3. field "Other" translateoutlang
-4. note: The active language is green. Other codes: Shortcuts and codes.
 == Model {only if tab "Model" open}
-1. note: Local Qwen or Internet API.
-2. text "<tmodelstatus>"
-3. text "<tmodelhint>"
-4. note: Official Qwen (Apache-2.0). Install Small, Normal or Large here.
-5. text "<tmodellabel $arg1>" | button "<tmodelbtn $arg1>" : concat tmodelclick small | button "Delete" : concat tmodeldelete small
-6. text "<tmodellabel $arg1>" | button "<tmodelbtn $arg1>" : concat tmodelclick normal | button "Delete" : concat tmodeldelete normal
-7. text "<tmodellabel $arg1>" | button "<tmodelbtn $arg1>" : concat tmodelclick large | button "Delete" : concat tmodeldelete large
-8. note: Large needs ~12 GB VRAM. Drop a custom .gguf here:
-9. button "Open custom model folder" : openfolder models
-10. {if tmodelcustomcount on and repeated for each i (count known in game: <tmodelcustomcount>)} (text "<tmodelcustomname $i>" | button "Use" : concat tmodelcustomuse <i> | button "Delete" : concat tmodelcustomdel <i>)
-11. {if not (tmodelcustomcount on)} note: No custom file yet
+1. text "<tmodelstatus>"
+2. text "<tmodelhint>"
+3. text "<tmodellabel $arg1>" | button "<tmodelbtn $arg1>" : concat tmodelclick small | button "Delete" : concat tmodeldelete small
+4. text "<tmodellabel $arg1>" | button "<tmodelbtn $arg1>" : concat tmodelclick normal | button "Delete" : concat tmodeldelete normal
+5. text "<tmodellabel $arg1>" | button "<tmodelbtn $arg1>" : concat tmodelclick large | button "Delete" : concat tmodeldelete large
+6. button "Open custom model folder" : openfolder models
+7. {if tmodelcustomcount on and repeated for each i (count known in game: <tmodelcustomcount>)} (text "<tmodelcustomname $i>" | button "Use" : concat tmodelcustomuse <i> | button "Delete" : concat tmodelcustomdel <i>)
+8. {if not (tmodelcustomcount on)} note: No custom file yet
 == Internet API (OpenAI-compatible) {only if tab "Model" open}
 1. field "Address" tmodelurl
 2. field "API Key" tmodelkey
 3. field "Model" tmodelapimodel
-4. note: Model empty = auto. Save does not show the key again.
-5. button "Save API" : tmodelsaveapi | button "Clear API Key" : tmodelclearapi
+4. button "Save API" : tmodelsaveapi | button "Clear API Key" : tmodelclearapi
 == Examples {only if tab "Examples" open}
-1. status: Few-shot examples: more = more work for the AI (slower)
-2. note: Exact translation: this phrase only, does not slow the AI.
-3. note: Keep as many as you want. = means leave untranslated. /tfix: same choice.
-4. text "<texamplestatus>"
-5. button "English" : concat texamplesetlang en | button "French" : concat texamplesetlang fr | button "German" : concat texamplesetlang de | button "Spanish" : concat texamplesetlang es | button "Russian" : concat texamplesetlang ru
-6. button "Portuguese" : concat texamplesetlang pt | button "Italian" : concat texamplesetlang it | button "Polish" : concat texamplesetlang pl | button "Dutch" : concat texamplesetlang nl | button "Swedish" : concat texamplesetlang sv
-7. field "Other" texamplelang (Enter runs texamplerefresh)
-8. "Direction" choice texampledir: "Incoming Chat"=0, "What I Send"=1
-9. "Save as" choice texamplekind: "Exact Translation"=0, "Few-Shot Example"=1
-10. {if "I am a woman (feminine grammar)" ticked (translatefemme)} note: I am a woman is on: feminine examples are included
-11. {if not ("I am a woman (feminine grammar)" ticked (translatefemme))} note: I am a woman is off: feminine-only examples stay hidden
-12. field "Original Phrase" texamplesrc
-13. field "How It Should Read" texampledst
-14. button "Save" : texamplesave | button "Forget This Original" : texampleforgetsrc | button "Reload List" : texamplerefresh
-15. {if texamplecount on and repeated for each i (count known in game: <texamplecount>)} (text "<texampleline $i>" | button "Edit" : concat texampleload <i> | button "Forget" : concat texampleforget <i>)
-16. {if not (texamplecount on)} note: No examples in this list yet
+1. text "<texamplestatus>"
+2. button "English" : concat texamplesetlang en | button "French" : concat texamplesetlang fr | button "German" : concat texamplesetlang de | button "Spanish" : concat texamplesetlang es | button "Russian" : concat texamplesetlang ru
+3. button "Portuguese" : concat texamplesetlang pt | button "Italian" : concat texamplesetlang it | button "Polish" : concat texamplesetlang pl | button "Dutch" : concat texamplesetlang nl | button "Swedish" : concat texamplesetlang sv
+4. field "Other" texamplelang (Enter runs texamplerefresh)
+5. "Direction" choice texampledir: "Incoming Chat"=0, "What I Send"=1
+6. "Save as" choice texamplekind: "Exact Translation"=0, "Few-Shot Example"=1
+7. field "Original Phrase" texamplesrc
+8. field "How It Should Read" texampledst
+9. button "Save" : texamplesave | button "Forget This Original" : texampleforgetsrc | button "Reload List" : texamplerefresh
+10. {if texamplecount on and repeated for each i (count known in game: <texamplecount>)} (text "<texampleline $i>" | button "Edit" : concat texampleload <i> | button "Forget" : concat texampleforget <i>)
+11. {if not (texamplecount on)} note: No examples in this list yet
 == Shortcuts {only if tab "Shortcuts and codes" open}
 1. button "Mute Translation (F7)" : toggletranslate
 2. button "Expanded Chat (F10)" : togglechat
 3. button "Retranslate Last Line (F9)" : tretry
 4. button "Service Status" : translatestatus
 5. slider "Expanded Chat Size" fullchatsize
-6. note: Keys: Options > Keys > Chat and game.
 == Language codes {only if tab "Shortcuts and codes" open}
 1. {if repeated for each i (count known in game: 9)} (text "<at $TRAD_readme_codes (+ $arg1 $i)> : <at $TRAD_readme_names (+ $arg1 $i)>" | text "<at $TRAD_readme_codes (+ $arg1 $i)> : <at $TRAD_readme_names (+ $arg1 $i)>") | {if repeated for each i (count known in game: 8)} text "<at $TRAD_readme_codes (+ $arg1 $i)> : <at $TRAD_readme_names (+ $arg1 $i)>"
 == Commands {only if tab "Commands" open}
@@ -429,24 +362,21 @@ also: Chat Translation
 1. button "Console and chat box" : concat consoletab "=" 0 | button "Full screen (F10, F11)" : concat consoletab "=" 1
 == Console (top left) {only if tab "Console and chat box" open}
 1. slider "Lines shown" consize
-2. note: What it shows:
+2. text "What it shows"
 3. [ flag "important information" confilter 0x11 / flag "warnings" confilter 0x02 / flag "errors" confilter 0x04 / flag "script messages" confilter 0x20 ] | [ flag "chat" confilter 0x100 / flag "team chat" confilter 0x200 / flag "game events" confilter 0x400 ] | [ flag "self frags" confilter 0x800 / flag "other player frags" confilter 0x1000 / flag "team kills" confilter 0x2000 ]
 == Chat box (bottom left) {only if tab "Console and chat box" open}
 1. checkbox "Chat in its own box" miniconfilter on=0x300
-2. note: Kill feed and frag messages: Options > HUD > Kill feed.
 == Full console (F11) {only if tab "Full screen (F10, F11)" open}
 1. slider "Size (percent of screen)" fullconsize
-2. note: What it shows:
+2. text "What it shows"
 3. [ flag "important information" fullconfilter 0x11 / flag "warnings" fullconfilter 0x02 / flag "errors" fullconfilter 0x04 / flag "script messages" fullconfilter 0x20 ] | [ flag "chat" fullconfilter 0x100 / flag "team chat" fullconfilter 0x200 / flag "game events" fullconfilter 0x400 ] | [ flag "self frags" fullconfilter 0x800 / flag "other player frags" fullconfilter 0x1000 / flag "team kills" fullconfilter 0x2000 ]
 == Expanded chat (F10) {only if tab "Full screen (F10, F11)" open}
 1. button "Open expanded chat (F10)" : togglechat
 2. slider "Expanded Chat Size" fullchatsize
-3. note: Chat only. Numbered lines, mouse wheel to scroll.
-4. note: Ctrl+C copies all. Ctrl+Shift+C = visible. Drag to copy a range.
 
 ## record | Recording | Options > Recording
 == (top)
-1. button "Match videos" : concat recordtab "=" 0 | button "Demos (HD aim)" : concat recordtab "=" 1
+1. button "Match videos" : concat recordtab "=" 0 | button "Demos (HD aim)" : concat recordtab "=" 1 | button "Demo playback" : concat recordtab "=" 3
 == Match videos {only if tab "Match videos" open}
 1. {if matchrecord on} button "Match Recording: ON" : togglematchrecord
 2. {if not (matchrecord on)} button "Match Recording: OFF" : togglematchrecord
@@ -456,48 +386,43 @@ also: Chat Translation
 1. text "My Games / L4ZY / recordings" | button "Open Folder" : openfolder recordings
 2. {if nummatchrecs() > 0 and repeated for each i (count known in game: <nummatchrecs>)} (text "<matchrecname $i>" | button "Extract" : matchrecextract <i>)
 3. {if not (nummatchrecs() > 0)} note: No Recordings Yet
-4. note: Extract copies the file.
 == Demos with HD aim {only if tab "Demos (HD aim)" open}
 1. {if demohdrecord on} button "Demo + HD Aim: ON" : toggledemorecord
 2. {if not (demohdrecord on)} button "Demo + HD Aim: OFF" : toggledemorecord
 3. checkbox "Record enemy visibility in HD demos" demohdvis
-4. note: Which enemies were really on your screen, for studying demos. Never shown in game.
-5. note: Aim recorded on this machine, not server truth.
-6. "X-ray at demo start" choice demoxraystart: "Off"=0, "On"=1
-7. "X-ray style" choice demoxraystyle: "Outline"=0, "Outline + veil"=1
-8. note: X-ray: players seen through walls in their colour. Demos only.
-9. slider "Demos to Keep (oldest deleted automatically)" demokeep
-10. slider "Live HD spectating delay in ms (same for every player)" hdlivedelay
+4. "X-ray at demo start" choice demoxraystart: "Off"=0, "On"=1
+5. "X-ray style" choice demoxraystyle: "Outline"=0, "Outline + veil"=1
+6. field "Demos to Keep" demokeep
+7. slider "Live HD spectating delay in ms (same for every player)" hdlivedelay
 == Saved demos {only if tab "Demos (HD aim)" open}
-1. note: Put both files in this folder (same names, not a subfolder):
-2. button "<localdemofolder>" : openfolder demo
-3. note: The game's demo folder works too.
-4. {if numlocaldemos() > 0 and repeated for each i (count known in game: <numlocaldemos>)} (text "<localdemoname $i>" | button "Play" : playlocaldemo <i> | button "Extract" : localdemoextract <i>)
-5. {if not (numlocaldemos() > 0)} note: No Local Demos Yet
-6. note: Extract copies the .dmo and the HD file together.
+1. button "<localdemofolder>" : openfolder demo
+2. {if numlocaldemos() > 0 and repeated for each i (count known in game: <numlocaldemos>)} (text "<localdemoname $i>" | button "Play" : playlocaldemo <i> | button "Extract" : localdemoextract <i>)
+3. {if not (numlocaldemos() > 0)} note: No Local Demos Yet
+== Watching demos {only if tab "Demo playback" open}
+1. "Followed player's view" choice demopov: "As their game showed them"=1, "Real positions"=0
+2. "Hitboxes" choice demohitbox: "Off"=0, "On"=1
+3. "Shots with hitboxes" choice demohitboxshots: "Off"=0, "On"=1
+4. "Hitbox of a killed player" choice demohitboxdeath: "Off"=0, "1 s"=1000, "1.5 s"=1500, "2 s"=2000, "3 s"=3000
+5. "Uncertain (pink) up to" choice demohitboxuncertain: "0.25 unit"=0.25, "0.5 unit"=0.5, "1 unit"=1, "Off (all red)"=0
+6. "Victims of the others' shots" choice demohitboxothercolour: "Light blue"=8440063, "Grey"=8160140, "Cyan"=6353151, "Green"=4259712, "Purple"=12615935
 
 ## importsettings | Import settings | Options > Import settings from another client
 == (top)
-1. text "Copies keys, name, options, servers and friends"
-2. text "from another client into L4ZY."
-3. {if importsrccount() = 0} note: No other client found in My Games.
-4. {if repeated for each i (count known in game: <importsrccount>)} button "<if (= $importsel $i) [result "> "] [result ""]><importsrclabel $i>" : importsel = <i>
-5. button "<if (= $importsel -1) [result "> "] [result ""]>Another folder (type it below)" : importsel = -1
-6. field importdir (Enter runs importsel = -1)
-7. note: Example: C:\Games\Sauerbraten (the folder that holds config.cfg)
-8. {if importsel >= -1 and tab "<if (= $importsel -1) [result "> "] [result ""]>Another folder (type it below)" open} note: From: <guifieldtext importdir>
-9. {if importsel >= -1 and not (tab "<if (= $importsel -1) [result "> "] [result ""]>Another folder (type it below)" open)} note: From: <importsrcfolder $importsel>
-10. {if importsel >= -1} button "<if (importrestartable) [result "Import and restart"] [result "Import at next start"]>" : importsettingsfrom $importsel (guifieldtext i...
-11. {if not (importsel >= -1)} note: Pick a client above.
-12. note: Your current settings are kept as config.cfg.before-import.bak
-13. {if not (strcmp(importlastresult() ))} note: Last time: <importlastresult>
+1. {if importsrccount() = 0} note: No other client found in My Games.
+2. {if repeated for each i (count known in game: <importsrccount>)} button "<if (= $importsel $i) [result "> "] [result ""]><importsrclabel $i>" : importsel = <i>
+3. button "<if (= $importsel -1) [result "> "] [result ""]>Another folder (type it below)" : importsel = -1
+4. field importdir (Enter runs importsel = -1)
+5. {if importsel >= -1 and tab "<if (= $importsel -1) [result "> "] [result ""]>Another folder (type it below)" open} note: From: <guifieldtext importdir>
+6. {if importsel >= -1 and not (tab "<if (= $importsel -1) [result "> "] [result ""]>Another folder (type it below)" open)} note: From: <importsrcfolder $importsel>
+7. {if importsel >= -1} button "<if (importrestartable) [result "Import and restart"] [result "Import at next start"]>" : importsettingsfrom $importsel (guifieldtext i...
+8. {if not (importsel >= -1)} note: Pick a client above.
+9. {if not (strcmp(importlastresult() ))} note: Last time: <importlastresult>
 
 ## crosshair | Crosshair | Options > Mouse > Crosshair...
 == Look
 1. slider "Size" crosshairsize
 2. colours "Crosshair colour (hex)" crosshaircolour
-3. note: Click an image to use it:
-4. {if repeated for each row (count known in game: <div (+ (listlen $crosshairs) 6) 7>) and repeated for each col (count known in game: 7) and <ch> != ""} button "image" : cleargui 1 loadcrosshair @(at <ch> 0) 0 loadc...
+3. {if repeated for each row (count known in game: <div (+ (listlen $crosshairs) 6) 7>) and repeated for each col (count known in game: 7) and <ch> != ""} button "image" : cleargui 1 loadcrosshair @(at <ch> 0) 0 loadc...
 == Effects
 1. checkbox "Crosshair effects" crosshairfx
 2. {if "Crosshair effects" ticked (crosshairfx)} [ checkbox "Colour shows my health" crosshaircolors / checkbox "Other crosshair on teammates" teamcrosshair / checkbox "Hit marker" hitcrosshair on=425 / checkbox "Dim while reloading" crosshairreloaddim ]
@@ -513,11 +438,10 @@ also: Chat Translation
 5. slider "Space between weapons" ammobarsep
 6. slider "Space before the ammo count" ammobarcountsep
 == Size and place
-1. note: Easier: Options > HUD > Move HUD parts.
-2. field "Ammo count size" ammobarcountscale | button "-" : ammobarcountscale (+fround $ammobarcountscale... | button "+" : ammobarcountscale (+fround $ammobarcountscale...
-3. field "Size" ammobarscale | button "-" : ammobarscale (+fround $ammobarscale -0.01) | button "+" : ammobarscale (+fround $ammobarscale 0.01)
-4. field "Position X" ammobarx | button "-" : ammobarx (+fround $ammobarx -0.01) | button "+" : ammobarx (+fround $ammobarx 0.01)
-5. field "Position Y" ammobary | button "-" : ammobary (+fround $ammobary -0.01) | button "+" : ammobary (+fround $ammobary 0.01)
+1. field "Ammo count size" ammobarcountscale | button "-" : ammobarcountscale (+fround $ammobarcountscale... | button "+" : ammobarcountscale (+fround $ammobarcountscale...
+2. field "Size" ammobarscale | button "-" : ammobarscale (+fround $ammobarscale -0.01) | button "+" : ammobarscale (+fround $ammobarscale 0.01)
+3. field "Position X" ammobarx | button "-" : ammobarx (+fround $ammobarx -0.01) | button "+" : ammobarx (+fround $ammobarx 0.01)
+4. field "Position Y" ammobary | button "-" : ammobary (+fround $ammobary -0.01) | button "+" : ammobary (+fround $ammobary 0.01)
 
 ## gameclock | Game Clock | Options > HUD > Adjust... (next to Game clock)
 == (top)
@@ -526,10 +450,9 @@ also: Chat Translation
 1. "Align" choice gameclockalign: "Left"=-1, "Centre"=0, "Right"=1
 2. slider "Opacity (0 to 255)" gameclockalpha
 == Size and place
-1. note: Easier: Options > HUD > Move HUD parts.
-2. field "Size" gameclockscale | button "-" : gameclockscale (+fround $gameclockscale -0.01) | button "+" : gameclockscale (+fround $gameclockscale 0.01)
-3. field "Position X" gameclockx | button "-" : gameclockx (+fround $gameclockx -0.01) | button "+" : gameclockx (+fround $gameclockx 0.01)
-4. field "Position Y" gameclocky | button "-" : gameclocky (+fround $gameclocky -0.01) | button "+" : gameclocky (+fround $gameclocky 0.01)
+1. field "Size" gameclockscale | button "-" : gameclockscale (+fround $gameclockscale -0.01) | button "+" : gameclockscale (+fround $gameclockscale 0.01)
+2. field "Position X" gameclockx | button "-" : gameclockx (+fround $gameclockx -0.01) | button "+" : gameclockx (+fround $gameclockx 0.01)
+3. field "Position Y" gameclocky | button "-" : gameclocky (+fround $gameclocky -0.01) | button "+" : gameclocky (+fround $gameclocky 0.01)
 
 ## hudscore | HUD Score | Options > HUD > Adjust... (next to Score display)
 == (top)
@@ -539,10 +462,9 @@ also: Chat Translation
 2. slider "Opacity (0 to 255)" hudscorealpha
 3. slider "Space between the two scores" hudscoresep
 == Size and place
-1. note: Easier: Options > HUD > Move HUD parts.
-2. field "Size" hudscorescale | button "-" : hudscorescale (+fround $hudscorescale -0.01) | button "+" : hudscorescale (+fround $hudscorescale 0.01)
-3. field "Position X" hudscorex | button "-" : hudscorex (+fround $hudscorex -0.01) | button "+" : hudscorex (+fround $hudscorex 0.01)
-4. field "Position Y" hudscorey | button "-" : hudscorey (+fround $hudscorey -0.01) | button "+" : hudscorey (+fround $hudscorey 0.01)
+1. field "Size" hudscorescale | button "-" : hudscorescale (+fround $hudscorescale -0.01) | button "+" : hudscorescale (+fround $hudscorescale 0.01)
+2. field "Position X" hudscorex | button "-" : hudscorex (+fround $hudscorex -0.01) | button "+" : hudscorex (+fround $hudscorex 0.01)
+3. field "Position Y" hudscorey | button "-" : hudscorey (+fround $hudscorey -0.01) | button "+" : hudscorey (+fround $hudscorey 0.01)
 
 ## killfeed | Kill Feed | Options > HUD > Adjust... (next to Kill feed)
 == (top)
@@ -574,10 +496,9 @@ also: Chat Translation
 == Look
 1. slider "Fade after (seconds)" killstreakfade
 2. "Align" choice killstreakalign: "Left"=-1, "Centre"=0, "Right"=1
-3. note: Easier: Options > HUD > Move HUD parts.
-4. field "Size" killstreakscale | button "-" : killstreakscale (+fround $killstreakscale -0.01) | button "+" : killstreakscale (+fround $killstreakscale 0.01)
-5. field "Position X" killstreakx | button "-" : killstreakx (+fround $killstreakx -0.01) | button "+" : killstreakx (+fround $killstreakx 0.01)
-6. field "Position Y" killstreaky | button "-" : killstreaky (+fround $killstreaky -0.01) | button "+" : killstreaky (+fround $killstreaky 0.01)
+3. field "Size" killstreakscale | button "-" : killstreakscale (+fround $killstreakscale -0.01) | button "+" : killstreakscale (+fround $killstreakscale 0.01)
+4. field "Position X" killstreakx | button "-" : killstreakx (+fround $killstreakx -0.01) | button "+" : killstreakx (+fround $killstreakx 0.01)
+5. field "Position Y" killstreaky | button "-" : killstreaky (+fround $killstreaky -0.01) | button "+" : killstreaky (+fround $killstreaky 0.01)
 
 ## trails | Weapons and trails | Options > HUD > Weapons and trails...
 == My gun
@@ -586,93 +507,81 @@ also: Chat Translation
 == Muzzle flashes (every player)
 1. checkbox "Flash" muzzleflash
 2. checkbox "Light (lights walls and players when shooting)" muzzlelight
-3. {if "Light (lights walls and players when shooting)" ticked (muzzlelight)} note: Light per weapon:
-4. {if "Light (lights walls and players when shooting)" ticked (muzzlelight)} ([ checkbox "Shotgun" muzzlelightshotgun / checkbox "Chaingun" muzzlelightchaingun / checkbox "Rifle" muzzlelightrifle ] | [ checkbox "Grenade" muzzlelightgrenadelauncher / checkbox "Pistol" muzzlelightpistol ])
+3. {if "Light (lights walls and players when shooting)" ticked (muzzlelight)} ([ checkbox "Shotgun" muzzlelightshotgun / checkbox "Chaingun" muzzlelightchaingun / checkbox "Rifle" muzzlelightrifle ] | [ checkbox "Grenade" muzzlelightgrenadelauncher / checkbox "Pistol" muzzlelightpistol ])
 == Trail colours
-1. note: Your view only: nothing is sent, size and duration stay stock.
-2. button "Me..." > page trailsme | button "Others..." > page trailsothers | button "All..." > page trailsall
-3. note: Me: my shots. Others: everyone else. All: every shot without its own.
-4. slider "Brightness of custom colours" trailbrightness
-5. button "Back to stock colours" : trailcolorreset
-6. note: Rockets and grenades also have a projectile colour (glow and explosion).
-7. button "Projectiles and explosions back to stock" : projcolorreset
+1. button "Me..." > page trailsme | button "Others..." > page trailsothers | button "All..." > page trailsall
+2. slider "Brightness of custom colours" trailbrightness
+3. button "Back to stock colours" : trailcolorreset
+4. button "Projectiles and explosions back to stock" : projcolorreset
 
 ## scoreboard | Scoreboard | Options > HUD > Scoreboard (Tab)...
-== (top)
-1. note: Shown while you hold Tab.
 == Board
 1. slider "Opacity" scoreboardalpha
-2. note: Lower = see the game through the board
-3. checkbox "Show it when I die" deathscore
-4. checkbox "Player list on the right while spectating" spectatorlist
-5. note: Hold Tab while spectating, then click a name to follow that player.
+2. checkbox "Show it when I die" deathscore
+3. checkbox "Player list on the right while spectating" spectatorlist
 == Columns
-1. note: Each box is one column.
-2. [ checkbox "Server name" showservinfo / checkbox "Frags" showfrags / checkbox "Frags in CTF / Collect" hidefrags on=0 off=1 / checkbox "Deaths" showdeaths / checkbox "K/D" showkd / checkbox "Flags / skulls" showflags / checkbox "Accuracy" showaccuracy / checkbox "Languages" showlang / checkbox "Vs you (kills-deaths)" showvs / checkbox "Status (dead / lag)" showstatus ] | [ checkbox "Ping" showping / checkbox "Packet jump" showpj / checkbox "Client number" showclientnum / checkbox "Spectators" showspectators / checkbox "Highlight me" highlightscore / checkbox "Connecting players" showconnecting ]
+1. [ checkbox "Server name" showservinfo / checkbox "Frags" showfrags / checkbox "Frags in CTF / Collect" hidefrags on=0 off=1 / checkbox "Deaths" showdeaths / checkbox "K/D" showkd / checkbox "Flags / skulls" showflags / checkbox "Accuracy" showaccuracy / checkbox "Languages" showlang / checkbox "Vs you (kills-deaths)" showvs / checkbox "Status (dead / lag)" showstatus ] | [ checkbox "Ping" showping / checkbox "Packet jump" showpj / checkbox "Client number" showclientnum / checkbox "Spectators" showspectators / checkbox "Highlight me" highlightscore / checkbox "Connecting players" showconnecting ]
 
 ## trailsme | Weapon Trails: Me | Options > HUD > Weapons and trails... > Me...
 == (top)
-1. note: My shots. same as All = use the All colour.
-2. text "Shotgun"
-3. colours "Shotgun trail colour, me" trailmycolorshotgun
-4. text "Chaingun"
-5. colours "Chaingun trail colour, me" trailmycolorchaingun
-6. text "Rifle"
-7. colours "Rifle trail colour, me" trailmycolorrifle
-8. text "Rocket launcher (smoke)"
-9. colours "Rocket trail colour, me" trailmycolorrocketlauncher
-10. text "Grenade launcher (smoke)"
-11. colours "Grenade trail colour, me" trailmycolorgrenadelauncher
-12. text "Pistol"
-13. colours "Pistol trail colour, me" trailmycolorpistol
-14. text "Rocket (projectile and explosion)"
-15. colours "Rocket projectile colour, me" projmycolorrocketlauncher
-16. text "Grenade (projectile and explosion)"
-17. colours "Grenade projectile colour, me" projmycolorgrenadelauncher
+1. text "Shotgun"
+2. colours "Shotgun trail colour, me" trailmycolorshotgun
+3. text "Chaingun"
+4. colours "Chaingun trail colour, me" trailmycolorchaingun
+5. text "Rifle"
+6. colours "Rifle trail colour, me" trailmycolorrifle
+7. text "Rocket launcher (smoke)"
+8. colours "Rocket trail colour, me" trailmycolorrocketlauncher
+9. text "Grenade launcher (smoke)"
+10. colours "Grenade trail colour, me" trailmycolorgrenadelauncher
+11. text "Pistol"
+12. colours "Pistol trail colour, me" trailmycolorpistol
+13. text "Rocket (projectile and explosion)"
+14. colours "Rocket projectile colour, me" projmycolorrocketlauncher
+15. text "Grenade (projectile and explosion)"
+16. colours "Grenade projectile colour, me" projmycolorgrenadelauncher
 
 ## trailsothers | Weapon Trails: Others | Options > HUD > Weapons and trails... > Others...
 == (top)
-1. note: Everyone else (players, bots), any team. same as All = use the All colour.
-2. text "Shotgun"
-3. colours "Shotgun trail colour, others" trailothercolorshotgun
-4. text "Chaingun"
-5. colours "Chaingun trail colour, others" trailothercolorchaingun
-6. text "Rifle"
-7. colours "Rifle trail colour, others" trailothercolorrifle
-8. text "Rocket launcher (smoke)"
-9. colours "Rocket trail colour, others" trailothercolorrocketlauncher
-10. text "Grenade launcher (smoke)"
-11. colours "Grenade trail colour, others" trailothercolorgrenadelauncher
-12. text "Pistol"
-13. colours "Pistol trail colour, others" trailothercolorpistol
-14. text "Rocket (projectile and explosion)"
-15. colours "Rocket projectile colour, others" projothercolorrocketlauncher
-16. text "Grenade (projectile and explosion)"
-17. colours "Grenade projectile colour, others" projothercolorgrenadelauncher
+1. text "Shotgun"
+2. colours "Shotgun trail colour, others" trailothercolorshotgun
+3. text "Chaingun"
+4. colours "Chaingun trail colour, others" trailothercolorchaingun
+5. text "Rifle"
+6. colours "Rifle trail colour, others" trailothercolorrifle
+7. text "Rocket launcher (smoke)"
+8. colours "Rocket trail colour, others" trailothercolorrocketlauncher
+9. text "Grenade launcher (smoke)"
+10. colours "Grenade trail colour, others" trailothercolorgrenadelauncher
+11. text "Pistol"
+12. colours "Pistol trail colour, others" trailothercolorpistol
+13. text "Rocket (projectile and explosion)"
+14. colours "Rocket projectile colour, others" projothercolorrocketlauncher
+15. text "Grenade (projectile and explosion)"
+16. colours "Grenade projectile colour, others" projothercolorgrenadelauncher
 
 ## trailsall | Weapon Trails: All | Options > HUD > Weapons and trails... > All...
 == (top)
-1. note: Every shot, unless Me / Others has its own colour. stock = the game's colour.
-2. text "Shotgun"
-3. colours "Shotgun trail colour" trailcolorshotgun
-4. text "Chaingun"
-5. colours "Chaingun trail colour" trailcolorchaingun
-6. text "Rifle"
-7. colours "Rifle trail colour" trailcolorrifle
-8. text "Rocket launcher (smoke)"
-9. colours "Rocket trail colour" trailcolorrocketlauncher
-10. text "Grenade launcher (smoke)"
-11. colours "Grenade trail colour" trailcolorgrenadelauncher
-12. text "Pistol"
-13. colours "Pistol trail colour" trailcolorpistol
-14. text "Rocket (projectile and explosion)"
-15. colours "Rocket projectile colour" projcolorrocketlauncher
-16. text "Grenade (projectile and explosion)"
-17. colours "Grenade projectile colour" projcolorgrenadelauncher
+1. text "Shotgun"
+2. colours "Shotgun trail colour" trailcolorshotgun
+3. text "Chaingun"
+4. colours "Chaingun trail colour" trailcolorchaingun
+5. text "Rifle"
+6. colours "Rifle trail colour" trailcolorrifle
+7. text "Rocket launcher (smoke)"
+8. colours "Rocket trail colour" trailcolorrocketlauncher
+9. text "Grenade launcher (smoke)"
+10. colours "Grenade trail colour" trailcolorgrenadelauncher
+11. text "Pistol"
+12. colours "Pistol trail colour" trailcolorpistol
+13. text "Rocket (projectile and explosion)"
+14. colours "Rocket projectile colour" projcolorrocketlauncher
+15. text "Grenade (projectile and explosion)"
+16. colours "Grenade projectile colour" projcolorgrenadelauncher
 
 ## playermodel | Player Model | <playermodelname> (next to player preview)
 == (top)
-1. [ {if repeated for each i (count known in game: <playermodelnum>)} button "<playermodelname $i>" : playermodelbutton <i> / checkbox "Custom model" customplayermodel / note: Your own files, nothing on top. / button "Open custom folder" : openfolder playermodel ] | [ player preview (click: checkrolloveraction "playermodel ") / colours "My colour" mycolor / text "<playermodelstory $pmidx>" ]
+1. [ {if repeated for each i (count known in game: <playermodelnum>)} button "<playermodelname $i>" : playermodelbutton <i> / checkbox "Custom model" customplayermodel / button "Open custom folder" : openfolder playermodel ] | [ player preview (click: checkrolloveraction "playermodel ") / colours "My colour" mycolor / text "<playermodelstory $pmidx>" ]
 
 # --- other pages ---
 ## main | main | main menu
@@ -770,12 +679,26 @@ also: Chat Translation
 2. slider "bot minimum skill" botmatchminskill (50..101)
 3. slider "bot maximum skill" botmatchmaxskill (50..101)
 4. "bots play" choice botperception: "Classic"=0, "Tiny Apa"=2
-5. {if "Classic" chosen (botperception 0)} note: Classic: the normal Sauerbraten bots.
-6. {if "Tiny Apa" chosen (botperception 2)} note: Tiny Apa (WIP): bots modelled on Apathy's own play.
-7. {if "Tiny Apa" chosen (botperception 2)} slider "their level: <botstylelevel> %" botstylelevel (50..100)
-8. {if "Tiny Apa" chosen (botperception 2)} note: 100 = a strong player, 50 = half the accuracy, slower.
-9. {if "Tiny Apa" chosen (botperception 2)} checkbox "a different form each game" botstyleform
+5. {if "Tiny Apa" chosen (botperception 2)} slider "their level: <botstylelevel> %" botstylelevel (50..100)
+6. {if "Tiny Apa" chosen (botperception 2)} (checkbox "a different form each game" botstyleform | button "form settings.." > page botform)
+7. {if "Tiny Apa" chosen (botperception 2)} checkbox "moves learned from recorded games (work in progress)" botnet
+8. {if "Tiny Apa" chosen (botperception 2)} checkbox "find their way on the map's walk grid" botnavgrid
+9. {if "Tiny Apa" chosen (botperception 2) and "find their way on the map's walk grid" ticked (botnavgrid)} button "walk grid settings.." > page botnav
 10. button "start match.." > page gamemode
+
+## botform | Tiny Apa Form | Bot Match > form settings..
+== (top)
+1. checkbox "a different form each game" botstyleform
+2. {if "a different form each game" ticked (botstyleform)} slider "very tired games: <botstyletired> %" botstyletired (0..100)
+3. checkbox "warm up in the first two minutes" botstylewarmup
+
+## botnav | Walk Grid | Bot Match > walk grid settings..
+== (top)
+1. checkbox "find their way on the map's walk grid" botnavgrid
+2. {if "find their way on the map's walk grid" ticked (botnavgrid)} checkbox "keep clear of deadly falls" botnavsafe
+3. {if "find their way on the map's walk grid" ticked (botnavgrid)} slider "grid making: <navbuildshare> % of each frame" navbuildshare (5..25)
+4. {if "find their way on the map's walk grid" ticked (botnavgrid)} slider "grid cache: none" navcachemb (0..512)
+5. {if "find their way on the map's walk grid" ticked (botnavgrid)} slider "way variety: <navvariety> %" navvariety (0..30)
 
 ## campaign | Campaign | Campaign
 == (top)
@@ -1004,9 +927,8 @@ also: Chat Translation
 ## settingsearch | Search settings | Options > Search settings...
 == (top)
 1. field "Search" settingsquery
-2. note: Click the field and type. Several words narrow the search.
-3. text "<generated by settingsearchgui (guifieldtext settingsquery)>"
-4. button "Ask the assistant (AI)..." > page assistant
+2. text "<generated by settingsearchgui (guifieldtext settingsquery)>"
+3. button "Ask the assistant (AI)..." > page assistant
 
 ## assistant | Settings assistant (local AI) | Options > Settings assistant (AI)...
 == (top)

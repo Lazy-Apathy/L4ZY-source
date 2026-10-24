@@ -22,6 +22,8 @@ int guipanelspare = 0; // free height left in the last laid out menu panel (nega
 
 static bool hascursor;
 static float cursorx = 0.5f, cursory = 0.5f;
+static bool guilasthit = false; // the control laid out last is under the mouse
+static float guitipsx = 0, guitipsy = 0; // letter scale of the open menu (for its explanations)
 
 #define SHADOW 4
 #define ICON_SIZE (FONTH-SHADOW)
@@ -591,6 +593,7 @@ struct gui : g3d_gui
                 xsize = max(xsize, w);
                 ysize += h;
             }
+            guilasthit = false;
             return 0;
         }
         else
@@ -599,9 +602,12 @@ struct gui : g3d_gui
             bool vis = visible();
             if(ishorizontal()) curx += w;
             else cury += h;
+            guilasthit = hit && vis;
             return (hit && vis) ? mousebuttons|G3D_ROLLOVER : 0;
         }
     }
+
+    bool lasthit() { return guilasthit; }
 
     bool mergehits(bool on) 
     { 
@@ -1450,10 +1456,11 @@ struct gui : g3d_gui
             if(gui2d)
             {
                 hudmatrix.ortho(0, 1, 1, 0, -1, 1);
-                hudmatrix.translate(origin);        
+                hudmatrix.translate(origin);
                 hudmatrix.scale(scale);
 
                 light = vec(1, 1, 1);
+                if(allowinput) { guitipsx = scale.x; guitipsy = scale.y; }
             }
             else
             {
@@ -2012,6 +2019,57 @@ void g3d_render()
     }
 }
 
+static void guitiprect(float x, float y, float w, float h)
+{
+    gle::defvertex(2);
+    gle::begin(GL_TRIANGLE_STRIP);
+    gle::attribf(x, y);
+    gle::attribf(x + w, y);
+    gle::attribf(x, y + h);
+    gle::attribf(x + w, y + h);
+    xtraverts += gle::end();
+}
+
+// the explanation of the option under the mouse (menus.cpp decides when),
+// with the letters of the open menu: next to the mouse, or at the bottom
+static void drawguitip(const char *text, int place)
+{
+    float sx = guitipsx, sy = guitipsy;
+    if(sx <= 0 || sy <= 0 || !text[0]) return;
+    int maxw = 44*FONTW, tw = 0, th = 0, pad = FONTH/3;
+    text_bounds(text, tw, th, maxw);
+    float bw = (tw + 2*pad)*sx, bh = (th + 2*pad)*sy, x, y;
+    if(place == 1)
+    {
+        x = 0.5f - bw/2;
+        y = 0.99f - bh;
+    }
+    else
+    {
+        x = cursorx + FONTH*0.7f*sx;
+        y = cursory + FONTH*1.0f*sy;
+        if(x + bw > 0.99f) x = cursorx - bw - FONTH*0.3f*sx;
+        if(y + bh > 0.99f) y = cursory - bh - FONTH*0.3f*sy;
+    }
+    x = clamp(x, 0.01f, max(0.01f, 0.99f - bw));
+    y = clamp(y, 0.01f, max(0.01f, 0.99f - bh));
+    hudmatrix.ortho(0, 1, 1, 0, -1, 1);
+    hudmatrix.translate(x, y, 0);
+    hudmatrix.scale(sx, sy, 1);
+    resethudmatrix();
+    hudnotextureshader->set();
+    float w = tw + 2*pad, h = th + 2*pad;
+    gle::colorub(10, 12, 16, 245);
+    guitiprect(0, 0, w, h);
+    gle::colorub(255, 122, 24, 210);
+    guitiprect(0, 0, w, 3);
+    guitiprect(0, h - 3, w, 3);
+    guitiprect(0, 0, 3, h);
+    guitiprect(w - 3, 0, 3, h);
+    hudshader->set();
+    draw_text(text, pad, pad, 0xE4, 0xE6, 0xE8, 0xFF, -1, maxw);
+}
+
 void g3d_render2d()
 {
     guibackdroptex = guibackdropnext;
@@ -2024,6 +2082,18 @@ void g3d_render2d()
         loopvrev(guis2d) guis2d[i].draw();
 
         glDisable(GL_BLEND);
+    }
+    {
+        extern const char *menuhelptip(bool clicked, float cx, float cy, int &place);
+        int place = 0;
+        const char *tip = menuhelptip(hascursor && (mousebuttons&(G3D_DOWN|G3D_PRESSED|G3D_UP)) != 0, cursorx, cursory, place);
+        if(tip && guis2d.length() && hascursor)
+        {
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            drawguitip(tip, place);
+            glDisable(GL_BLEND);
+        }
     }
 
     flusheditors();

@@ -315,6 +315,37 @@ namespace ai
 	extern void stylebotplay(int cn, int st);
 
     extern void render();
+
+    // walk grid of the Human bots (ainav.cpp): built while this game plays one
+    extern void navupdate();
+    extern void navmapstart();
+    extern void navworldchanged(const ivec &bbmin, const ivec &bbmax);
+    extern void naventchanged(int i);
+    extern void navrender();
+    extern bool navready();
+    extern int navnearestnode(const vec &feet, float maxdist);
+    extern bool navroutenodes(int from, int to, vector<int> *path, float &cost);
+    extern bool navnodepos(int n, vec &pos);
+    extern int navrandomnode(const vec &from, float mind, float maxd);
+    // their way on it (ainavbot.h), once it is ready: ai.cpp asks it from one-line branches taken by Human bots only
+    extern bool navsimbody(const physent *d);
+    extern bool navbotready();
+    extern bool navbotroute(fpsent *d, aistate &b, const vec &pos, bool changed);
+    extern bool navbotroutenode(fpsent *d, aistate &b, int wp, bool changed);
+    extern bool navbotrandom(fpsent *d, aistate &b, const vec &pos, float guard, float wander);
+    extern bool navbotinterest(fpsent *d, aistate &b, const interest &n);
+    extern int navbotnodegoal(fpsent *d, aistate &b);
+    extern int navbothunt(fpsent *d, aistate &b);
+    extern bool navbotjump(fpsent *d, aistate &b);
+    extern void navbotkeys(fpsent *d, aistate &b, int result);
+    extern bool navbottimeouts(fpsent *d, aistate &b);
+    extern bool navbotontrigger(const vec &p);
+    // and what only ai.cpp knows of a bot
+    extern int navbotmode(fpsent *d);
+    extern bool navbotsees(fpsent *d, fpsent *e);
+    extern int navbotstyle(fpsent *d);
+    extern bool navbotstylejump(fpsent *d, aistate &b);
+    extern void navbotstyleview(fpsent *d);
 }
 
 

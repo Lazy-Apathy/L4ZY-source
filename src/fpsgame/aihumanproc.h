@@ -2,7 +2,8 @@
 // Not a standalone header: ai.cpp includes it once, inside namespace ai, right before process().
 
     // the enemy part of process() for a human-perception bot: same aim and shooting, but it
-    // only knows what it noticed, aims at where it believes the enemy is when it cannot see him
+    // only knows what it noticed, aims at where it believes the enemy is when it cannot see him,
+    // and at the part of him it sees when the middle of his body is hidden
     AI_HUMAN int processhuman(fpsent *d, aistate &b, const vec &dp, bool idle, float frame, int skmod)
     {
         int result = 0;
@@ -17,9 +18,11 @@
                 if(targetable(d, f))
                 {
                     aiperceived *q = findperceived(d, f);
-                    if(q && q->visible && q->tracking) // under its crosshair, and noticed
+                    // under its crosshair, and noticed: another enemy passing there does not take its eyes off the one
+                    // it sees; he becomes the one it goes for when that one is out of its sight (or it had none)
+                    if(f != e && q && q->visible && q->tracking && !(enemyok && p->visible && p->tracking))
                     {
-                        if(!enemyok) violence(d, b, f, d->gunselect == GUN_FIST ? 1 : 0);
+                        violence(d, b, f, d->gunselect == GUN_FIST ? 1 : 0);
                         enemyok = true;
                         e = f;
                     }
@@ -41,9 +44,10 @@
             // an old guess far away (a duel: never forgotten) is kept in mind, but it looks where it goes
             if(!insight && !quick && lastmillis - p->knownmillis > botmemory*1000 && guess.squaredist(dp) > 512*512) return botmode(d) == 2 ? stylelook(d, b, dp, &guess) : 0;
             if(botmode(d) == 2) return styleenemy(d, b, e, *p, dp, insight, quick, guess);
-            vec ep = insight ? getaimpos(d, e) : guessaimpos(d, e, guess);
+            vec ep = insight ? humanaim(d, e, *p) : guessaimpos(d, e, guess);
             float yaw, pitch;
             getyawpitch(dp, ep, yaw, pitch);
+            if(!insight) guesspitch(d, dp, ep, pitch);
             fixrange(yaw, pitch);
             if(insight) d->ai->enemyseen = lastmillis;
             float sskew = insight || d->skill > 100 ? 1.5f : 1.f;
@@ -75,3 +79,4 @@
         }
         return result;
     }
+    #include "ainet.h" // Tiny Apa: its moves from a small network (botnet 1)

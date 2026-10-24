@@ -124,10 +124,9 @@ do NOT make it polite. Decode typos in the source; the output must be readable \
 {lang}, not a copy of the misspelled input.
 - Stay as short as the original. A two-word callout stays a two-word callout.
 - Leave player names, clan tags, map names, mode names, game titles \
-(Fear and Hunger) and numbers exactly as written. Do not turn a nickname \
-into a common noun (Apathy is not apathie, Fear is not peur, COW is not \
-vache, LAZY is the clan, tool, buttman, Scuba, nasty/nasti, woals, \
-watson, fiko, tribu, gavin, kotzi are players). \
+(Fear and Hunger) and numbers exactly as written. Many nicknames are \
+ordinary words or first names: never translate, correct or explain a \
+nickname (a player called cow is not vache). \
 o/ plus a name is a wave, not a translation of the name.
 - Never invent. If the source does not mention the flag, a death, or a \
 map, do not add them. Do not reverse less / never / not.
@@ -199,7 +198,7 @@ reader or when the source marks a woman.
 # Les langues d'entree sont volontairement melangees dans chaque liste : c'est
 # ce qui apprend au modele a ne pas recopier la langue de depart.
 #
-# Les paires ci-dessous viennent surtout des vrais chats JKEU (aout 2026).
+# Les paires ci-dessous viennent surtout de vrais chats de parties publiques (aout 2026).
 # On reste volontairement court : chaque exemple est renvoye au modele a
 # CHAQUE ligne, et un prompt trop long casse le cache (gris d'abord, vert
 # plusieurs secondes plus tard).
@@ -228,16 +227,14 @@ FEWSHOT = {
         ("how the HELL is it more important?", "comment ca peut etre plus important putain ?"),
         ("esc and press toggle spectator",   "echap puis toggle spectator"),
         ("whats the command to zoom out the minimap more?", "c'est quoi la commande pour dezoomer plus la minimap ?"),
-        ("apathy wasn't enough :)",          "apathy suffisait pas :)"),
-        ("cow is busy atm",                  "COW est occupe"),
-        ("lazy clan play with us",           "LAZY jouez avec nous"),
-        ("LAZY are lazy",                    "LAZY sont des feignasses"),
+        ("cow is busy atm",                  "cow est occupe"),
+        ("where is pickle?",                 "il est ou pickle ?"),
+        ("toaster stop camping",             "toaster arrete de camper"),
         ("poor map taste",                   "mauvais gout en map"),
         ("watch out i shoot back",           "attention je tire en retour"),
         ("sprich deutsch du hurensohn",      "parle allemand fils de pute"),
         ("ok cheater is here again i go byw", "ok le cheater est de retour je pars bye"),
         ("the cheater is back, she's using aimbot", "la cheater est de retour, elle utilise un aimbot"),
-        ("how lazy",                         "trop lazy"),
         ("bb thx for playing",               "bb merci d'avoir joue"),
         ("eays win",                         "easy win"),
         ("take your sweet ass time",         "prends ton temps"),
@@ -267,7 +264,8 @@ FEWSHOT = {
         ("salut mec",                        "hey"),
         ("salut comment ca va",              "hey how are you"),
         ("sache que tu es vraiment incroyable", "you should know you're really amazing"),
-        ("tu es allemand butty ?",           "are you german butty?"),
+        ("tu es allemand ?",                 "are you german?"),
+        ("pickle t'es ou ?",                 "pickle where are you?"),
         ("j'arrive",                         "coming"),
         ("ok je l'ai",                       "got it"),
         ("je t'aime bien oui",               "i like you yeah"),
@@ -279,7 +277,7 @@ FEWSHOT = {
         ("b mid",                            "="),
     ],
     "de": [
-        ("tu es allemand butty ?",           "bist du deutsch butty?"),
+        ("tu es allemand ?",                 "bist du deutsch?"),
         ("salut mec comment ça va aujourd'hui ?", "hi, wie gehts dir heute?"),
         ("va mid, je prends le flag",        "geh mid, ich hol die flag"),
         ("fils de pute",                     "du hurensohn"),
@@ -684,7 +682,6 @@ PHRASES = {
         "i cant breathe": "j'arrive plus a respirer",
         "i can't breathe": "j'arrive plus a respirer",
         "put me in coach": "mets-moi en jeu coach",
-        "comback fiko": "comeback fiko",
         "he was wanking": "il se branlait",
         "dick fromage": "bite fromage",
         "kommt mir spanisch vor": "ca me semble louche",
@@ -897,6 +894,12 @@ LANGNAMES = {
 # Un 8B n'est appele que si ces listes ne departagent pas ET que la ligne est longue.
 # En cas d'egalite (salut = fr ET ro), on prend la langue la plus courante en Sauer.
 INCOMING_KEEP = 8
+# Pseudos vus pendant la partie (auteurs des chats, tableau des scores) : quand l'un d'eux apparait
+# dans la ligne a traduire, le modele est prevenu que c'est un nom (cow n'est pas une vache).
+NAMES_KEEP = 64
+NAMES_MIN_LEN = 3
+NAMES_ADDENDUM = ("Player names in the next line (nicknames: keep them exactly as written, "
+                  "never translate them): {names}")
 LANG_PRIORITY = (
     "en", "fr", "de", "es", "pt", "it", "ru", "pl", "nl", "sv", "no", "da",
     "cs", "tr", "uk", "hu", "ro", "bg", "sr", "hr", "sk", "fi", "sl", "et",
@@ -1039,6 +1042,7 @@ class Translator:
         self.history = []          # (speaker, text, t) ; capture() exclut la ligne courante
         self.incoming = []         # (speaker, text, t) ; derniers chats RECUS, pour /trep
         self.speaker_lang = {}     # nom.casefold() -> code 2 lettres (dernier, pour /trep)
+        self.names = OrderedDict() # nom.casefold() -> pseudo tel que vu (NAMES_KEEP derniers)
         self.last_out_lang = ""
         self.last_src_lang = ""    # source de la ligne IN courante (scoreboard, plusieurs OK)
         self.history_at = 0.0
@@ -1056,8 +1060,31 @@ class Translator:
         cleaned = re.sub(r"[<>\r\n]", "", name or "").strip()
         return (cleaned[:32] if cleaned else "?")
 
+    def note_name(self, speaker):
+        """Retient un pseudo vu (auteur d'un chat, tableau des scores)."""
+        name = re.sub(r"[<>\r\n]", "", speaker or "").strip()[:32]
+        if len(name) < NAMES_MIN_LEN or not re.search(r"[^\W\d_]", name):
+            return
+        with self.lock:
+            key = name.casefold()
+            self.names.pop(key, None)
+            self.names[key] = name
+            while len(self.names) > NAMES_KEEP:
+                self.names.popitem(last=False)
+
+    def names_in(self, text):
+        """Pseudos deja vus qui apparaissent comme mots entiers dans la ligne (6 au plus)."""
+        with self.lock:
+            known = list(self.names.values())
+        found = []
+        for name in known:
+            if re.search(r"(?<!\w)" + re.escape(name) + r"(?!\w)", text or "", re.IGNORECASE):
+                found.append(name)
+        return found[:6]
+
     def capture(self, speaker, text):
         """Retient la ligne pour plus tard, rend les precedentes (sans celle-ci)."""
+        self.note_name(speaker)
         now = time.time()
         with self.lock:
             if self.history_at and now - self.history_at > HISTORY_IDLE:
@@ -1086,6 +1113,7 @@ class Translator:
 
     def note_incoming(self, speaker, text):
         """Derniers messages recus (dir=in), independants du contexte 3 lignes."""
+        self.note_name(speaker)
         text = (text or "").strip()
         if not text:
             return
@@ -1097,6 +1125,7 @@ class Translator:
             del self.incoming[:-INCOMING_KEEP]
 
     def remember_lang(self, speaker, code):
+        self.note_name(speaker)
         code = langcode(code) if code else ""
         if not speaker or not code:
             return
@@ -1349,7 +1378,7 @@ class Translator:
         return f"{prefix}{dest}{extra}{tail}"
 
     def wave(self, text, lang):
-        """o/ pseudo = salut, sans traduire le nick (COW n'est pas une vache)."""
+        """o/ pseudo = salut, sans traduire le pseudo (un joueur nomme cow n'est pas une vache)."""
         if langcode(lang) != "fr":
             return None
         match = WAVE_RE.fullmatch(text.strip())
@@ -1548,7 +1577,7 @@ class Translator:
         decrite. Mieux vaut aucun exemple qu'un jeu ecrit dans une autre langue :
         le modele recopierait la langue des reponses qu'on lui montre, et
         traduirait vers le francais une demande d'allemand.
-        FEMME_IN seulement si la ligne tutoye : sinon watzson/idm/sry
+        FEMME_IN seulement si la ligne tutoye : sinon idm/sry
         recuperent 't'es morte' des exemples."""
         paires = list(FEWSHOT.get(langcode(lang)) or [])
         if femme:
@@ -1564,7 +1593,7 @@ class Translator:
                   f"ajoute un bloc a FEWSHOT dans ce fichier.")
         return paires
 
-    def build_messages(self, text, lang, speaker, direction, context=None, femme=False):
+    def build_messages(self, text, lang, speaker, direction, context=None, femme=False, names=True):
         messages = [{"role": "system", "content": self._system(lang, direction, femme)}]
         for src, dst in self.examples(lang, direction, femme, text):
             messages.append({"role": "user", "content": src})
@@ -1577,6 +1606,10 @@ class Translator:
             if speaker:
                 extra += f"The next message is from player: {self._tag(speaker)}\n"
             messages.append({"role": "user", "content": extra.strip()})
+            messages.append({"role": "assistant", "content": "ok"})
+        found = self.names_in(text) if names else []
+        if found:
+            messages.append({"role": "user", "content": NAMES_ADDENDUM.format(names=", ".join(found))})
             messages.append({"role": "assistant", "content": "ok"})
         messages.append({"role": "user", "content": text})
         return messages
@@ -1781,6 +1814,9 @@ class Translator:
             )
             if speaker:
                 system += f"The new message is from player: {self._tag(speaker)}\n"
+        found = self.names_in(text)
+        if found:
+            system += "\n" + NAMES_ADDENDUM.format(names=", ".join(found)) + "\n"
         return self.call_model([
             {"role": "system", "content": system},
             {"role": "user", "content": text},
@@ -1957,7 +1993,7 @@ class Translator:
         first, and the example pairs are listed in the system prompt instead
         of as past chat turns: after two dozen instant answers, Qwen3-8B
         skips its reasoning even when it is switched on."""
-        messages = self.build_messages(text, lang, speaker, "out", None, femme)
+        messages = self.build_messages(text, lang, speaker, "out", None, femme, names=False)
         system = messages[0]["content"].replace(", no thinking tags, no /no_think.", ".")
         system += CAREFUL_ADDENDUM.format(lang=langlabel(lang))
         turns = messages[1:-1]
@@ -1968,6 +2004,9 @@ class Translator:
         if ctx:
             chat = "\n".join(f"<{self._tag(spk)}> {msg}" for spk, msg in ctx)
             system += CONTEXT_ADDENDUM.format(chat=chat, lang=langlabel(lang))
+        found = self.names_in(text)
+        if found:
+            system += "\n" + NAMES_ADDENDUM.format(names=", ".join(found)) + "\n"
         # Qwen3 soft switch: without it the model still answers some short
         # lines instantly, with an empty reasoning
         line = {"role": "user", "content": messages[-1]["content"] + " /think"}

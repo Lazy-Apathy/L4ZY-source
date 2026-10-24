@@ -141,7 +141,7 @@ namespace game
     {
         demohd::tryautofollow();
         fpsent *target = followingplayer();
-        if(!target && demoplayback)
+        if(!target && demoplayback && demohd::recorderview())
         {
             int cn = demohd::recordercn();
             if(cn >= 0) target = getclient(cn);
@@ -265,7 +265,7 @@ namespace game
     void updateworld()        // main game update loop
     {
         if(!maptime) { maptime = lastmillis; maprealtime = totalmillis; return; }
-        if(!curtime) { gets2c(); updatespecqueue(); if(player1->clientnum>=0) c2sinfo(); return; }
+        if(!curtime) { gets2c(); updatespecqueue(); if(demoplayback) demohd::freefly(); if(player1->clientnum>=0) c2sinfo(); return; }
 
         physicsframe();
         ai::navigate();
@@ -276,7 +276,7 @@ namespace game
         otherplayers(curtime);
         updatefragreact();
         updateweapons(curtime);
-        ai::update();
+        ai::update(); ai::navupdate();
         moveragdolls();
         gets2c();
         updatespecqueue();
@@ -296,7 +296,7 @@ namespace game
             else if(!intermission)
             {
                 if(player1->ragdoll) cleanragdoll(player1);
-                moveplayer(player1, 10, true);
+                if(!demoplayback || !demohd::freefly()) moveplayer(player1, 10, true); // a demo's free camera flies with the real time
                 swayhudgun(curtime);
                 entities::checkitems(player1);
                 if(m_sp)
@@ -703,20 +703,31 @@ namespace game
         }
     }
 
-    static void colorfeedname(fpsent *d, char *dst)
+    // the name in your own colour or in a friend's colour (false: no such colour, dst untouched)
+    bool personalcolorname(fpsent *d, char *dst, const char *alt)
     {
         if(d == player1)
         {
-            if(selfhascolor())
-                nformatstring(dst, MAXSTRLEN, "\fs\f%c%s\fr", selfcolcode(), colorname(d, NULL, "", "", "you"));
-            else copystring(dst, colorname(d, NULL, "", "", "you"), MAXSTRLEN);
-            return;
+            if(!selfhascolor()) return false;
+            nformatstring(dst, MAXSTRLEN, "\fs\f%c%s\fr", selfcolcode(), colorname(d, NULL, "", "", alt));
+            return true;
         }
         if(isfriend(d) && friendhascolor(isfriendally(d)))
         {
             string pre;
             formatstring(pre, "\fs\f%c", friendcolcode(isfriendally(d)));
-            copystring(dst, colorname(d, NULL, pre, "\fr", "you"), MAXSTRLEN);
+            copystring(dst, colorname(d, NULL, pre, "\fr", alt), MAXSTRLEN);
+            return true;
+        }
+        return false;
+    }
+
+    static void colorfeedname(fpsent *d, char *dst)
+    {
+        if(personalcolorname(d, dst, "you")) return;
+        if(d == player1)
+        {
+            copystring(dst, colorname(d, NULL, "", "", "you"), MAXSTRLEN);
             return;
         }
         if(m_teammode && teamcolorfrags) copystring(dst, teamcolorname(d, "you"), MAXSTRLEN);
@@ -896,8 +907,16 @@ namespace game
         reactset(react_myfov[cn], seen);
         reactset(react_myxh[cn], xh);
 
+        // demo, a player's view (demopov): the killer's times from their real eyes and aim (HD), on the followed
+        // player where the killer's game showed them: the reaction time of the killer's own game
+        vec realo = d->o, vo = v->o;
+        float realyaw = d->yaw, realpitch = d->pitch;
+        bool swapped = demoplayback && demohd::truepos(d, d->o, d->yaw, d->pitch);
+        bool vswapped = swapped && demohd::clientview(v, d, v->o);
         bool txh = reactxhair(d->o, d->yaw, d->pitch, v);
         bool tseen = txh || (reactincone(d->o, d->yaw, d->pitch, thfov, tvfov, v) && reactlosbody(d->o, v));
+        if(vswapped) v->o = vo;
+        if(swapped) { d->o = realo; d->yaw = realyaw; d->pitch = realpitch; }
         reactset(react_theirfov[cn], tseen);
         reactset(react_theirxh[cn], txh);
     }
@@ -978,10 +997,10 @@ namespace game
             if(cn < 0 || cn >= FRAGRT_CN) continue;
             if(d->state != CS_ALIVE)
             {
-                reactclear(react_myfov[cn]);
-                reactclear(react_myxh[cn]);
-                reactclear(react_theirfov[cn]);
-                reactclear(react_theirxh[cn]);
+                reactset(react_myfov[cn], false); // ends the streaks, kept FRAGRT_GRACE ms: a frag of his that
+                reactset(react_myxh[cn], false); // arrives just after his death (shots cross, server DEATHMILLIS)
+                reactset(react_theirfov[cn], false); // still gets his times; cleared when he spawns again
+                reactset(react_theirxh[cn], false);
                 continue;
             }
             trackonefragreact(v, d, myhfov, myvfov, thfov, tvfov);
@@ -1656,7 +1675,7 @@ namespace game
     void startmap(const char *name)   // called just after a map load
     {
         ai::savewaypoints();
-        ai::clearwaypoints(true);
+        ai::clearwaypoints(true); ai::navmapstart();
 
         respawnent = -1; // so we don't respawn at an old spot
         if(!m_mp(gamemode)) spawnplayer(player1);
@@ -1679,7 +1698,7 @@ namespace game
 
     void physicstrigger(physent *d, bool local, int floorlevel, int waterlevel, int material)
     {
-        if(d->type==ENT_INANIMATE) return;
+        if(d->type==ENT_INANIMATE || demohd::povmoving || ai::navsimbody(d)) return; // povmoving: a player rebuilt for a demo view; navsimbody: the walk grid's simulated player (no sound, nothing heard)
         if     (waterlevel>0) { if(material!=MAT_LAVA) playsound(S_SPLASH1, d==player1 ? NULL : &d->o); }
         else if(waterlevel<0) playsound(material==MAT_LAVA ? S_BURN : S_SPLASH2, d==player1 ? NULL : &d->o);
         if(d->type==ENT_PLAYER && (waterlevel<0 || (waterlevel>0 && material!=MAT_LAVA))) ai::noise((fpsent *)d, waterlevel>0 ? S_SPLASH1 : S_SPLASH2, d->o);

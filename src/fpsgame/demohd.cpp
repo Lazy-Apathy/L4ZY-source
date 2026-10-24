@@ -32,8 +32,12 @@ VARFP(demohdrecord, 0, 1, 1, game::announceautodemo());
 VARP(demohdplay, 0, 1, 1);
 // enemy visibility from your eyes in the HD track (off: the file is unchanged)
 VARP(demohdvis, 0, 0, 1);
-static void hdprune();
-VARFP(demokeep, 1, 5, 30, { hdprune(); });
+// matches kept by the clean-up, typed in the menu (a 3 digit field): an empty
+// or wrong entry reads as 0 and the previous number stays, above 200 reads as
+// 200 (no range message). Nothing is deleted here, so neither at start nor
+// while typing: the clean-up runs when a recorded match ends (finish()).
+static int demokeepprev = 5;
+VARFP(demokeep, 0, 5, 999, { if(demokeep < 1) demokeep = demokeepprev; else demokeepprev = demokeep = min(demokeep, 200); });
 
 namespace demohd
 {
@@ -81,7 +85,7 @@ namespace demohd
     static bool dbdrag = false;
     static int dbhidden = 0; // 1 hidden by its button (SHOW stays), 2 by the key (nothing left)
     static float dbdragk = 0;
-    static float dbbox[9][4];
+    static float dbbox[13][4]; // DB_N
     static vector<fileitem> files;
 
     static int clockms()
@@ -623,15 +627,77 @@ namespace demohd
         files.sort(fileless);
     }
 
+    // Automatic clean-up (demokeep). Only this recorder's matches count and
+    // go: stems named YYYY-MM-DD_HH-MM-SS_<map> by buildnames(), in the game's
+    // own demo folder. A match is a whole set: demo/<stem>.dmo, its .dmohd and
+    // the local original moved to demo/replaced when the server's copy took
+    // its place. The demokeep newest matches in demo/ stay; every set older
+    // than the oldest kept one goes, oldest first. Demos received with getdemo,
+    // copied in or renamed by the player are never counted nor removed.
+    // Runs only when a recorded match has just been saved (finish(): next map,
+    // disconnect, quit, or the server's copy arriving), never at start.
+    static bool ownstem(const char *s)
+    {
+        static const char pat[] = "dddd-dd-dd_dd-dd-dd_";
+        loopi(int(sizeof(pat))-1)
+        {
+            uchar c = (uchar)s[i];
+            if(pat[i]=='d' ? !isdigit(c) : c != (uchar)pat[i]) return false;
+        }
+        const char *m = s + sizeof(pat)-1;
+        if(!*m) return false;
+        for(; *m; m++) if(!isalnum((uchar)*m) && *m!='-' && *m!='_') return false;
+        return true;
+    }
+
+    // the file in the game's own folder (never a package or install folder)
+    static void ownpath(char (&dst)[MAXSTRLEN], const char *dir, const char *stem, const char *ext)
+    {
+        defformatstring(rel, "%s/%s.%s", dir, stem, ext);
+        if(homedir[0]) formatstring(dst, "%s%s", homedir, rel);
+        else copystring(dst, rel, MAXSTRLEN);
+        path(dst);
+    }
+
+    static bool ownexists(const char *dir, const char *stem, const char *ext)
+    {
+        string p;
+        ownpath(p, dir, stem, ext);
+        struct stat st;
+        return stat(p, &st)==0;
+    }
+
+    static bool stemnewer(const char *a, const char *b) { return strcmp(a, b) > 0; }
+
     void prune()
     {
-        scanfiles(true);
-        while(files.length() > demokeep)
+        static const char * const dirs[2] = { "demo", "demo/replaced" };
+        static const char * const exts[2] = { "dmo", "dmohd" };
+        vector<char *> stems;
+        loopj(2) loopk(2)
         {
-            fileitem it = files.remove(0);
-            remove(it.path);
-            remove(it.hdpath);
+            vector<char *> names;
+            listfiles(dirs[j], exts[k], names);
+            loopv(names)
+            {
+                char *n = names[i];
+                bool skip = !ownstem(n) || (active && dmostem[0] && !strcmp(n, dmostem)) || !ownexists(dirs[j], n, exts[k]);
+                for(int s = 0; s < stems.length() && !skip; s++) if(!strcmp(stems[s], n)) skip = true;
+                if(skip) delete[] n;
+                else stems.add(n);
+            }
         }
+        stems.sort(stemnewer);
+        int kept = 0, cut = stems.length();
+        loopv(stems) if(ownexists("demo", stems[i], "dmo") && ++kept >= demokeep) { cut = i+1; break; }
+        for(int i = stems.length()-1; i >= cut; i--) loopj(2) loopk(2)
+        {
+            string p;
+            ownpath(p, dirs[j], stems[i], exts[k]);
+            remove(p);
+        }
+        stems.deletearrays();
+        scanfiles(true);
     }
 
     static float lerpyaw(float a, float b, float k)
@@ -803,6 +869,7 @@ namespace demohd
             for(int j = i; j >= 0; j--) if(src[j].cn==cn || cn<0) { a = j; break; }
         }
         if(a < 0 && b < 0) return false;
+        if(game::demoplayback && a >= 0 && b >= 0 && src[b].t - src[a].t > 250 && t > src[a].t && t < src[b].t) return false; // samples lost here: the demo's network position, not a slide across the hole
         if(b < 0) { out = src[a]; return true; }
         if(a < 0) { out = src[b]; return true; }
         const hdsample &sa = src[a], &sb = src[b];
@@ -1105,6 +1172,7 @@ namespace demohd
         play_loaded = false;
         play_cn = -1;
         autofollowdone = false;
+        povclose();
     }
 
     void onplayback(const char *dmofilepath)
@@ -1117,6 +1185,7 @@ namespace demohd
         play_idx = 0;
         autofollowdone = false;
         game::demoxrayreset(); // a demo opens: X-ray at its start value; going back in it (onplaybackreset) keeps it
+        povopen(dmofilepath); // its network positions, for the players' views (demopov)
     }
 
     void onplaybackend()
@@ -1132,6 +1201,7 @@ namespace demohd
         dbdrag = false;
         dbhidden = 0;
         autofollowdone = false;
+        povclose();
     }
 
     void onplaybackreset()
@@ -1225,15 +1295,43 @@ namespace demohd
         return true;
     }
 
+    // a player's view (demopov) and the VIEW line of the demo controls, end of the file
+    static fpsent *povviewer(fpsent *target);
+    static bool povplace(fpsent *d, fpsent *viewer, vec &o, float &yaw, float &pitch, float &roll);
+    static void viewlabel(char *buf, int len);
+    static const char *viewtip();
+    static void viewclick();
+    static bool viewhole(char *buf, int len);
+    static void dbviewtop(int w, int h, float s);
+    static void gotoprompt();
+    bool timeediting();
+    static void timeupdate();
+    static bool timekey(int code, bool isdown);
+    static void dbtimefield(const char *tnow, const char *tdur, float right, float y, float th, float s, int w, int h, float cx, float cy);
+
     void applyothers(fpsent *skip)
     {
-        if(!game::demoplayback || !demohdplay || !play_loaded) return;
+        if(!game::demoplayback || !demohdplay) return;
+        fpsent *pv = povviewer(skip);
+        if(!play_loaded && !pv) return; // no HD aim and no player's view (estimated): the demo's own positions
         loopv(game::players)
         {
             fpsent *d = game::players[i];
             if(!d || d==skip || d==game::player1) continue;
             if(d->state==CS_SPECTATOR) continue;
             if(d->state==CS_DEAD && d->ragdoll) continue;
+            vec po;
+            float pyaw, ppitch, proll;
+            if(pv && d->state!=CS_DEAD && povplace(d, pv, po, pyaw, ppitch, proll))
+            {
+                d->yaw = pyaw;
+                d->pitch = ppitch;
+                d->roll = proll;
+                d->o = po;
+                d->smoothmillis = 0;
+                d->resetinterp();
+                continue;
+            }
             if(!hastrack(d->clientnum)) continue;
             hdsample s;
             if(!lerpsample(track, play_idx, server::demotime(), d->clientnum, s)) continue;
@@ -1294,10 +1392,11 @@ namespace demohd
     }
 
     // Server copy of the match replacing the local recording (AUTODEMO_CMD).
-    // The local files move to demo/replaced (kept AUTODEMO_KEEPDAYS days),
-    // the server's take their name. Anything unexpected keeps the local ones.
+    // The local files move to demo/replaced while the server's take their
+    // name, then are removed: the server's copy is the match from then on.
+    // Anything unexpected keeps the local ones (a set left in demo/replaced
+    // goes with its match in the demokeep clean-up).
     #define AUTODEMO_DIR "demo/replaced"
-    #define AUTODEMO_KEEPDAYS 7
     // the local recording may start before the server's (map load) but must
     // not cover much more than this match
     #define AUTODEMO_SLACK 20000
@@ -1337,26 +1436,6 @@ namespace demohd
         bool ok = f->write(data, len) == size_t(len);
         delete f;
         return ok;
-    }
-
-    static void autodemopurge()
-    {
-        time_t now = time(NULL);
-        static const char * const exts[2] = { "dmo", "dmohd" };
-        loopk(2)
-        {
-            vector<char *> names;
-            listfiles(AUTODEMO_DIR, exts[k], names);
-            loopv(names)
-            {
-                defformatstring(rel, "%s/%s.%s", AUTODEMO_DIR, names[i], exts[k]);
-                path(rel);
-                const char *found = findfile(rel, "r");
-                struct stat st;
-                if(found && stat(found, &st)==0 && now - st.st_mtime > AUTODEMO_KEEPDAYS*24*3600) remove(found);
-                DELETEA(names[i]);
-            }
-        }
     }
 
     // the HD aim file: same match (map, mode), whole samples, and the
@@ -1452,7 +1531,6 @@ namespace demohd
         copystring(stem, dmostem, stemlen);
         elapsed = recstart ? max(totalmillis - recstart, 0) : 0;
         splitnext = true;
-        autodemopurge();
         return true;
     }
 
@@ -1498,6 +1576,11 @@ namespace demohd
         }
         remove(tdmo);
         remove(thd);
+        if(ok)
+        {
+            remove(bdmo);
+            if(hadhd) remove(bhd);
+        }
         scanmillis = 0;
         return ok;
     }
@@ -1507,12 +1590,14 @@ namespace demohd
     // Demo controls, drawn like the client menus (near black panels, thin orange
     // edge, white text and icons, orange for hover and for what is on, a line of
     // help over the control under the mouse). A compact block at the bottom
-    // centre: state and exact time, timeline (click or drag), back / play-pause /
-    // ahead (10 s, 0.5 s while Alt is held), speed, X-ray; the players you can
+    // centre: state and exact time, the view shown (whose game: VIEW, click to
+    // change it), timeline (click or drag), back / play-pause / ahead (10 s,
+    // 0.5 s while Alt is held), speed, go to a typed time, X-ray, hitboxes; the players you can
     // follow at the bottom right (click a name to follow); HIDE / SHOW top right.
     // Ids: 0 block, 1 back, 2 play / pause, 3 ahead, 4 timeline, 5 speed,
-    // 6 X-ray, 7 hide / show, 8 player list (rows in dbrows).
-    enum { DB_N = 9, DB_ROWS = 24, DB_ORANGE = 0xFF7A18 };
+    // 6 X-ray, 7 hide / show, 8 player list (rows in dbrows), 9 hitboxes,
+    // 10 the view shown, 11 go to a time, 12 the time now (click: type one).
+    enum { DB_N = 13, DB_ROWS = 24, DB_ORANGE = 0xFF7A18 };
     static float dbrowbox[DB_ROWS][4];
     static int dbrowcn[DB_ROWS], dbnrows = 0;
 
@@ -1748,7 +1833,8 @@ namespace demohd
     {
         loopi(DB_N) dbbox[i][2] = 0;
         dbnrows = 0;
-        if(!game::demoplayback || !w || !h) return;
+        timeupdate(); // the time typed in place in the demo controls
+        if(!game::demoplayback || !w || !h) { return; } drawhitboxes(w, h); // under the controls, even hidden
         if(dbhidden == 2) return; // hidden by the key: nothing at all, for watching or filming
 
         float cx, cy;
@@ -1762,6 +1848,7 @@ namespace demohd
         {
             dbdrawbtn(7, w, h, hover, "show", "SHOW", false, th*0.85f);
             if(hover==7) dbtip("Show the demo controls", dbbox[7], w, h, small, true);
+            if(hitboxactive()) dbviewtop(w, h, s); // hitboxes drawn: whose view they are in, even without the controls
             return;
         }
 
@@ -1770,12 +1857,14 @@ namespace demohd
         float k = dbdrag ? dbdragk : clamp(float(now)/float(dur), 0.0f, 1.0f);
         bool paused = game::ispaused(), alt = dbalt();
 
-        // the block: state + time, timeline, help line, buttons
-        float pad = 12*s, btnh = 40*s, gap = 6*s;
-        float bw[5] = { 100*s, 120*s, 100*s, 96*s, game::demoxrayallowed() ? 128*s : 0 };
-        float roww = bw[0] + bw[1] + bw[2] + bw[3] + (bw[4] > 0 ? bw[4] + gap : 0) + 3*gap;
+        // the block: state + time, the view shown, timeline, help line, buttons
+        float pad = 12*s, btnh = 40*s, gap = 6*s, vh = th + 8*s;
+        bool local = game::demoxrayallowed();
+        float bw[7] = { 100*s, 120*s, 100*s, 96*s, local ? 110*s : 0, local ? 128*s : 0, local ? 140*s : 0 };
+        float roww = 3*gap;
+        loopi(7) if(bw[i] > 0) roww += bw[i] + (i >= 4 ? gap : 0);
         float blockw = max(roww, 580*s) + 2*pad;
-        float blockh = pad + th + 8*s + 18*s + 4*s + small + 8*s + btnh + pad;
+        float blockh = pad + th + 8*s + vh + 6*s + 18*s + 4*s + small + 8*s + btnh + pad;
         float bx = (w - blockw)/2, by = h*0.915f - blockh;
         dbpanel(bx, by, blockw, blockh, max(1.0f, s));
         dbset(0, bx/w, by/h, blockw/w, blockh/h);
@@ -1791,9 +1880,20 @@ namespace demohd
         string tnow, tdur;
         dbtimems(int(k*dur + 0.5f), tnow, sizeof(tnow));
         dbtimems(dur, tdur, sizeof(tdur));
-        defformatstring(times, "%s / %s", tnow, tdur);
-        dbtext(times, bx + blockw - pad - dbtextw(times, th), y, th, 0xE6E6E6);
+        dbtimefield(tnow, tdur, bx + blockw - pad, y, th, s, w, h, cx, cy); // "now / length": click the time now to type one
         y += th + 8*s;
+
+        // the view shown: whose game, or the real positions (click: change it)
+        string vlabel;
+        viewlabel(vlabel, sizeof(vlabel));
+        float vth = th*0.92f, vw = min(dbtextw(vlabel, vth) + 3*pad, blockw - 2*pad), vx = bx + (blockw - vw)/2;
+        dbset(10, vx/w, y/h, vw/w, vh/h);
+        bool vhit = dbhit(cx, cy) == 10;
+        hudrect(vx, y, vw, vh, 0x1C2026, 215);
+        if(vhit) hudrect(vx, y, vw, vh, DB_ORANGE, 45);
+        dbedge(vx, y, vw, vh, max(1.0f, s), vhit ? 220 : 120);
+        dbtext(vlabel, vx + 1.5f*pad, y + (vh - vth)/2, vth, 0xFFFFFF);
+        y += vh + 6*s;
 
         float tlx = bx + pad, tlw = blockw - 2*pad, tlh = 18*s;
         dbset(4, tlx/w, y/h, tlw/w, tlh/h);
@@ -1811,13 +1911,15 @@ namespace demohd
         hudrect(tlx + tlw*k - knob/4, y + (tlh - knob)/2, knob/2, knob, tlhit ? DB_ORANGE : 0xFFFFFF, 255);
         y += tlh + 4*s;
 
-        const char *help = alt ? "ALT: STEPS OF 0.5 S" : "HOLD ALT FOR 0.5 S STEPS";
-        dbtext(help, bx + (blockw - dbtextw(help, small))/2, y, small, alt ? DB_ORANGE : 0x8A9199);
+        string hole;
+        bool inhole = viewhole(hole, sizeof(hole)), typing = timeediting(); // the player whose view is shown lost their HD aim here
+        const char *help = typing ? "TYPE A TIME (9:00.842)   ENTER: GO THERE   ESC: CANCEL" : inhole ? hole : (alt ? "ALT: STEPS OF 0.5 S" : "HOLD ALT FOR 0.5 S STEPS");
+        dbtext(help, bx + (blockw - dbtextw(help, small))/2, y, small, typing || inhole || alt ? DB_ORANGE : 0x8A9199);
         y += small + 8*s;
 
         float x = bx + (blockw - roww)/2;
-        int ids[5] = { 1, 2, 3, 5, 6 };
-        loopi(5) if(bw[i] > 0) { dbset(ids[i], x/w, y/h, bw[i]/w, btnh/h); x += bw[i] + gap; }
+        int ids[7] = { 1, 2, 3, 5, 11, 6, 9 };
+        loopi(7) if(bw[i] > 0) { dbset(ids[i], x/w, y/h, bw[i]/w, btnh/h); x += bw[i] + gap; }
         hover = dbhit(cx, cy);
 
         dbdrawbtn(1, w, h, hover, "back", alt ? "0.5s" : "10s", false, th*0.95f);
@@ -1825,7 +1927,9 @@ namespace demohd
         dbdrawbtn(3, w, h, hover, "forward", alt ? "0.5s" : "10s", false, th*0.95f);
         defformatstring(spd, "%.2fx", game::gamespeed/100.0f);
         dbdrawbtn(5, w, h, hover, NULL, spd, game::gamespeed != 100, th*0.95f);
-        if(bw[4] > 0) dbdrawbtn(6, w, h, hover, "xray", "X-RAY", game::demoxrayactive(), th*0.95f);
+        if(bw[4] > 0) dbdrawbtn(11, w, h, hover, NULL, "GO TO", false, th*0.95f);
+        if(bw[5] > 0) dbdrawbtn(6, w, h, hover, "xray", "X-RAY", game::demoxrayactive(), th*0.95f);
+        if(bw[6] > 0) dbdrawbtn(9, w, h, hover, "hitbox", "HITBOX", hitboxactive(), th*0.95f);
         dbdrawbtn(7, w, h, hover, "hide", "HIDE", false, th*0.85f);
 
         dbplayers(w, h, s, cx, cy);
@@ -1842,6 +1946,10 @@ namespace demohd
             case 5: tip = "Speed: click for faster, Alt+click for slower"; break;
             case 6: tip = game::demoxrayactive() ? "X-ray on: players seen through walls" : "X-ray: see players through walls"; break;
             case 7: tip = "Hide the demo controls"; break;
+            case 9: tip = hitboxactive() ? "Hitboxes on: white touched, yellow missed, pink uncertain, red disagree" : "Hitboxes: the real shape a shot must touch"; break;
+            case 10: tip = viewtip(); break;
+            case 11: tip = "Go to a time you type, to the millisecond (paused there)"; break;
+            case 12: if(!timeediting()) tip = "Click and type a time, to the millisecond (Enter: go there)"; break;
             case 4:
             {
                 float hk = dbbox[4][2] > 0 ? clamp((cx - dbbox[4][0]) / dbbox[4][2], 0.0f, 1.0f) : 0;
@@ -1912,6 +2020,8 @@ namespace demohd
     bool barkey(int code, bool isdown)
     {
         if(!game::demoplayback) return speckey(code, isdown);
+        if(timekey(code, isdown)) return true; // the time typed in place: keys that would leave it
+        if(lookkey(code, isdown)) return true; // held: the mouse turns the view (demolookkey)
         if(code != -1) return false;
         float cx, cy;
         g3d_cursorpos(cx, cy);
@@ -1940,6 +2050,9 @@ namespace demohd
             }
             else if(hit==5) dbnextspeed(dbalt() ? -1 : 1);
             else if(hit==6) game::toggledemoxray();
+            else if(hit==9) togglehitbox();
+            else if(hit==10) viewclick();
+            else if(hit==11 || hit==12) gotoprompt();
             else if(hit==8 && row >= 0)
             {
                 defformatstring(cmd, "follow %d", dbrowcn[row]);
@@ -1962,15 +2075,1458 @@ ICOMMAND(toggledemobar, "", (),
     demohd::togglebar();
 });
 
-static void hdprune() { demohd::prune(); }
-
 void game::demohdsample() { game::reactframe(); demohd::captureframe(); }
 void game::demohdapplyzoom() { demohd::applyzoom(); }
 void game::demohdafterpacket(int chan, const uchar *data, int len) { if(!game::specpacketqueued()) demohd::afterpacket(chan, data, len); }
 void game::demohdwritepos(const uchar *data, int len) { demohd::writepos(data, len); }
 
 extern int hidehud;
-bool game::demobarcursor() { return (demoplayback || demohd::speccursor()) && !mainmenu && !hidehud; }
+bool game::demobarcursor() { return ((demoplayback && !demohd::looking()) || demohd::speccursor()) && !mainmenu && !hidehud; }
+
+// Demo hitboxes (demohitbox, Off by default; HITBOX button of the demo
+// controls, key toggledemohitbox): the shape the game really tests when a shot
+// is fired (weapon.cpp intersect: an upright cylinder of the player's radius,
+// from eyeheight under the eyes to aboveeye over them, at the player's
+// position), a thin wireframe around every player still in the game, in the
+// colour of their X-ray outline. Only while a demo played on this computer is
+// watched (the X-ray check, every frame): never in a game, while spectating,
+// in edit mode or in a demo played by a server.
+// With demohitboxshots (On) each shot shows for 1.5 s of demo time: its line
+// from the shooter's eyes (where the view shows them) to where it stopped, a
+// cross there with their name, and the hitbox of each player near the line at
+// that moment: white when the line crosses it, yellow when it passes beside it
+// (within 12 units). In a player's view (demopov, or the view chosen for the
+// free camera; in a local demo the view of its recorder too) only that
+// player's own shots get hitboxes, checked against what their game decided
+// (the hits and frags the server replayed with the shot): white = touched in
+// their game and crossed here, yellow = missed in their game and beside here;
+// when the two disagree, PINK marked "uncertain" while the line passes within
+// demohitboxuncertain units of the edge of the hitbox (the rebuilt view is not
+// more exact than that; in an estimated view, also what the target moves in
+// 15 ms), RED beyond, with what their game counted and how far the line is;
+// the victims of the others' shots are light blue (demohitboxothercolour:
+// decided by the others' own game). The shot that killed and
+// the hitbox of its victim stay demohitboxdeath ms where the victim was hit
+// (the body falls, the hitbox does not). After a jump in the demo (seek,
+// -10 s, go to a time) the shots and frags of the last moments before the new
+// time are shown.
+VARP(demohitbox, 0, 0, 1);
+VARP(demohitboxshots, 0, 1, 1);
+VARP(demohitboxdeath, 0, 1500, 5000);
+FVARP(demohitboxuncertain, 0, 0.5f, 4);
+HVARP(demohitboxothercolour, 0, 0x80C8FF, 0xFFFFFF);
+
+// A player's view (demopov, On): in a server demo that has their exact aim,
+// while you follow a player the others are shown where THEIR game showed them,
+// rebuilt the way their game did it: from the positions the server sent them
+// (the demo's N_POS, about 30 a second), their ping (N_CLIENTPING) plus how
+// late the demo dates their own eyes (povcalage), the smoothing of client.cpp
+// parsepositions (smoothmove, smoothdist), the push aside of updatepos and the
+// prediction of fps.cpp otherplayers (moveplayer from the last position
+// received, 5 ms steps). The followed player stays at their real place. The
+// reaction times of the kill feed are measured on what the killer's game
+// showed. A player with no exact aim (a client without it in a server demo,
+// anybody but the recorder of a local demo) gets an ESTIMATED view, said so:
+// the same rebuilding from their ping and the positions the demo has, their
+// shots placed with their own clock of them (N_SHOTFX id). The recorder of a
+// local demo already has their own view: the demo itself. 0 = the demo's
+// positions in every view that follows a player, and the kill feed on them.
+VARP(demopov, 0, 1, 1);
+
+// The free camera of a demo: whose game it shows (a client number), -1 the
+// real positions (a server demo) or the recorder's game (a local demo). Not
+// saved; -1 when a demo opens. The VIEW control of the demo controls (or
+// demonextview) changes it.
+VAR(demofreeview, -1, -1, 255);
+
+// Hold this key in a demo (MOUSE3, the middle button, by default; several key
+// names can be given) to look around with the mouse; released, the cursor of
+// the demo controls comes back where it was.
+SVARP(demolookkey, "MOUSE3");
+
+extern const char *getkeyname(int code);
+extern int commandmillis, commandpos; // console.cpp: the command line, for the time typed in place (demo controls)
+extern string commandbuf;
+namespace game { extern int smoothmove, smoothdist; }
+
+namespace demohd
+{
+    #define HB_SHOTMS 1500
+    #define HB_MAXSHOTS 16
+    #define HB_MAXHIT 4
+    #define HB_MAXCAND 16
+    #define HB_SIDES 24
+    #define HB_NEAR 12
+    #define POV_STEP 5
+    #define POV_WARM 8
+    #define POV_LAG 1000
+    #define POV_MAXDELAY 400
+    #define POV_PAIRS 32 // (viewer, player) ghosts kept: the kill feed of a view uses two per player
+
+    // ---- a player's view (demopov) ----
+
+    // a network position of the demo (N_POS), kept as the game reads it
+    struct povnet
+    {
+        int t, o[3];                            // demo time; feet, in 1/DMF units
+        ushort dir, mag, veldir, fmag, falldir;
+        uchar roll, physstate, fflags;          // fflags 1: falling sent, 2: with its direction
+    };
+    static vector<povnet> *povnets[256];
+    static bool povloaded = false, povtried = false;
+    static string povpath; // the .dmo watched, while its positions are not read yet
+
+    // one player (target) as a viewer's game showed them: a body moved by the
+    // game's physics (CS_LAGGED: no player collision, never in the dynent cache)
+    struct povghost
+    {
+        fpsent *e;
+        int idx, physt, smoothms, viewer, target, delay;
+        bool valid, smooth;
+        vec deltapos;
+        float deltayaw, deltapitch, deltaroll;
+    };
+    static povghost povghosts[256], povscratch, povpairs[POV_PAIRS];
+    static int povpairnext = 0;
+    static int povextra[256]; // ms over the ping: how late the demo dates the player's own HD track (povcalage)
+    bool povmoving = false; // fps.cpp physicstrigger: a rebuilt body makes no sound
+
+    // the clock of each player's shots (N_SHOTFX id) on the demo's time: the
+    // smallest gap (demo time of the shot - id) on their last shots, when they
+    // sent it at once (their send wait, 0 to 33 ms, is about 0 then); and the
+    // ping of the recorder of a local demo (not in the file): the smallest wait
+    // between their own shot and the hit or frag the server sent back
+    #define POV_CLOCKS 9
+    static int povclk[256][POV_CLOCKS], povclkn[256], povrecping = 0;
+    // going back in a demo restarts it: the player followed, kept (seekkeep)
+    static int seekcn = -1;
+    static string seekname;
+
+    static bool lookon = false, lookback = false;
+    static int lookx = 0, looky = 0, lookbackms = 0;
+
+    // client.cpp parsepositions, the same reading of the bytes
+    static int povparse(int t, uchar *data, int len)
+    {
+        ucharbuf p(data, len);
+        int n = 0;
+        while(p.remaining())
+        {
+            int type = getint(p);
+            if(type == N_TELEPORT) { getint(p); getint(p); getint(p); continue; }
+            if(type == N_JUMPPAD) { getint(p); getint(p); continue; }
+            if(type != N_POS) break;
+            int cn = getuint(p), physstate = p.get(), flags = getuint(p);
+            povnet q;
+            q.t = t;
+            loopk(3)
+            {
+                int v = p.get(); v |= p.get()<<8; if(flags&(1<<k)) { v |= p.get()<<16; if(v&0x800000) v |= ~0U<<24; }
+                q.o[k] = v;
+            }
+            int dir = p.get(); dir |= p.get()<<8;
+            q.dir = ushort(dir);
+            q.roll = uchar(p.get());
+            int mag = p.get(); if(flags&(1<<3)) mag |= p.get()<<8;
+            q.mag = ushort(mag);
+            dir = p.get(); dir |= p.get()<<8;
+            q.veldir = ushort(dir);
+            q.fflags = 0;
+            q.fmag = q.falldir = 0;
+            if(flags&(1<<4))
+            {
+                mag = p.get(); if(flags&(1<<5)) mag |= p.get()<<8;
+                q.fmag = ushort(mag);
+                q.fflags |= 1;
+                if(flags&(1<<6)) { dir = p.get(); dir |= p.get()<<8; q.falldir = ushort(dir); q.fflags |= 2; }
+            }
+            q.physstate = uchar(physstate);
+            if(p.overread()) break;
+            if(cn < 0 || cn > 255) continue;
+            if(!povnets[cn]) povnets[cn] = new vector<povnet>;
+            vector<povnet> &l = *povnets[cn];
+            if(l.length() && l.last().t > t) continue;
+            l.add(q);
+            n++;
+        }
+        return n;
+    }
+
+    static void povclearghost(povghost &g)
+    {
+        DELETEP(g.e);
+        g.valid = g.smooth = false;
+        g.idx = -1;
+    }
+
+    void povclose()
+    {
+        loopi(256)
+        {
+            DELETEP(povnets[i]);
+            povclearghost(povghosts[i]);
+        }
+        povclearghost(povscratch);
+        loopi(POV_PAIRS) povclearghost(povpairs[i]);
+        memset(povextra, 0, sizeof(povextra));
+        memset(povclkn, 0, sizeof(povclkn));
+        povrecping = 0;
+        seekcn = -1;
+        povloaded = povtried = false;
+        povpath[0] = '\0';
+        demofreeview = -1;
+        lookon = lookback = false;
+    }
+
+    // How late a player's own HD track is dated, measured in the demo itself:
+    // while they move, each network position of theirs (relayed by the server
+    // at demo time w) is found on their HD track at time u. Dated "their clock +
+    // smallest delay", w - u would only be the wait for the server's next
+    // update (0 to 33 ms, 16 on average): the median shortfall is how much
+    // later their track is dated, so their game's view lags their HD eyes by
+    // their ping plus that much.
+    #define POV_RELAYWAIT 16
+    static void povcalage(int cn)
+    {
+        povextra[cn] = 0;
+        if(!povnets[cn] || !playexact[cn] || track.empty()) return;
+        vector<povnet> &l = *povnets[cn];
+        vector<int> lags;
+        for(int i = 0; i < l.length(); i += 4)
+        {
+            const povnet &q = l[i];
+            if(q.mag < 60) continue; // they must move, for a position to mean one moment
+            vec o(q.o[0]/DMF, q.o[1]/DMF, q.o[2]/DMF + 14);
+            int lo = 0, hi = track.length();
+            while(lo < hi) { int mid = (lo + hi)/2; if(track[mid].t < q.t - 150) lo = mid + 1; else hi = mid; }
+            const hdsample *prev = NULL;
+            float bestd = 1e9f, bestt = 0;
+            for(int j = lo; j < track.length() && track[j].t <= q.t + 50; j++)
+            {
+                const hdsample &b = track[j];
+                if(b.cn != cn) continue;
+                if(prev && b.t > prev->t && b.t - prev->t <= 50)
+                {
+                    vec ab = vec(b.o).sub(prev->o);
+                    float n2 = ab.squaredlen(), k = n2 > 1e-6f ? clamp(vec(o).sub(prev->o).dot(ab)/n2, 0.0f, 1.0f) : 0;
+                    float dist = vec(ab).mul(k).add(prev->o).dist(o);
+                    if(dist < bestd) { bestd = dist; bestt = prev->t + k*(b.t - prev->t); }
+                }
+                prev = &b;
+            }
+            if(bestd < 1.0f) lags.add(q.t - int(bestt + 0.5f));
+        }
+        if(lags.length() < 50) return;
+        lags.sort();
+        povextra[cn] = clamp(POV_RELAYWAIT - lags[lags.length()/2], 0, 40);
+    }
+
+    // a local demo: its recorder's own rifle shots (written as they fired) and
+    // the hits and frags the server sent back for them, a ping later
+    static void povrecshot(int t, uchar *data, int len, int &lastshot, vector<int> &waits)
+    {
+        ucharbuf p(data, len);
+        int type = getint(p);
+        if(type == N_SHOTFX)
+        {
+            int cn = getint(p), gun = getint(p);
+            if(!p.overread() && cn == play_cn) lastshot = gun == GUN_RIFLE ? t : -1;
+        }
+        else if(type == N_DAMAGE || type == N_DIED)
+        {
+            int target = getint(p), actor = getint(p);
+            if(p.overread() || actor != play_cn || target == play_cn || lastshot < 0) return;
+            int w = t - lastshot;
+            if(w >= 0 && w <= POV_MAXDELAY) waits.add(w);
+        }
+    }
+
+    // the network positions of the demo, read once, when a player's view is
+    // first needed (demopov On: as the demo opens)
+    static void povload()
+    {
+        povtried = true;
+        stream *f = opengzfile(povpath, "rb");
+        if(!f) return;
+        demoheader hdr;
+        int total = 0, lastshot = -1;
+        vector<int> waits;
+        if(f->read(&hdr, sizeof(hdr)) == sizeof(hdr))
+        {
+            vector<uchar> buf;
+            int stamp[3];
+            while(f->read(stamp, sizeof(stamp)) == sizeof(stamp))
+            {
+                lilswap(stamp, 3);
+                int len = stamp[2];
+                if(len < 0 || len > (1<<20)) break;
+                buf.setsize(0);
+                databuf<uchar> b = buf.reserve(len+1);
+                if(len && f->read(b.buf, len) != size_t(len)) break;
+                if(stamp[1] == 0) total += povparse(stamp[0], b.buf, len);
+                else if(stamp[1] == 1 && play_cn >= 0 && len) povrecshot(stamp[0], b.buf, len, lastshot, waits);
+            }
+        }
+        delete f;
+        povloaded = total > 0;
+        if(povloaded && play_cn < 0) loopi(256) povcalage(i); // a server demo: how late each exact aim is dated
+        if(waits.length()) { waits.sort(); povrecping = waits[waits.length()/10]; } // the 10th percentile: their send wait near 0
+    }
+
+    // a demo opens; with demopov Off nothing is read until a player's view is
+    // asked for
+    void povopen(const char *dmopath)
+    {
+        povclose();
+        if(!dmopath || !dmopath[0]) return;
+        copystring(povpath, dmopath);
+        if(demopov) povload();
+    }
+
+    static bool povready()
+    {
+        if(povloaded) return true;
+        if(povtried || !povpath[0]) return false;
+        povload(); // asked for during the demo
+        return povloaded;
+    }
+
+    static bool povsamelife(const povnet &a, const povnet &b)
+    {
+        return !((a.physstate^b.physstate)&8) && b.t - a.t <= POV_LAG;
+    }
+
+    // what client.cpp parsepositions does with a position it receives
+    static void povset(fpsent *e, const povnet &q)
+    {
+        vec vel, falling;
+        loopk(3) e->o[k] = q.o[k]/DMF;
+        e->o.z += e->eyeheight;
+        e->yaw = q.dir%360;
+        e->pitch = clamp(q.dir/360, 0, 180)-90;
+        e->roll = clamp(int(q.roll), 0, 180)-90;
+        vecfromyawpitch(q.veldir%360, clamp(q.veldir/360, 0, 180)-90, 1, 0, vel);
+        vel.mul(q.mag/DVELF);
+        if(q.fflags&1)
+        {
+            if(q.fflags&2) vecfromyawpitch(q.falldir%360, clamp(q.falldir/360, 0, 180)-90, 1, 0, falling);
+            else falling = vec(0, 0, -1);
+            falling.mul(q.fmag/DVELF);
+        }
+        else falling = vec(0, 0, 0);
+        e->move = (q.physstate>>4)&2 ? -1 : (q.physstate>>4)&1;
+        e->strafe = (q.physstate>>6)&2 ? -1 : (q.physstate>>6)&1;
+        e->vel = vel;
+        e->falling = falling;
+        e->physstate = q.physstate&7;
+        updatephysstate(e);
+    }
+
+    // client.cpp updatepos: a player overlapping you is pushed aside; "you" is
+    // the viewer, at their real place (their HD track) when it happened
+    static void povpush(fpsent *e, int viewer, int t)
+    {
+        hdsample s;
+        int idx = play_idx;
+        if(!play_loaded || viewer < 0 || !lerpsample(track, idx, t, viewer, s) || s.state != CS_ALIVE) return;
+        const float r = e->radius*2, rz = e->aboveeye + e->eyeheight;
+        const float dx = s.o.x - e->o.x, dy = s.o.y - e->o.y, dz = s.o.z - e->o.z;
+        const float fx = fabs(dx), fy = fabs(dy), fz = fabs(dz);
+        if(fx < r && fy < r && fz < rz)
+        {
+            if(fx < fy) e->o.y += dy < 0 ? r-fy : -(r-fy);
+            else        e->o.x += dx < 0 ? r-fx : -(r-fx);
+        }
+    }
+
+    // fps.cpp otherplayers: moveplayer from the last position received, in
+    // the 5 ms steps of the game's physics, up to demo time t
+    static void povstep(povghost &g, int t)
+    {
+        int n = t/POV_STEP - g.physt/POV_STEP;
+        if(n <= 0) return;
+        g.physt = (t/POV_STEP)*POV_STEP;
+        n = min(n, POV_LAG/POV_STEP);
+        povmoving = true;
+        loopi(n) moveplayer(g.e, 1, false, POV_STEP);
+        povmoving = false;
+    }
+
+    // fps.cpp predictplayer: what is drawn, the rest of the smoothing included
+    static void povshown(const povghost &g, int t, vec &o, float &yaw, float &pitch, float &roll)
+    {
+        o = g.e->o;
+        yaw = g.e->yaw;
+        pitch = g.e->pitch;
+        roll = g.e->roll;
+        if(!g.smooth || game::smoothmove <= 0) return;
+        float k = 1.0f - float(t - g.smoothms)/game::smoothmove;
+        if(k <= 0) return;
+        o.add(vec(g.deltapos).mul(k));
+        yaw += g.deltayaw*k;
+        if(yaw < 0) yaw += 360;
+        else if(yaw >= 360) yaw -= 360;
+        pitch += g.deltapitch*k;
+        roll += g.deltaroll*k;
+    }
+
+    // player cn at time t (the time base of the demo's positions) as the
+    // viewer's game showed them; false when that game had nothing to show
+    static bool povat(povghost &g, int cn, int t, int viewer, int delay, vec &o, float &yaw, float &pitch, float &roll)
+    {
+        if(cn < 0 || cn > 255 || !povnets[cn]) return false;
+        vector<povnet> &l = *povnets[cn];
+        if(l.empty() || t < l[0].t) return false;
+        int lo = 0, hi = l.length()-1;
+        while(lo < hi)
+        {
+            int mid = (lo + hi + 1)/2;
+            if(l[mid].t <= t) lo = mid;
+            else hi = mid - 1;
+        }
+        int k = lo;
+        if(t - l[k].t > POV_LAG) return false;
+        if(!g.e) { g.e = new fpsent; g.e->state = CS_LAGGED; }
+        // rebuilt from POV_WARM positions back when the time jumps, goes back more than a physics step (a ping that
+        // grows by a few ms does not) or the viewer or the player changes
+        if(!g.valid || g.viewer != viewer || g.target != cn || k < g.idx || t < g.physt - POV_STEP || k - g.idx > POV_WARM)
+        {
+            int k0 = k;
+            while(k0 > 0 && k - k0 < POV_WARM && povsamelife(l[k0-1], l[k0])) k0--;
+            g.e->reset();
+            povset(g.e, l[k0]);
+            int mat = lookupmaterial(vec(g.e->o.x, g.e->o.y, g.e->o.z + (3*g.e->aboveeye - g.e->eyeheight)/4)); // as moveplayer
+            g.e->inwater = isliquid(mat&MATF_VOLUME) ? mat&MATF_VOLUME : MAT_AIR;
+            povpush(g.e, viewer, l[k0].t + delay);
+            g.idx = k0;
+            g.physt = l[k0].t;
+            g.smooth = false;
+            g.valid = true;
+            g.viewer = viewer;
+            g.target = cn;
+            g.delay = delay;
+        }
+        while(g.idx < k)
+        {
+            const povnet &q = l[g.idx+1];
+            povstep(g, q.t);
+            vec oldpos;
+            float oldyaw, oldpitch, oldroll;
+            povshown(g, q.t, oldpos, oldyaw, oldpitch, oldroll);
+            bool same = povsamelife(l[g.idx], q);
+            povset(g.e, q);
+            povpush(g.e, viewer, q.t + delay);
+            if(same && game::smoothmove && oldpos.dist(g.e->o) < game::smoothdist)
+            {
+                g.deltapos = vec(oldpos).sub(g.e->o);
+                g.deltayaw = oldyaw - g.e->yaw;
+                if(g.deltayaw > 180) g.deltayaw -= 360;
+                else if(g.deltayaw < -180) g.deltayaw += 360;
+                g.deltapitch = oldpitch - g.e->pitch;
+                g.deltaroll = oldroll - g.e->roll;
+                g.smoothms = q.t;
+                g.smooth = true;
+            }
+            else g.smooth = false;
+            g.idx++;
+        }
+        povstep(g, t);
+        povshown(g, t, o, yaw, pitch, roll);
+        return true;
+    }
+
+    static bool povexact(fpsent *d)
+    {
+        return d && d != game::player1 && d->clientnum >= 0 && d->clientnum <= 255 && playexact[d->clientnum] && hastrack(d->clientnum);
+    }
+
+    // whose game can be shown: 1 exact (their aim in a server demo), 2
+    // estimated (no exact aim: their network positions and ping), 0 none (the
+    // recorder of a local demo: the demo itself is their view; a bot: its
+    // owner's game; nothing in the file)
+    static int povkindof(fpsent *v, bool known)
+    {
+        if(!v || v == game::player1 || v->aitype != AI_NONE || v->clientnum < 0 || v->clientnum > 255 || v->state == CS_SPECTATOR) return 0;
+        if(play_cn >= 0 && v->clientnum == play_cn) return 0;
+        if(play_cn < 0 && povexact(v)) return 1;
+        if(!povloaded) return known || povtried || !povpath[0] ? 0 : 2; // the demo's positions not read yet: it may be
+        return povnets[v->clientnum] ? 2 : 0;
+    }
+    static int povkind(fpsent *v) { return povkindof(v, true); }
+
+    // how far in the past the viewer's game showed the others: their ping (the
+    // demo's N_CLIENTPING) plus how late the demo dates their own eyes
+    // (povcalage); estimated: plus the server's wait to relay them (16 ms on
+    // average: the demo shows the viewer that much after they were there)
+    static int povdelay(fpsent *v)
+    {
+        int cn = v->clientnum, extra = cn >= 0 && cn <= 255 ? povextra[cn] : 0;
+        if(povkind(v) != 1) extra = POV_RELAYWAIT;
+        return clamp(v->ping + extra, 0, POV_MAXDELAY);
+    }
+
+    // the recorder of a local demo in another player's view: their own
+    // positions (sent by them) reached that player through the server, so
+    // their ping and one more relay wait later
+    static int povdelayfor(fpsent *v, fpsent *d)
+    {
+        int delay = povdelay(v);
+        if(play_cn >= 0 && d && d->clientnum == play_cn) delay = clamp(delay + povrecping + POV_RELAYWAIT, 0, POV_MAXDELAY);
+        return delay;
+    }
+
+    // whose game is shown: the followed player (demopov), or with the free
+    // camera the player chosen for it (demofreeview); NULL = the real
+    // positions (a local demo: its recorder's game, the demo itself)
+    static fpsent *povviewer(fpsent *target)
+    {
+        if(!game::demoxrayallowed()) return NULL;
+        fpsent *v = target;
+        if(!v)
+        {
+            if(demofreeview < 0 || !game::player1 || game::player1->state != CS_SPECTATOR) return NULL;
+            v = game::getclient(demofreeview);
+        }
+        else if(!demopov) return NULL;
+        if(!v || !povready() || !povkind(v)) return NULL;
+        return v;
+    }
+
+    // a ghost for one (viewer, player) pair, kept from frame to frame
+    static povghost &povpair(int viewer, int target)
+    {
+        loopi(POV_PAIRS) if(povpairs[i].valid && povpairs[i].viewer == viewer && povpairs[i].target == target) return povpairs[i];
+        loopi(POV_PAIRS) if(!povpairs[i].valid) return povpairs[i];
+        povghost &g = povpairs[povpairnext];
+        povpairnext = (povpairnext + 1) % POV_PAIRS;
+        povclearghost(g);
+        return g;
+    }
+
+    // fps.cpp trackonefragreact: the times of a killer are measured from THEIR
+    // real eyes and aim (their HD track; with no exact aim, their place in the
+    // demo, not where the followed player's game showed them); false when
+    // nothing is rebuilt or they cannot be placed
+    bool truepos(fpsent *d, vec &o, float &yaw, float &pitch)
+    {
+        if(!d || !povviewer(game::followingplayer()) || d->clientnum < 0 || d->clientnum > 255) return false;
+        if(playexact[d->clientnum] && hastrack(d->clientnum))
+        {
+            hdsample s;
+            int idx = play_idx;
+            if(!lerpsample(track, idx, server::demotime(), d->clientnum, s)) return false;
+            o = s.o;
+            yaw = s.yaw;
+            pitch = s.pitch;
+            return true;
+        }
+        if(!povkind(d)) return false;
+        float roll;
+        return povat(povpair(-1, d->clientnum), d->clientnum, server::demotime(), -1, 0, o, yaw, pitch, roll);
+    }
+
+    // fps.cpp trackonefragreact: where the killer's game showed the followed
+    // player (target), so the killer's times are those of their own game
+    // (demopov On; estimated without their exact aim); false when that view
+    // cannot be rebuilt
+    bool clientview(fpsent *target, fpsent *viewer, vec &o)
+    {
+        if(!demopov || !target || !viewer || target == viewer || !game::demoxrayallowed() || !povready() || !povkind(viewer)) return false;
+        int tc = target->clientnum;
+        if(tc < 0 || tc > 255) return false;
+        int delay = povdelayfor(viewer, target);
+        float yaw, pitch, roll;
+        return povat(povpair(viewer->clientnum, tc), tc, server::demotime() - delay, viewer->clientnum, delay, o, yaw, pitch, roll);
+    }
+
+    // the other players of a player's view, every frame (applyothers)
+    static bool povplace(fpsent *d, fpsent *viewer, vec &o, float &yaw, float &pitch, float &roll)
+    {
+        if(!viewer || !d || d == viewer || d->clientnum < 0 || d->clientnum > 255) return false;
+        int delay = povdelayfor(viewer, d);
+        return povat(povghosts[d->clientnum], d->clientnum, server::demotime() - delay, viewer->clientnum, delay, o, yaw, pitch, roll);
+    }
+
+    // where player d is shown at demo time t in this view: as the viewer's
+    // game showed them, else the demo's position (HD track, else their network
+    // positions, else the one now)
+    static void povplaceat(fpsent *d, int t, fpsent *viewer, vec &o)
+    {
+        float yaw, pitch, roll;
+        if(d->clientnum >= 0 && d->clientnum <= 255)
+        {
+            if(viewer && d != viewer)
+            {
+                int delay = povdelayfor(viewer, d);
+                povscratch.valid = false; // a one-off moment: rebuilt exactly from the positions before it
+                if(povat(povscratch, d->clientnum, t - delay, viewer->clientnum, delay, o, yaw, pitch, roll)) return;
+            }
+            hdsample hs;
+            int idx = play_idx;
+            if(play_loaded && hastrack(d->clientnum) && lerpsample(track, idx, t, d->clientnum, hs)) { o = hs.o; return; }
+            povscratch.valid = false;
+            if(povloaded && povat(povscratch, d->clientnum, t, -1, 0, o, yaw, pitch, roll)) return;
+        }
+        o = d->o;
+    }
+
+    // where the shooter's game showed player d when the shot was fired (tt:
+    // the time of the demo's positions they were seeing), and how fast d went
+    static bool povplacefor(fpsent *d, int tt, fpsent *shooter, vec &o, float &speed)
+    {
+        if(!d || !shooter || d == shooter || d->clientnum < 0 || d->clientnum > 255) return false;
+        int t = tt;
+        if(play_cn >= 0 && d->clientnum == play_cn) t -= povrecping + POV_RELAYWAIT; // the recorder: their own positions, sent earlier
+        float yaw, pitch, roll;
+        povscratch.valid = false;
+        if(!povat(povscratch, d->clientnum, t, shooter->clientnum, max(tt - t, 0) + povdelay(shooter), o, yaw, pitch, roll)) return false;
+        speed = vec(povscratch.e->vel).add(povscratch.e->falling).magnitude();
+        return true;
+    }
+
+    bool povshownnow()
+    {
+        return povviewer(game::followingplayer()) != NULL;
+    }
+
+    // ---- the view shown, in words, for the demo controls ----
+
+    // 1 the game of who (a player's view), 4 the game of who, estimated (no
+    // exact aim), 2 the game of who, the recorder of a local demo (the demo
+    // itself), 0 the real positions (HD tracks), 3 the demo's own positions
+    static int viewkind(fpsent *&who)
+    {
+        who = NULL;
+        if(fpsent *pv = povviewer(game::followingplayer())) { who = pv; return povkind(pv) == 1 ? 1 : 4; }
+        if(play_cn >= 0) { who = game::getclient(play_cn); return who ? 2 : 3; } // a local demo: what its recorder's game showed
+        return play_loaded && nexactcns > 0 ? 0 : 3;
+    }
+
+    static void viewlabel(char *buf, int len)
+    {
+        fpsent *who;
+        int k = viewkind(who);
+        bool freecam = !game::followingplayer();
+        if(k == 1) nformatstring(buf, len, "\f4VIEW\f7  %s\f7's game%s", game::colorname(who), freecam ? " (free camera)" : "");
+        else if(k == 4) nformatstring(buf, len, "\f4VIEW\f7  %s\f7's game, \f6estimated\f7%s", game::colorname(who), freecam ? " (free camera)" : "");
+        else if(k == 2) nformatstring(buf, len, "\f4VIEW\f7  %s\f7's game (they recorded this demo)", game::colorname(who));
+        else if(k == 0) copystring(buf, "\f4VIEW\f7  real positions (server)", len);
+        else copystring(buf, "\f4VIEW\f7  positions of the demo", len);
+    }
+
+    // a player whose view can be shown (known: the demo's positions read, a
+    // click; else what may be, a tip)
+    static bool viewother(bool known)
+    {
+        if(known && !povready()) return false;
+        loopv(game::players) if(povkindof(game::players[i], known)) return true;
+        return false;
+    }
+
+    static const char *viewtip()
+    {
+        static string tip;
+        fpsent *who, *f = game::followingplayer();
+        int k = viewkind(who);
+        if(f)
+        {
+            if(k == 1 || k == 4)
+            {
+                if(play_cn < 0) return "Click: the real positions (server)";
+                fpsent *r = game::getclient(play_cn);
+                if(!r) return "Click: the positions of the demo";
+                formatstring(tip, "Click: %s\f7's game (they recorded this demo)", game::colorname(r));
+                return tip;
+            }
+            int fk = povkindof(f, false);
+            if(!fk) return play_cn >= 0 ? "This demo shows what its recorder's game showed" : "This player's view cannot be rebuilt: real positions";
+            formatstring(tip, "Click: %s\f7's game%s", game::colorname(f), fk == 1 ? "" : ", estimated");
+            return tip;
+        }
+        if(!viewother(false)) return play_cn >= 0 ? "This demo shows what its recorder's game showed" : "No player view in this demo: its own positions";
+        return play_cn >= 0 ? "Click: next view (the recorder's game, then each player's, estimated)" :
+                              "Click: next view (real positions, then each player's game)";
+    }
+
+    // the free camera: the next view, the real positions (a local demo: its
+    // recorder's game) then the game of each player whose view can be shown,
+    // by client number
+    static void nextfreeview()
+    {
+        if(!game::demoplayback) { conoutf("Only while watching a demo"); return; }
+        if(!game::demoxrayallowed()) { conoutf("Only for demos played on this computer"); return; }
+        if(!viewother(true)) { conoutf("No player view in this demo"); return; }
+        int next = -1;
+        loopv(game::players)
+        {
+            fpsent *d = game::players[i];
+            if(!povkind(d)) continue;
+            int c = d->clientnum;
+            if(c > demofreeview && (next < 0 || c < next)) next = c;
+        }
+        demofreeview = next;
+        if(game::followingplayer()) execute("follow"); // the free camera, where the followed player was
+        fpsent *v = povviewer(NULL);
+        if(v) conoutf("Free camera: %s\f7's game%s", game::colorname(v), povkind(v) == 1 ? "" : ", estimated");
+        else if(fpsent *r = play_cn >= 0 ? game::getclient(play_cn) : NULL) conoutf("Free camera: %s\f7's game (they recorded this demo)", game::colorname(r));
+        else conoutf("Free camera: real positions");
+    }
+
+    static void viewclick()
+    {
+        fpsent *f = game::followingplayer();
+        if(f) { if(povkindof(f, false) || povviewer(f)) execute("toggledemopov"); return; }
+        if(viewother(false)) nextfreeview();
+    }
+
+    // the HD track of the player whose view is shown lost samples here (more
+    // than 250 ms without one, lerpsample): their network position is shown,
+    // not a frozen or sliding player
+    static bool viewhole(char *buf, int len)
+    {
+        if(play_cn >= 0 || !play_loaded || !game::demoxrayallowed()) return false;
+        fpsent *f = game::followingplayer(), *v = f ? f : povviewer(NULL);
+        if(!povexact(v) || v->state != CS_ALIVE) return false;
+        hdsample s;
+        int idx = play_idx;
+        if(lerpsample(track, idx, server::demotime(), v->clientnum, s)) return false;
+        nformatstring(buf, len, "%s\f6: HD AIM LOST HERE, NETWORK POSITION SHOWN", game::colorname(v));
+        return true;
+    }
+
+    // the demo controls hidden by their button, hitboxes drawn: the view they
+    // are in, at the top
+    static void dbviewtop(int w, int h, float s)
+    {
+        string vl, hole;
+        viewlabel(vl, sizeof(vl));
+        bool hl = viewhole(hole, sizeof(hole));
+        float th = 20*s, pad = 9*s;
+        float tw = max(dbtextw(vl, th), hl ? dbtextw(hole, th*0.8f) : 0.0f);
+        float bw = tw + 2*pad, bh = th + 1.2f*pad + (hl ? th*0.8f + 4*s : 0);
+        float x = (w - bw)/2, y = 12*s;
+        dbpanel(x, y, bw, bh, max(1.0f, s));
+        dbtext(vl, x + pad, y + 0.6f*pad, th, 0xFFFFFF);
+        if(hl) dbtext(hole, x + pad, y + 0.6f*pad + th + 4*s, th*0.8f, DB_ORANGE);
+    }
+
+    // ---- going back keeps the player followed ----
+
+    // server.cpp seekdemoms: going back restarts the demo, which forgot the
+    // player followed (-10 s, PgUp, a click on the timeline, a time typed); they
+    // are kept, quietly, and followed again (by name: a client number can be
+    // somebody else earlier in the demo)
+    void seekkeep()
+    {
+        seekcn = game::demoplayback && game::player1 && game::player1->state == CS_SPECTATOR ? game::following : -1;
+        if(seekcn < 0) return;
+        fpsent *d = game::getclient(seekcn);
+        if(!d) { seekcn = -1; return; }
+        copystring(seekname, d->name);
+        game::following = -1; // no "follow off" while the demo restarts
+    }
+
+    void seekrefollow()
+    {
+        if(seekcn < 0) return;
+        int cn = seekcn;
+        seekcn = -1;
+        fpsent *d = game::getclient(cn);
+        if(!d || strcmp(d->name, seekname))
+        {
+            d = NULL;
+            loopv(game::players) if(game::players[i] && !strcmp(game::players[i]->name, seekname)) { d = game::players[i]; break; }
+        }
+        if(d && d != game::player1 && d->state != CS_SPECTATOR && game::demoplayback && game::player1->state == CS_SPECTATOR) game::following = d->clientnum;
+        else conoutf("follow off");
+    }
+
+    // ---- going to a time typed to the millisecond ----
+
+    // "9:00.842", "9.00.842", "9:00,842", "9:00", "540.842" (seconds) -> ms; -1 if unreadable
+    static int parsedemotime(const char *s)
+    {
+        if(!s) return -1;
+        while(*s == ' ') s++;
+        int part[3] = { 0, 0, 0 }, digits[3] = { 0, 0, 0 }, n = 0;
+        char sep[3] = { 0, 0, 0 };
+        while(*s && n < 3)
+        {
+            if(*s < '0' || *s > '9') return -1;
+            int v = 0, l = 0;
+            while(*s >= '0' && *s <= '9') { if(l < 9) v = v*10 + (*s - '0'); l++; s++; }
+            part[n] = v;
+            digits[n] = min(l, 9);
+            n++;
+            if(!*s || *s == ' ') break;
+            if(*s != ':' && *s != '.' && *s != ',') return -1;
+            sep[n-1] = *s++;
+        }
+        while(*s == ' ') s++;
+        if(*s || !n) return -1;
+        int mins = 0, secs = 0, frac = -1, fdigits = 0;
+        if(n == 1) secs = part[0];
+        else if(n == 2 && sep[0] == ':') { mins = part[0]; secs = part[1]; }
+        else if(n == 2) { secs = part[0]; frac = part[1]; fdigits = digits[1]; }
+        else { mins = part[0]; secs = part[1]; frac = part[2]; fdigits = digits[2]; }
+        if(n >= 2 && (n == 3 || sep[0] == ':') && secs >= 60) return -1;
+        int ms = 0;
+        if(frac >= 0)
+        {
+            ms = frac;
+            for(int d = fdigits; d < 3; d++) ms *= 10;
+            for(int d = fdigits; d > 3; d--) ms /= 10;
+        }
+        return (mins*60 + secs)*1000 + ms;
+    }
+
+    // The time of the demo controls, typed in place: a click on it (or GO TO,
+    // or demogotoprompt) pauses the demo and turns it into a field holding the
+    // time now, selected (typing replaces it); Enter goes to the time typed, to
+    // the millisecond, paused there; Esc puts the demo back as it was. The keys
+    // go to the command line (console.cpp), which is not drawn meanwhile; its
+    // text is "/demogoto <time>" so it runs as a command, never as a message.
+    #define DB_GOTOCMD "/demogoto "
+    static bool dbtimeedit = false, dbtimefresh = false, dbtimeplay = false, dbtimewent = false;
+    static string dbtimeinit;
+
+    bool timeediting()
+    {
+        return dbtimeedit && commandmillis >= 0 && game::demoplayback && !dbhidden && game::demoxrayallowed() &&
+               !strncmp(commandbuf, DB_GOTOCMD, strlen(DB_GOTOCMD));
+    }
+
+    // the demo at that time exactly, paused there
+    static void gototime(const char *s)
+    {
+        if(!game::demoplayback) { conoutf("Only while watching a demo"); return; }
+        if(!game::demoxrayallowed()) { conoutf("Only for demos played on this computer"); return; }
+        int ms = parsedemotime(s);
+        if(ms < 0) { conoutf("Type a time like 9:00.842"); return; }
+        if(dmolenms > 0) ms = min(ms, dmolenms - 1);
+        server::seekdemoms(ms); // the player followed is kept (seekkeep)
+        if(!server::ispaused()) server::forcepaused(true);
+        dbtimewent = true;
+    }
+
+    // GO TO, demogotoprompt, a click on the time: the field (the command line
+    // when the demo controls are hidden)
+    static void gotoprompt()
+    {
+        if(!game::demoplayback || !game::demoxrayallowed() || dbtimeedit) return;
+        if(dbhidden) { execute("inputcommand [/demogoto ] [] [Go to a time, paused (e.g. 9:00.842):] x"); return; }
+        dbtimeplay = !server::ispaused();
+        if(dbtimeplay) server::forcepaused(true);
+        string now;
+        dbtimems(clamp(server::demotime(), 0, max(dmolenms, 1)), now, sizeof(now));
+        formatstring(dbtimeinit, "%s%s", DB_GOTOCMD, now);
+        defformatstring(cmd, "inputcommand [%s] [] [] x", dbtimeinit);
+        execute(cmd);
+        dbtimeedit = commandmillis >= 0;
+        dbtimefresh = true;
+        dbtimewent = false;
+    }
+
+    // every frame: the field closed (Enter went to the time; Esc or a time that
+    // could not be read: the demo plays again if it was playing), typing over
+    // the selected time, the caret kept after "/demogoto "
+    static void timeupdate()
+    {
+        if(!dbtimeedit) return;
+        size_t pl = strlen(DB_GOTOCMD);
+        if(commandmillis < 0 || !game::demoplayback || strncmp(commandbuf, DB_GOTOCMD, pl))
+        {
+            dbtimeedit = false;
+            if(!dbtimewent && dbtimeplay && game::demoplayback && server::ispaused()) server::forcepaused(false);
+            return;
+        }
+        if(dbtimefresh && strcmp(commandbuf, dbtimeinit))
+        {
+            size_t n = strlen(dbtimeinit);
+            if(!strncmp(commandbuf, dbtimeinit, n) && commandpos < 0) memmove(&commandbuf[pl], &commandbuf[n], strlen(&commandbuf[n]) + 1);
+            dbtimefresh = false;
+        }
+        if(commandpos >= 0 && commandpos < int(pl)) commandpos = int(strlen(commandbuf)) > int(pl) ? int(pl) : -1;
+    }
+
+    // the keys the command line would use to leave the field (history, the
+    // start of the line); on the selected time, Backspace or Delete clears it
+    static bool timekey(int code, bool isdown)
+    {
+        if(!timeediting()) return false;
+        int pl = int(strlen(DB_GOTOCMD)), len = int(strlen(commandbuf));
+        bool atstart = commandpos == pl || (commandpos < 0 && len <= pl);
+        switch(code)
+        {
+            case SDLK_UP: case SDLK_DOWN: case SDLK_TAB: case SDLK_PAGEUP: case SDLK_PAGEDOWN:
+                return true;
+            case SDLK_HOME:
+                if(isdown) { dbtimefresh = false; commandpos = len > pl ? pl : -1; }
+                return true;
+            case SDLK_LEFT:
+                if(isdown) dbtimefresh = false;
+                return atstart;
+            case SDLK_BACKSPACE: case SDLK_DELETE:
+                if(isdown && dbtimefresh) { commandbuf[pl] = '\0'; commandpos = -1; dbtimefresh = false; return true; }
+                return code == SDLK_BACKSPACE && atstart;
+            case SDLK_RIGHT: case SDLK_END:
+                if(isdown) dbtimefresh = false;
+                return false;
+        }
+        return false;
+    }
+
+    // the time "now / length" at the top right of the demo controls; the time
+    // now can be clicked (id 12) and becomes the field
+    static void dbtimefield(const char *tnow, const char *tdur, float right, float y, float th, float s, int w, int h, float cx, float cy)
+    {
+        defformatstring(rest, " / %s", tdur);
+        float rw = dbtextw(rest, th), padx = 5*s;
+        bool edit = timeediting(), local = game::demoxrayallowed();
+        const char *shown = edit ? commandbuf + strlen(DB_GOTOCMD) : tnow;
+        float fw = max(dbtextw(shown, th), dbtextw("0:00.000", th)) + 2*padx;
+        float fx = right - rw - fw, fy = y - 2*s, fh = th + 4*s;
+        if(local) dbset(12, fx/w, fy/h, fw/w, fh/h);
+        bool hover = local && !edit && dbhit(cx, cy) == 12;
+        if(edit)
+        {
+            hudrect(fx, fy, fw, fh, 0x101318, 240);
+            dbedge(fx, fy, fw, fh, max(1.0f, 2*s), 255);
+            if(dbtimefresh && shown[0]) hudrect(fx + padx, fy + 2*s, dbtextw(shown, th), th, DB_ORANGE, 110); // selected: typing replaces it
+            int caret = commandpos >= 0 ? commandpos - int(strlen(DB_GOTOCMD)) : int(strlen(shown));
+            float k = dbtextk(th);
+            pushhudmatrix();
+            hudmatrix.translate(fx + padx, y, 0);
+            hudmatrix.scale(k, k, 1);
+            flushhudmatrix();
+            draw_text(shown, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF, dbtimefresh ? -1 : caret);
+            pophudmatrix();
+        }
+        else
+        {
+            if(hover) hudrect(fx, fy, fw, fh, DB_ORANGE, 45);
+            dbtext(tnow, fx + padx, y, th, hover ? DB_ORANGE : 0xE6E6E6);
+        }
+        dbtext(rest, right - rw, y, th, 0xE6E6E6);
+    }
+
+    // ---- the free camera, looking around ----
+
+    // a local demo shows its recorder until you follow somebody or leave them
+    bool recorderview() { return game::demoplayback && play_cn >= 0 && !autofollowdone; }
+
+    // the free camera of a demo flies with the real time, at the normal speed
+    // whatever the speed of the demo (0.25x, 2x) and while it is paused: the
+    // demo, its players and its time are not touched (fps.cpp updateworld)
+    static int flylast = -1;
+    bool freefly()
+    {
+        fpsent *p = game::player1;
+        if(!game::demoplayback || !game::demoxrayallowed() || !p || p->state != CS_SPECTATOR || game::followingplayer() || recorderview())
+        {
+            flylast = -1;
+            return false;
+        }
+        if(flylast < 0 || totalmillis - flylast > 250) { flylast = totalmillis; p->newpos = p->o; p->deltapos = vec(0, 0, 0); }
+        int diff = totalmillis - flylast;
+        if(diff > 0)
+        {
+            int steps = (diff + POV_STEP - 1)/POV_STEP;
+            p->o = p->newpos;
+            loopi(steps - 1) moveplayer(p, 10, true, POV_STEP);
+            p->deltapos = p->o;
+            moveplayer(p, 10, true, POV_STEP);
+            p->newpos = p->o;
+            p->deltapos.sub(p->newpos);
+            flylast += steps*POV_STEP;
+        }
+        // as engine/physics.cpp interppos: drawn between the last two steps
+        p->o = p->newpos;
+        int ahead = flylast - totalmillis;
+        if(ahead > 0) p->o.add(vec(p->deltapos).mul(min(ahead, POV_STEP)/float(POV_STEP)));
+        return true;
+    }
+
+    static bool islookkey(int code)
+    {
+        const char *name = getkeyname(code);
+        if(!name || !demolookkey[0]) return false;
+        size_t n = strlen(name);
+        for(const char *s = demolookkey; *s;)
+        {
+            while(*s == ' ') s++;
+            const char *e = s;
+            while(*e && *e != ' ') e++;
+            if(size_t(e - s) == n && !strncasecmp(s, name, n)) return true;
+            s = e;
+        }
+        return false;
+    }
+
+    // the look key while a demo plays: held, the mouse turns the view
+    bool lookkey(int code, bool isdown)
+    {
+        if(!islookkey(code)) return false;
+        if(isdown)
+        {
+            if(!game::demoxrayallowed()) return false;
+            if(!lookon) { SDL_GetMouseState(&lookx, &looky); lookon = true; lookback = false; }
+        }
+        else if(lookon) { lookon = false; lookback = true; lookbackms = totalmillis; }
+        else return false;
+        return true;
+    }
+
+    bool looking() { return lookon && game::demoplayback && game::demoxrayallowed(); }
+
+    // main.cpp: the mouse is freed again, the cursor goes back where it was
+    bool lookcursor(int &x, int &y)
+    {
+        if(!lookback) return false;
+        lookback = false;
+        if(totalmillis - lookbackms > 500) return false;
+        x = lookx;
+        y = looky;
+        return true;
+    }
+
+    // ---- hitboxes and shots ----
+
+    // how a hitbox of a shot is drawn: crossed (white), beside (yellow), the
+    // rebuilt view and the shooter's game disagree near the edge of the hitbox
+    // (pink, "uncertain") or further (red, with what their game counted), the
+    // victim of another player's shot in a player's view (light blue)
+    enum { HB_CROSSED = 0, HB_BESIDE, HB_UNSURE, HB_OTHER, HB_DISAGREE };
+    struct hbcyl { vec o; float eyeheight, aboveeye, radius, margin, slack; int look; bool victim, gamehit; }; // HB_DISAGREE: pink or red when drawn
+    struct hbshot
+    {
+        // t: played by the server; ts: fired, on the demo's time (the shooter's HD track, else when the demo got it);
+        // tt: the time of the demo's positions the shooter's game was showing then (their own view), -1 unknown
+        int t, ts, tt, cn, gun, color, nhit, view, ends, victim, ncand, ngamehits;
+        bool line;
+        vec from, to, eye;
+        string name;
+        int cand[HB_MAXCAND], gamehits[HB_MAXHIT]; // gamehits: the players the shooter's game touched (N_DAMAGE)
+        hbcyl hit[HB_MAXHIT];
+    };
+    static vector<hbshot> hbshots;
+    static vector<vec> hblines;
+
+    bool hitboxactive() { return demohitbox && game::demoxrayallowed(); }
+
+    void togglehitbox()
+    {
+        if(!game::demoplayback) { conoutf("Hitboxes are only shown while watching a demo"); return; }
+        if(!game::demoxrayallowed()) { conoutf("Hitboxes are only for demos played on this computer"); return; }
+        demohitbox = demohitbox ? 0 : 1;
+        conoutf("Hitboxes %s", demohitbox ? "on" : "off");
+    }
+
+    static hbshot &hbadd(fpsent *s, int now)
+    {
+        while(hbshots.length() >= HB_MAXSHOTS) hbshots.remove(0);
+        hbshot &h = hbshots.add();
+        h.t = h.ts = now;
+        h.tt = -1;
+        h.cn = s->clientnum;
+        h.gun = -1;
+        h.color = game::demohitboxcolor(s);
+        copystring(h.name, game::colorname(s));
+        h.nhit = h.ncand = h.ngamehits = 0;
+        h.view = -2;
+        h.ends = now + HB_SHOTMS;
+        h.victim = -1;
+        h.line = true;
+        return h;
+    }
+
+    // the clock of a player's shots: each shot's gap (demo time - their id of
+    // it), the smallest of their last ones (povclock)
+    static void povlearnclock(int cn, int t, int id)
+    {
+        if(cn < 0 || cn > 255 || id < 0) return;
+        int v = t - id, n = povclkn[cn];
+        if(n)
+        {
+            int lo = povclk[cn][0];
+            loopi(min(n, POV_CLOCKS)) lo = min(lo, povclk[cn][i]);
+            if(v < lo - 100 || v > lo + 300) n = 0; // their clock jumped (a pause, a new map): learnt again
+        }
+        povclk[cn][n%POV_CLOCKS] = v;
+        povclkn[cn] = n + 1;
+    }
+
+    static bool povclock(int cn, int &c)
+    {
+        int n = cn >= 0 && cn <= 255 ? min(povclkn[cn], POV_CLOCKS) : 0;
+        if(n <= 0) return false;
+        c = povclk[cn][0];
+        loopi(n) c = min(c, povclk[cn][i]);
+        return true;
+    }
+
+    // With the shooter's exact aim (HD track): the moment their eyes were where
+    // the line starts ("from") AND looked along it (their yaw and pitch against
+    // from -> to), in the 160 ms before the demo got the shot; -1 when that
+    // moment is not clear (eyes and aim still: the middle of a 100 ms stillness
+    // was 30-60 ms off, the target drawn where it was too early)
+    #define HB_FIREWIN 160
+    #define HB_FIRECLEAR 8
+    static int hbhdinstant(int cn, int t, const vec &from, const vec &to)
+    {
+        vec sdir = vec(to).sub(from);
+        float slen = sdir.magnitude();
+        if(slen < 0.5f) return -1;
+        sdir.div(slen);
+        static float cost[HB_FIREWIN+1];
+        hdsample s;
+        int lo = 0, hi = track.length(), best = -1;
+        while(lo < hi) { int mid = (lo + hi)/2; if(track[mid].t < t) lo = mid + 1; else hi = mid; } // also for a shot read at once by a jump
+        int idx = lo;
+        loopk(HB_FIREWIN+1)
+        {
+            cost[k] = 1e9f;
+            if(!lerpsample(track, idx, t - k, cn, s)) continue;
+            float dp = s.o.dist(from);
+            if(dp > 2.0f) continue; // the eyes elsewhere
+            vec aim;
+            vecfromyawpitch(s.yaw, s.pitch, 1, 0, aim);
+            cost[k] = dp/0.1f + acosf(clamp(aim.dot(sdir), -1.0f, 1.0f))/RAD/0.05f; // 0.1 unit of the eyes = 0.05 degree of aim
+            if(best < 0 || cost[k] < cost[best]) best = k;
+        }
+        if(best < 0) return -1;
+        lo = hi = best;
+        while(lo > 0 && cost[lo-1] <= cost[best] + 1) lo--;
+        while(hi < HB_FIREWIN && cost[hi+1] <= cost[best] + 1) hi++;
+        return hi - lo <= HB_FIRECLEAR && hi < HB_FIREWIN - 4 ? t - (lo + hi)/2 : -1;
+    }
+
+    // When the shot was fired (ts, on the demo's time: the shooter's HD track,
+    // else when the demo got it) and the time of the demo's positions their
+    // game was showing then (tt, for their own view). Their own clock of the
+    // shot (N_SHOTFX id) plus its smallest gap to the demo (povclock: a shot
+    // sent at once) is when the demo would have got it: their game showed the
+    // others their ping and 15 ms before that (measured on demos with exact
+    // aim: within 5-7 ms for 9 shots in 10). With their exact aim: ts from the
+    // HD track and tt = ts - the delay of their view, unless it is not clear or
+    // disagrees with their clock by more than 30 ms (an HD track dated
+    // otherwise at the start of a demo): their clock. The recorder of a local
+    // demo: their view is the demo itself, at ts.
+    #define HB_CLOCKLATE 15
+    #define HB_CLOCKAGREE 30
+    static void hbinstants(fpsent *s, int t, int id, const vec &from, const vec &to, int &ts, int &tt)
+    {
+        int cn = s->clientnum;
+        ts = t;
+        tt = -1;
+        if(cn < 0 || cn > 255) return;
+        int c, ttclock = id >= 0 && povclock(cn, c) ? id + c - clamp(s->ping, 0, POV_MAXDELAY) - HB_CLOCKLATE : -1;
+        bool exact = play_loaded && playexact[cn];
+        int hd = exact ? hbhdinstant(cn, t, from, to) : -1;
+        if(play_cn >= 0 && cn == play_cn) { if(hd >= 0) ts = hd; return; } // the recorder of a local demo
+        if(!exact) { tt = ttclock; return; }
+        int delay = povdelay(s);
+        if(hd >= 0 && (ttclock < 0 || abs(hd - delay - ttclock) <= HB_CLOCKAGREE)) { ts = hd; tt = hd - delay; return; }
+        if(ttclock >= 0) { tt = ttclock; ts = clamp(ttclock + delay, t - POV_LAG, t); return; }
+        if(hd >= 0) ts = hd;
+        tt = ts - delay;
+    }
+
+    // a shot replayed from the demo (client.cpp N_SHOTFX, id: the shooter's
+    // clock of it); its hitboxes are worked out for the view they are drawn in
+    // (hbcompute)
+    void noteshot(fpsent *s, int gun, const vec &from, const vec &to, int id)
+    {
+        if(!s || !game::demoxrayallowed()) return;
+        int now = server::demotime(), pt = min(server::demopackettime(), now); // the exact time of the shot in the demo
+        if(demohitbox || demopov) povlearnclock(s->clientnum, pt, id); // the shooter's clock, also before the hitboxes are on and for a shot read at once by a jump
+        if(!hitboxactive()) return;
+        if(gun < GUN_SG || gun > GUN_PISTOL || gun == GUN_RL || gun == GUN_GL) return; // projectiles: no line
+        if(vec(to).sub(from).magnitude() < 0.5f) return;
+        int ts, tt;
+        hbinstants(s, pt, id, from, to, ts, tt);
+        if(now - pt > HB_SHOTMS) return; // read at once by a jump in the demo, already over
+        hbshot &h = hbadd(s, pt);
+        h.ts = ts;
+        h.tt = tt;
+        h.gun = gun;
+        h.from = h.eye = from;
+        h.to = to;
+        loopv(game::players)
+        {
+            fpsent *d = game::players[i];
+            if(d && d != s && d->state == CS_ALIVE && d->clientnum >= 0 && h.ncand < HB_MAXCAND) h.cand[h.ncand++] = d->clientnum;
+        }
+    }
+
+    // the shot of this player played at the same moment of the demo: the
+    // server sends a shot (N_SHOTFX), then the hits it made (N_DAMAGE) and the
+    // frag (N_DIED), all at once; a frag with no shot then (another weapon, a
+    // fall) has no line. The recorder of a local demo: their own last shot,
+    // written as they fired, the server's answer a ping later
+    static hbshot *hbshotat(int cn, int pt)
+    {
+        bool rec = play_cn >= 0 && cn == play_cn;
+        loopvrev(hbshots)
+        {
+            hbshot &h = hbshots[i];
+            if(h.cn != cn || !h.line) continue;
+            if(rec ? h.t <= pt && pt - h.t <= POV_MAXDELAY : abs(pt - h.t) <= 2) return &h;
+        }
+        return NULL;
+    }
+
+    static void hbgamehit(hbshot &h, int cn)
+    {
+        loopi(h.ngamehits) if(h.gamehits[i] == cn) return;
+        if(h.ngamehits < HB_MAXHIT) h.gamehits[h.ngamehits++] = cn;
+        h.view = -2;
+    }
+
+    // a hit replayed from the demo (client.cpp N_DAMAGE): the shooter's game
+    // touched this player with that shot
+    void notedamage(fpsent *target, fpsent *actor)
+    {
+        if(!target || !actor || target == actor || !hitboxactive()) return;
+        int now = server::demotime(), pt = min(server::demopackettime(), now);
+        if(hbshot *h = hbshotat(actor->clientnum, pt)) hbgamehit(*h, target->clientnum);
+    }
+
+    // a frag replayed from the demo (client.cpp N_DIED): the shot that killed
+    // and the hitbox of its victim stay demohitboxdeath ms where they were hit
+    void notedeath(fpsent *victim, fpsent *actor)
+    {
+        if(!victim || !actor || victim == actor || demohitboxdeath <= 0 || !hitboxactive()) return;
+        int now = server::demotime(), pt = min(server::demopackettime(), now);
+        if(now - pt > demohitboxdeath) return; // read at once by a jump in the demo, already over
+        if(hbshot *s = hbshotat(actor->clientnum, pt))
+        {
+            hbshot &h = *s;
+            hbgamehit(h, victim->clientnum);
+            if(h.victim < 0)
+            {
+                h.victim = victim->clientnum;
+                h.ends = max(h.ends, pt + demohitboxdeath);
+                h.view = -2;
+                return;
+            }
+        }
+        // no shot line (rocket, grenade...): the victim's hitbox only
+        hbshot &h = hbadd(actor, pt);
+        h.from = h.eye = h.to = victim->o;
+        h.line = false;
+        h.victim = victim->clientnum;
+        h.ends = pt + demohitboxdeath;
+    }
+
+    // along the line: how deep a point is in the hitbox (> 0 inside), and how
+    // far it is from it outside
+    static float hbdepth(const vec &p, const vec &o, float bottom, float top, float radius)
+    {
+        return min(min(radius - vec(p.x - o.x, p.y - o.y, 0).magnitude(), p.z - bottom), top - p.z);
+    }
+    static float hbdist(const vec &p, const vec &o, float bottom, float top, float radius)
+    {
+        float dxy = max(vec(p.x - o.x, p.y - o.y, 0).magnitude() - radius, 0.0f), dz = max(max(bottom - p.z, p.z - top), 0.0f);
+        return sqrtf(dxy*dxy + dz*dz);
+    }
+
+    // how far the line is from the edge of the hitbox (units): crossing, how
+    // deep it passes in; beside, how far from it it passes (the depth is
+    // concave along the line and the distance convex: one extremum, by thirds)
+    static float hbmargin(const vec &o, float eyeheight, float aboveeye, float radius, const vec &from, const vec &to, bool crossing)
+    {
+        vec dir = vec(to).sub(from);
+        float len = dir.magnitude();
+        if(len < 1e-3f) return 0;
+        dir.div(len);
+        float bottom = o.z - eyeheight, top = o.z + aboveeye, lo = 0, hi = len;
+        loopi(40)
+        {
+            float a = lo + (hi - lo)/3, b = hi - (hi - lo)/3;
+            vec pa = vec(dir).mul(a).add(from), pb = vec(dir).mul(b).add(from);
+            if(crossing ? hbdepth(pa, o, bottom, top, radius) < hbdepth(pb, o, bottom, top, radius) : hbdist(pa, o, bottom, top, radius) > hbdist(pb, o, bottom, top, radius)) lo = a;
+            else hi = b;
+        }
+        vec p = vec(dir).mul((lo + hi)/2).add(from);
+        return max(crossing ? hbdepth(p, o, bottom, top, radius) : hbdist(p, o, bottom, top, radius), 0.0f);
+    }
+
+    // the hitboxes of a shot in the view drawn now (viewer, or NULL = the
+    // demo's positions): only the viewer's own shots in a player's view (in a
+    // local demo, the recorder's in theirs, the demo itself), the victim of a
+    // frag always
+    #define HB_ESTSPREAD 15
+    static void hbcompute(hbshot &h, fpsent *pv)
+    {
+        h.view = pv ? pv->clientnum : -1;
+        h.nhit = 0;
+        fpsent *s = game::getclient(h.cn);
+        h.eye = h.from;
+        if(h.line && pv && s && s != pv) povplaceat(s, h.ts, pv, h.eye); // the shooter where this view shows them
+        int judge = pv ? pv->clientnum : play_cn; // whose game decided here
+        bool own = judge < 0 || h.cn == judge, mine = judge >= 0 && h.cn == judge, estimated = pv && povkind(pv) == 2;
+        vec dir = vec(h.to).sub(h.eye);
+        float len = dir.magnitude();
+        loopi(h.ncand + 1)
+        {
+            int cn = i < h.ncand ? h.cand[i] : h.victim;
+            if(cn < 0 || h.nhit >= HB_MAXHIT) continue;
+            bool victim = cn == h.victim, gamehit = victim;
+            if(victim && i < h.ncand) continue; // the victim once, at the end
+            loopj(h.ngamehits) if(h.gamehits[j] == cn) gamehit = true;
+            if(!own && !victim) continue;
+            fpsent *d = game::getclient(cn);
+            if(!d || (d == pv && d == game::followingplayer() && !isthirdperson())) continue; // your own eyes
+            vec o;
+            float speed = 0;
+            // where this view showed them when the shot was fired; the shooter's own view: what their game was showing
+            if(!(mine && pv && h.tt >= 0 && povplacefor(d, h.tt, pv, o, speed))) povplaceat(d, h.ts, pv, o);
+            bool hit = false, nearby = victim || (mine && gamehit);
+            if(h.line && len >= 0.5f)
+            {
+                vec saved = d->o;
+                float radius = d->radius;
+                d->o = o;
+                hit = game::intersect(d, h.eye, vec(dir).mul((len + 1.0f)/len).add(h.eye)); // "to" stops on the hitbox it hit
+                d->radius = radius + HB_NEAR;
+                if(!nearby) nearby = hit || game::intersect(d, h.eye, vec(dir).mul((len + HB_NEAR)/len).add(h.eye));
+                d->radius = radius;
+                d->o = saved;
+            }
+            if(!nearby) continue;
+            hbcyl &c = h.hit[h.nhit++];
+            c.o = o;
+            c.eyeheight = d->eyeheight;
+            c.aboveeye = d->aboveeye;
+            c.radius = d->radius;
+            c.margin = c.slack = 0;
+            c.gamehit = gamehit;
+            // the shooter's own view: checked against what their game decided (shotgun: pellets at random, only
+            // the centre line is drawn, so a pellet that touched counts): when they disagree, uncertain near the
+            // edge (demohitboxuncertain; an estimated view: also what the target moves in 15 ms), else disagree;
+            // the real positions: the line alone; another player's shot in a player's view: decided by that game
+            if(!h.line) c.look = judge >= 0 && !mine ? HB_OTHER : HB_CROSSED; // a frag with no line (rocket, grenade): its victim
+            else if(mine && h.gun != GUN_SG && len >= 0.5f && hit != gamehit)
+            {
+                c.margin = hbmargin(o, d->eyeheight, d->aboveeye, d->radius, h.eye, vec(dir).mul((len + 1.0f)/len).add(h.eye), hit);
+                c.slack = estimated ? speed*HB_ESTSPREAD/1000.0f : 0.0f;
+                c.look = HB_DISAGREE; // pink or red by demohitboxuncertain, when drawn
+            }
+            else if(mine) c.look = (h.gun == GUN_SG ? gamehit || hit : hit) ? HB_CROSSED : HB_BESIDE;
+            else if(judge >= 0) c.look = HB_OTHER;
+            else c.look = hit ? HB_CROSSED : HB_BESIDE;
+            c.victim = victim;
+        }
+    }
+
+    static void hbcylinder(const vec &o, float eyeheight, float aboveeye, float radius)
+    {
+        float bottom = o.z - eyeheight, top = o.z + aboveeye;
+        loopi(HB_SIDES)
+        {
+            float a0 = 2*PI*i/HB_SIDES, a1 = 2*PI*(i+1)/HB_SIDES;
+            vec p0(o.x + cosf(a0)*radius, o.y + sinf(a0)*radius, 0), p1(o.x + cosf(a1)*radius, o.y + sinf(a1)*radius, 0);
+            hblines.add(vec(p0.x, p0.y, bottom)); hblines.add(vec(p1.x, p1.y, bottom));
+            hblines.add(vec(p0.x, p0.y, top)); hblines.add(vec(p1.x, p1.y, top));
+        }
+        // the two side edges as seen from the camera
+        vec side(o.y - camera1->o.y, camera1->o.x - o.x, 0);
+        float sl = side.magnitude();
+        if(sl < 1e-3f) return;
+        side.mul(radius/sl);
+        loopk(2)
+        {
+            vec e = k ? vec(o).add(side) : vec(o).sub(side);
+            hblines.add(vec(e.x, e.y, bottom)); hblines.add(vec(e.x, e.y, top));
+        }
+    }
+
+    void drawhitboxes(int w, int h)
+    {
+        if(!hitboxactive() || !camera1) { hbshots.setsize(0); return; }
+        int now = server::demotime();
+        loopvrev(hbshots) if(hbshots[i].t > now || now > hbshots[i].ends) hbshots.remove(i);
+        float thick = max(1.0f, h/720.0f);
+        fpsent *f = game::followingplayer(), *exclude = isthirdperson() ? NULL : f, *pv = povviewer(f);
+        loopv(game::players)
+        {
+            fpsent *d = game::players[i];
+            if(!d || d == game::player1 || d == exclude || d->lifesequence < 0) continue;
+            if(d->state != CS_ALIVE && d->state != CS_LAGGED) continue;
+            hblines.setsize(0);
+            hbcylinder(d->o, d->eyeheight, d->aboveeye, d->radius);
+            hudworldlines(hblines.getbuf(), hblines.length(), w, h, game::demohitboxcolor(d), 200, thick);
+        }
+        int view = pv ? pv->clientnum : -1;
+        float th = max(12.0f, h*18/1080.0f);
+        loopv(hbshots)
+        {
+            hbshot &s = hbshots[i];
+            if(s.view != view) hbcompute(s, pv);
+            if(s.victim < 0 && !demohitboxshots) continue;
+            int alpha = 255 - (now - s.t)*175/max(s.ends - s.t, 1);
+            if(s.line && demohitboxshots)
+            {
+                hblines.setsize(0);
+                hblines.add(s.eye); hblines.add(s.to);
+                loopk(3)
+                {
+                    vec d(0, 0, 0);
+                    d[k] = 1.5f;
+                    hblines.add(vec(s.to).sub(d)); hblines.add(vec(s.to).add(d));
+                }
+                hudworldlines(hblines.getbuf(), hblines.length(), w, h, s.color, alpha, thick);
+                float x, y;
+                if(hudworldpoint(s.to, w, h, x, y)) dbtext(s.name, x + th*0.5f, y - th*0.5f, th, s.color, alpha);
+            }
+            loopj(s.nhit)
+            {
+                hbcyl &c = s.hit[j];
+                const int looks[5] = { 0xFFFFFF, 0xFFD040, 0xFF5AE6, demohitboxothercolour, 0xFF3C3C }; // white, yellow, pink, light blue, red
+                int look = c.look == HB_DISAGREE && c.margin <= demohitboxuncertain + c.slack ? HB_UNSURE : c.look, col = looks[clamp(look, 0, 4)];
+                hblines.setsize(0);
+                hbcylinder(c.o, c.eyeheight, c.aboveeye, c.radius);
+                hudworldlines(hblines.getbuf(), hblines.length(), w, h, col, alpha, c.victim ? thick*1.75f : thick);
+                float x, y;
+                if((look == HB_UNSURE || look == HB_DISAGREE) && hudworldpoint(vec(c.o).addz(c.aboveeye + 3), w, h, x, y))
+                {
+                    string msg;
+                    if(look == HB_UNSURE) copystring(msg, "uncertain");
+                    else formatstring(msg, c.gamehit ? "their game: hit, line %.2f units outside" : "their game: missed, line %.2f units inside", c.margin);
+                    dbtext(msg, x - dbtextw(msg, th)/2, y - 1.6f*th, th, col, alpha); // above the impact cross
+                }
+            }
+        }
+    }
+}
+
+ICOMMAND(toggledemohitbox, "", (), demohd::togglehitbox());
+ICOMMAND(demohitboxshown, "", (), intret(demohd::hitboxactive() ? 1 : 0));
+ICOMMAND(toggledemopov, "", (),
+{
+    if(!game::demoplayback) { conoutf("Only while watching a demo"); return; }
+    if(!game::demoxrayallowed()) { conoutf("Only for demos played on this computer"); return; }
+    demopov = demopov ? 0 : 1;
+    conoutf("%s", demopov ? "Following a player: the others as their game showed them" : "Following a player: the real positions");
+});
+ICOMMAND(demopovshown, "", (), intret(demohd::povshownnow() ? 1 : 0));
+ICOMMAND(demonextview, "", (), demohd::nextfreeview());
+ICOMMAND(demogoto, "s", (char *t), demohd::gototime(t));
+ICOMMAND(demogotoprompt, "", (), demohd::gotoprompt());
+ICOMMAND(demoviewshown, "", (),
+{
+    fpsent *who;
+    int k = demohd::viewkind(who);
+    intret((k == 1 || k == 4) && who ? who->clientnum : -1);
+});
+ICOMMAND(demoholeshown, "", (),
+{
+    string hole;
+    intret(demohd::viewhole(hole, sizeof(hole)) ? 1 : 0);
+});
+bool game::demolookcursor(int &x, int &y) { return demohd::lookcursor(x, y); }
+bool game::demotimeedit() { return demohd::timeediting(); }
 bool game::demobarkey(int code, bool isdown) { return demohd::barkey(code, isdown); }
 
 static bool hdcopyfile(const char *src, const char *dst)

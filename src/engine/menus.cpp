@@ -16,6 +16,9 @@ static g3d_gui *cgui = NULL;
 
 VAR(guitabnum, 1, 0, 0);
 
+static void helpbegin(const char *page);
+static void helpend();
+
 struct menu : g3d_callback
 {
     char *name, *header;
@@ -31,7 +34,9 @@ struct menu : g3d_callback
         guitabnum = menutab;
         cgui->start(menustart, 0.034f, showtab ? &menutab : NULL);
         if(showtab) cgui->tab(header ? header : name, GUI_TITLE_COLOR);
+        if(!firstpass) helpbegin(name);
         execute(contents);
+        if(!firstpass) helpend();
         cgui->end();
         cgui = NULL;
         guitabnum = 0;
@@ -264,12 +269,322 @@ void guimerge(uint *contents)
     cgui->mergehits(oldval);
 }
 
+// ---------------------------------------------------------------------------
+// Explanation of an option when the mouse rests on it (settings pages).
+// data/settings-help.txt holds the texts, one per line:
+//   KEY: text                 what the option does
+//   cost KEY: Level - detail  what it costs (Level: None, Low, Medium, High, Very high)
+// KEY = a setting (hwrtsoftshadows), one value of it (hwrtsoftshadowrays=8),
+// @Label (a button, or the name written before a row of controls) or >action
+// (what a button runs); a label or action with a colon is quoted: @"Demo: X-ray".
+// It shows once the mouse has rested menuhelpdelay ms on the same option and
+// goes as soon as the mouse leaves it; nothing is drawn while playing.
+static const char *settinglocked(const char *var, float val);
+
+VARP(menuhelpdelay, 0, 1500, 5000); // ms before the explanation shows, 0 = never
+VARP(menuhelpplace, 0, 0, 1);       // 0 next to the mouse, 1 at the bottom of the screen
+
+struct helpentry { char *key, *text; bool cost; };
+static vector<helpentry> helpentries;
+static bool helploaded = false;
+
+// a label as a key: colour codes and tabs dropped, lower case, no trailing " :."
+static void helpcleankey(char *dst, const char *src, int len)
+{
+    int n = 0;
+    while(*src == ' ') src++;
+    for(const char *c = src; *c && n < len-1; c++)
+    {
+        if(*c == '\f' && c[1]) { c++; continue; }
+        if(*c == '^' && c[1] == 'f' && c[2]) { c += 2; continue; }
+        if(*c == '\t') continue;
+        dst[n++] = tolower((uchar)*c);
+    }
+    while(n > 0 && (dst[n-1] == ' ' || dst[n-1] == ':' || dst[n-1] == '.')) n--;
+    dst[n] = 0;
+}
+
+static void loadhelp()
+{
+    if(helploaded) return;
+    helploaded = true;
+    char *buf = loadfile(path("data/settings-help.txt", true), NULL);
+    if(!buf) return;
+    for(char *line = buf; line && *line; )
+    {
+        char *next = strchr(line, '\n');
+        if(next) *next++ = 0;
+        char *end = line + strlen(line);
+        while(end > line && (end[-1] == '\r' || end[-1] == ' ' || end[-1] == '\t')) *--end = 0;
+        if(line[0] && line[0] != '#')
+        {
+            bool cost = !strncmp(line, "cost ", 5);
+            char *k = cost ? line + 5 : line, *sep = NULL;
+            while(*k == ' ') k++;
+            char key[MAXSTRLEN];
+            key[0] = 0;
+            if((k[0] == '@' || k[0] == '>') && k[1] == '"')
+            {
+                char *q = strchr(k + 2, '"');
+                if(q)
+                {
+                    *q = 0;
+                    key[0] = k[0];
+                    if(k[0] == '@') helpcleankey(key + 1, k + 2, sizeof(key) - 1);
+                    else copystring(key + 1, k + 2, sizeof(key) - 1);
+                    sep = strchr(q + 1, ':');
+                }
+            }
+            else if((sep = strchr(k, ':')))
+            {
+                *sep = 0;
+                if(k[0] == '@') { key[0] = '@'; helpcleankey(key + 1, k + 1, sizeof(key) - 1); }
+                else
+                {
+                    copystring(key, k);
+                    int n = strlen(key);
+                    while(n > 0 && key[n-1] == ' ') key[--n] = 0;
+                }
+            }
+            if(sep && key[0])
+            {
+                const char *t = sep + 1;
+                while(*t == ' ') t++;
+                helpentry &e = helpentries.add();
+                e.key = newstring(key);
+                e.text = newstring(t);
+                e.cost = cost;
+            }
+        }
+        line = next;
+    }
+    delete[] buf;
+}
+
+// exact key first, then a key ending with * (">screenres *" for every screen size button)
+static const char *helpfind(const char *key, bool cost)
+{
+    loadhelp();
+    loopv(helpentries) if(helpentries[i].cost == cost && !strcasecmp(helpentries[i].key, key)) return helpentries[i].text;
+    loopv(helpentries) if(helpentries[i].cost == cost)
+    {
+        const char *k = helpentries[i].key;
+        int n = strlen(k);
+        if(n > 1 && k[n-1] == '*' && !strncasecmp(k, key, n-1)) return helpentries[i].text;
+    }
+    return NULL;
+}
+
+// what the mouse is on, gathered while the open menu is drawn
+static bool helpactive = false, helphave = false, helpfresh = false, helprowhit = false, helpshown = false;
+static int helpdepth = 0, helprowdepth = -1, helpstart = 0;
+static float helpcx = 0, helpcy = 0;
+static string helppage = "", helpvar = "", helpval = "", helplabel = "", helpaction = "", helprow = "", helprowname = "", helplastid = "", helpkind = "";
+
+static void helpbegin(const char *page)
+{
+    helpactive = guistack.length() && guistack.last()->name && page && !strcmp(guistack.last()->name, page);
+    helphave = helprowhit = false;
+    helpdepth = 0;
+    helprowdepth = -1;
+    helprow[0] = helpvar[0] = helpval[0] = helplabel[0] = helpaction[0] = helprowname[0] = helpkind[0] = 0;
+    copystring(helppage, page ? page : "");
+}
+
+static void helpend()
+{
+    if(helpactive) helpfresh = true;
+    helpactive = false;
+}
+
+// a row name only names the controls of its own row
+static void helprowcheck()
+{
+    if(helprowdepth >= 0 && helpdepth < helprowdepth - 1) { helprow[0] = 0; helprowdepth = -1; helprowhit = false; }
+}
+
+static void helpnumstr(char *dst, float v)
+{
+    if(v == float(int(v))) nformatstring(dst, 32, "%d", int(v));
+    else nformatstring(dst, 32, "%g", v);
+}
+
+// a control was just laid out: is the mouse on it (or on the name of its row)?
+// kind: "field" or "keyfield" adds the general line "#field" / "#keyfield" of the file
+static void helpcontrol(const char *var, const char *val, const char *label, const char *action, const char *kind = NULL)
+{
+    if(!helpactive) return;
+    helprowcheck();
+    bool hit = cgui && cgui->lasthit();
+    bool fromrow = !hit && helprowhit && var && var[0];
+    if((hit || fromrow) && !helphave)
+    {
+        helphave = true;
+        copystring(helpvar, var ? var : "");
+        copystring(helpval, val && !fromrow ? val : "");
+        copystring(helplabel, label ? label : "");
+        // the action without its outer spaces ("[ hdroutexpstep 0.1 ]" -> "hdroutexpstep 0.1")
+        const char *a = action ? action : "";
+        while(*a == ' ' || *a == '\t') a++;
+        copystring(helpaction, a);
+        for(int n = strlen(helpaction); n > 0 && (helpaction[n-1] == ' ' || helpaction[n-1] == '\t'); n--) helpaction[n-1] = 0;
+        copystring(helprowname, helprow);
+        copystring(helpkind, kind ? kind : "");
+    }
+    if(var && var[0]) helprowhit = false;
+}
+
+// a literal text: it may name the controls that follow on its row
+static void helptext(const char *text)
+{
+    if(!helpactive) return;
+    helprowcheck();
+    copystring(helprow, text);
+    helprowdepth = helpdepth;
+    helprowhit = false;
+    if(cgui && cgui->lasthit() && !helphave && text[0])
+    {
+        char k[MAXSTRLEN];
+        k[0] = '@';
+        helpcleankey(k + 1, text, sizeof(k) - 1);
+        if(helpfind(k, false))
+        {
+            helphave = true;
+            copystring(helplabel, text);
+            helpvar[0] = helpval[0] = helpaction[0] = helprowname[0] = helpkind[0] = 0;
+        }
+        else helprowhit = true;
+    }
+}
+
+static void helpendrow() { if(helpactive) { helprow[0] = 0; helprowdepth = -1; helprowhit = false; } }
+
+static const char *helpcostcolor(const char *level)
+{
+    if(!strncasecmp(level, "very high", 9)) return "\f3";
+    if(!strncasecmp(level, "high", 4)) return "\f6";
+    if(!strncasecmp(level, "medium", 6)) return "\f2";
+    return "\f0";
+}
+
+static const char *helpcompose()
+{
+    static char out[4096];
+    const char *main = NULL, *val = NULL, *cost = NULL;
+    char k[MAXSTRLEN];
+    if(helpvar[0])
+    {
+        if(helpval[0])
+        {
+            formatstring(k, "%s=%s", helpvar, helpval);
+            val = helpfind(k, false);
+            cost = helpfind(k, true);
+        }
+        main = helpfind(helpvar, false);
+        if(!cost) cost = helpfind(helpvar, true);
+    }
+    // a button: what it runs first (two "Delete" buttons do different things), then its text
+    const char *labels[3] = { helpaction, helplabel, helprowname };
+    loopi(3) if(!main && !val && labels[i][0])
+    {
+        if(i == 0) formatstring(k, ">%s", labels[i]);
+        else { k[0] = '@'; helpcleankey(k + 1, labels[i], sizeof(k) - 1); }
+        main = helpfind(k, false);
+        if(main && !cost) cost = helpfind(k, true);
+    }
+    const char *general = NULL;
+    // the general line of a key field always, of a text field only when nothing else explains it
+    if(helpkind[0] && (!strcmp(helpkind, "keyfield") || (!main && !val)))
+    {
+        formatstring(k, "#%s", helpkind);
+        general = helpfind(k, false);
+    }
+    if(!main && !val && !general) return NULL;
+    out[0] = 0;
+    if(main) concatstring(out, main, sizeof(out));
+    if(val)
+    {
+        if(out[0]) concatstring(out, "\n", sizeof(out));
+        concatstring(out, "\f2", sizeof(out));
+        concatstring(out, val, sizeof(out));
+    }
+    if(general)
+    {
+        if(out[0]) concatstring(out, "\n", sizeof(out));
+        concatstring(out, "\f4", sizeof(out));
+        concatstring(out, general, sizeof(out));
+    }
+    if(cost)
+    {
+        if(out[0]) concatstring(out, "\n", sizeof(out));
+        concatstring(out, "\f4Cost: ", sizeof(out));
+        concatstring(out, helpcostcolor(cost), sizeof(out));
+        concatstring(out, cost, sizeof(out));
+    }
+    if(helpvar[0] && helpval[0])
+    {
+        const char *why = settinglocked(helpvar, parsefloat(helpval));
+        if(why)
+        {
+            concatstring(out, "\n\f3", sizeof(out));
+            concatstring(out, why, sizeof(out));
+        }
+    }
+    return out;
+}
+
+// called by the menu drawing each frame: the text to show now, or NULL
+const char *menuhelptip(bool clicked, float cx, float cy, int &place)
+{
+    place = menuhelpplace;
+    bool fresh = helpfresh;
+    helpfresh = false;
+    if(!fresh || !helphave || menuhelpdelay <= 0)
+    {
+        helplastid[0] = 0;
+        helpshown = false;
+        return NULL;
+    }
+    defformatstring(id, "%s|%s|%s|%s|%s|%s", helppage, helpvar, helpval, helplabel, helpaction, helprowname);
+    // a new option, a click, or the mouse still moving: wait again
+    if(strcmp(id, helplastid) || clicked || (!helpshown && (fabs(cx - helpcx) > 0.004f || fabs(cy - helpcy) > 0.004f)))
+    {
+        copystring(helplastid, id);
+        helpstart = totalmillis;
+        helpcx = cx;
+        helpcy = cy;
+        helpshown = false;
+        return NULL;
+    }
+    if(totalmillis - helpstart < max(menuhelpdelay, 500)) return NULL;
+    const char *text = helpcompose();
+    helpshown = text != NULL;
+    return text;
+}
+
+// the explanation of a setting as the menus show it (for scripts and tests)
+// "menuhelptext VAR [VALUE]", or "menuhelptext @Label" for a button or a row name
+static void menuhelptext(char *var, char *val)
+{
+    string sv, sval, sl, sa, sr, sk;
+    copystring(sv, helpvar); copystring(sval, helpval); copystring(sl, helplabel); copystring(sa, helpaction); copystring(sr, helprowname); copystring(sk, helpkind);
+    helpvar[0] = helpval[0] = helplabel[0] = helpaction[0] = helprowname[0] = helpkind[0] = 0;
+    if(var[0] == '@') copystring(helplabel, var + 1);
+    else if(var[0] == '>') copystring(helpaction, var + 1);
+    else { copystring(helpvar, var); copystring(helpval, val); }
+    const char *t = helpcompose();
+    result(t ? t : "");
+    copystring(helpvar, sv); copystring(helpval, sval); copystring(helplabel, sl); copystring(helpaction, sa); copystring(helprowname, sr); copystring(helpkind, sk);
+}
+COMMAND(menuhelptext, "ss");
+
 //@DOC name and icon are optional
 void guibutton(char *name, char *action, char *icon)
 {
     if(!cgui) return;
     bool hideicon = !icon[0] || !strcmp(icon, "0");
     int ret = cgui->button(name, GUI_BUTTON_COLOR, hideicon ? NULL : icon);
+    helpcontrol(NULL, NULL, name, action);
     if(ret&G3D_UP) 
     {
         updatelater.add().schedule(action[0] ? action : name);
@@ -325,11 +640,13 @@ void guitext(char *name, char *icon)
 {
     bool hideicon = !icon[0] || !strcmp(icon, "0");
     if(cgui) cgui->text(name, hideicon ? GUI_TEXT_COLOR : GUI_BUTTON_COLOR, hideicon ? NULL : icon);
+    if(cgui) helptext(name);
 }
 
 void guititle(char *name)
 {
     if(cgui) cgui->title(name, GUI_TITLE_COLOR);
+    helpendrow();
 }
 
 void guitab(char *name)
@@ -416,7 +733,9 @@ void guicolorswatch(char *var, int *idx)
     if(!cgui) return;
     int i = *idx < 0 ? -1 : clamp(*idx, 0, 9);
     bool selected = getval(var) == i;
-    if(cgui->colorswatch(i, selected)&G3D_UP) updateval(var, i, (char *)"");
+    int ret = cgui->colorswatch(i, selected);
+    helpcontrol(var, intstr(i), NULL, NULL);
+    if(ret&G3D_UP) updateval(var, i, (char *)"");
 }
 
 static float getfval(const char *var)
@@ -452,6 +771,7 @@ void guislider(char *var, int *min, int *max, char *onchange)
 	if(!cgui) return;
     int oldval = getval(var), val = oldval, vmin = *max > INT_MIN ? *min : getvarmin(var), vmax = *max > INT_MIN ? *max : getvarmax(var);
     cgui->slider(val, vmin, vmax, GUI_TITLE_COLOR);
+    helpcontrol(var, NULL, NULL, NULL);
     if(val != oldval) updateval(var, val, onchange);
 }
 
@@ -470,6 +790,7 @@ void guilistslider(char *var, char *list, char *onchange)
     int val = getval(var), oldoffset = vals.length()-1, offset = oldoffset;
     loopv(vals) if(val <= vals[i]) { oldoffset = offset = i; break; }
     cgui->slider(offset, 0, vals.length()-1, GUI_TITLE_COLOR, intstr(val));
+    helpcontrol(var, NULL, NULL, NULL);
     if(offset != oldoffset) updateval(var, vals[offset], onchange);
 }
 
@@ -489,6 +810,7 @@ void guinameslider(char *var, char *names, char *list, char *onchange)
     loopv(vals) if(val <= vals[i]) { oldoffset = offset = i; break; }
     char *label = indexlist(names, offset);
     cgui->slider(offset, 0, vals.length()-1, GUI_TITLE_COLOR, label);
+    helpcontrol(var, NULL, NULL, NULL);
     if(offset != oldoffset) updateval(var, vals[offset], onchange);
     delete[] label;
 }
@@ -545,8 +867,12 @@ void guicheckbox(char *name, char *var, float *on, float *off, char *onchange)
     bool enabled = getfval(var)!=*off;
     float onval = *on || *off ? *on : 1.0f;
     // switching off is always allowed; only turning on can be locked
-    if(!enabled && settinglocked(var, onval)) { cgui->disabledbutton(name, "checkbox_off"); return; }
-    if(cgui->button(name, GUI_BUTTON_COLOR, enabled ? "checkbox_on" : "checkbox_off")&G3D_UP)
+    char onstr[32];
+    helpnumstr(onstr, onval);
+    if(!enabled && settinglocked(var, onval)) { cgui->disabledbutton(name, "checkbox_off"); helpcontrol(var, onstr, name, NULL); return; }
+    int ret = cgui->button(name, GUI_BUTTON_COLOR, enabled ? "checkbox_on" : "checkbox_off");
+    helpcontrol(var, onstr, name, NULL);
+    if(ret&G3D_UP)
     {
         updateval(var, enabled ? *off : onval, onchange);
     }
@@ -556,8 +882,12 @@ void guiradio(char *name, char *var, float *n, char *onchange)
 {
     if(!cgui) return;
     bool enabled = getfval(var)==*n;
-    if(settinglocked(var, *n)) { cgui->disabledbutton(name, enabled ? "radio_on" : "radio_off"); return; }
-    if(cgui->button(name, GUI_BUTTON_COLOR, enabled ? "radio_on" : "radio_off")&G3D_UP)
+    char nstr[32];
+    helpnumstr(nstr, *n);
+    if(settinglocked(var, *n)) { cgui->disabledbutton(name, enabled ? "radio_on" : "radio_off"); helpcontrol(var, nstr, name, NULL); return; }
+    int ret = cgui->button(name, GUI_BUTTON_COLOR, enabled ? "radio_on" : "radio_off");
+    helpcontrol(var, nstr, name, NULL);
+    if(ret&G3D_UP)
     {
         if(!enabled) updateval(var, *n, onchange);
     }
@@ -567,19 +897,40 @@ void guibitfield(char *name, char *var, int *mask, char *onchange)
 {
     int val = getval(var);
     bool enabled = (val & *mask) != 0;
-    if(cgui && cgui->button(name, GUI_BUTTON_COLOR, enabled ? "checkbox_on" : "checkbox_off")&G3D_UP)
+    if(!cgui) return;
+    int ret = cgui->button(name, GUI_BUTTON_COLOR, enabled ? "checkbox_on" : "checkbox_off");
+    helpcontrol(var, intstr(*mask), name, NULL);
+    if(ret&G3D_UP)
     {
         updateval(var, enabled ? val & ~*mask : val | *mask, onchange);
     }
 }
 
+// the setting a text field edits: VAR itself, or the X of "guifield COPY N [X $COPY]"
+static const char *helpfieldvar(const char *var, const char *onchange)
+{
+    static string real;
+    copystring(real, var);
+    char a[MAXSTRLEN], b[MAXSTRLEN];
+    if(sscanf(onchange, " %259s %259s", a, b) != 2 || !isalpha((uchar)a[0])) return real;
+    if(b[0] == '$' && !strcmp(b + 1, var)) copystring(real, a);
+    else
+    {
+        // "settrailcolor trailcolorshotgun (...)": the setting is the second word
+        ident *id = getident(b);
+        if(id && id->type <= ID_SVAR) copystring(real, b);
+    }
+    return real;
+}
+
 //-ve length indicates a wrapped text field of any (approx 260 chars) length, |length| is the field width
 void guifield(char *var, int *maxlength, char *onchange)
-{   
+{
     if(!cgui) return;
     const char *initval = getsval(var);
 	char *result = cgui->field(var, GUI_BUTTON_COLOR, *maxlength ? *maxlength : 12, 0, initval);
-    if(result) updateval(var, result, onchange); 
+    helpcontrol(helpfieldvar(var, onchange), NULL, NULL, NULL, "field");
+    if(result) updateval(var, result, onchange);
 }
 
 // a framed, wrapped text field (at least two lines high), for typing sentences
@@ -591,6 +942,7 @@ void guiinputfield(char *var, int *width, char *onchange)
     guifieldboxed = true;
     char *result = cgui->field(var, GUI_BUTTON_COLOR, -max(abs(*width), 10), 0, initval);
     guifieldboxed = false;
+    helpcontrol(helpfieldvar(var, onchange), NULL, NULL, NULL, "field");
     if(result) updateval(var, result, onchange);
 }
 COMMAND(guiinputfield, "sis");
@@ -609,6 +961,7 @@ void guikeyfield(char *var, int *maxlength, char *onchange)
     if(!cgui) return;
     const char *initval = getsval(var);
     char *result = cgui->keyfield(var, GUI_BUTTON_COLOR, *maxlength ? *maxlength : -8, 0, initval);
+    helpcontrol(helpfieldvar(var, onchange), NULL, NULL, NULL, "keyfield");
     if(result) updateval(var, result, onchange);
 }
 
@@ -619,7 +972,10 @@ void guilist(uint *contents)
 {
     if(!cgui) return;
     cgui->pushlist();
+    helpdepth++;
     execute(contents);
+    helpdepth--;
+    helprowcheck();
     cgui->poplist();
 }
 
@@ -628,8 +984,11 @@ void guialign(int *align, uint *contents)
     if(!cgui) return;
     cgui->pushlist();
     if(*align >= 0) cgui->spring();
+    helpdepth++;
     execute(contents);
-    if(*align == 0) cgui->spring(); 
+    helpdepth--;
+    helprowcheck();
+    if(*align == 0) cgui->spring();
     cgui->poplist();
 }
 
@@ -1427,6 +1786,9 @@ ICOMMAND(settingsearchreload, "", (),
     settingsyn.deletearrays();
     settingvarwords.deletearrays();
     settingindexed = false;
+    loopv(helpentries) { delete[] helpentries[i].key; delete[] helpentries[i].text; }
+    helpentries.setsize(0);
+    helploaded = false;
     buildsettingindex();
     intret(settingindex.length());
 });
@@ -2391,6 +2753,16 @@ static void assistcatalogline(vector<char> &out, const assistitem &it)
         default:
             nformatstring(line, sizeof(line), "%s = \"%s\" (text) : %s%s\n", id->name, *id->storage.s, assistabout(it.var, e), where);
             break;
+    }
+    // what it costs, as the menu explanation says (data/settings-help.txt)
+    const char *cost = helpfind(it.var, true);
+    int ll = strlen(line);
+    if(cost && ll > 0 && line[ll-1] == '\n')
+    {
+        line[ll-1] = 0;
+        concatstring(line, " (performance cost: ", sizeof(line));
+        concatstring(line, cost, sizeof(line));
+        concatstring(line, ")\n", sizeof(line));
     }
     out.put(line, strlen(line));
 }

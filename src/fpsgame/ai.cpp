@@ -230,6 +230,7 @@ namespace ai
 
     bool makeroute(fpsent *d, aistate &b, int node, bool changed, int retries)
     {
+        if(humanbot(d) && navbotready()) return navbotroutenode(d, b, node, changed); // a Human bot: the way of the walk grid (ainavbot.h)
         if(!iswaypoint(d->lastnode)) return false;
 		if(changed && d->ai->route.length() > 1 && d->ai->route[0] == node) return true;
 		if(route(d, d->lastnode, node, d->ai->route, obstacles, retries))
@@ -244,12 +245,14 @@ namespace ai
 
     bool makeroute(fpsent *d, aistate &b, const vec &pos, bool changed, int retries)
     {
+        if(humanbot(d) && navbotready()) return navbotroute(d, b, pos, changed);
         int node = closestwaypoint(pos, SIGHTMIN, true);
         return makeroute(d, b, node, changed, retries);
     }
 
     bool randomnode(fpsent *d, aistate &b, const vec &pos, float guard, float wander)
     {
+        if(humanbot(d) && navbotready()) return navbotrandom(d, b, pos, guard, wander);
         static vector<int> candidates;
         candidates.setsize(0);
         findwaypointswithin(pos, guard, wander, candidates);
@@ -482,7 +485,7 @@ namespace ai
                 }
                 default: break;
             }
-            if(proceed && makeroute(d, b, n.node))
+            if(proceed && (humanbot(d) && navbotready() ? navbotinterest(d, b, n) : makeroute(d, b, n.node)))
             {
                 d->ai->switchstate(b, n.state, n.targtype, n.target);
                 return true;
@@ -538,7 +541,7 @@ namespace ai
                 }
                 default: break;
             }
-            if(proceed && makeroute(d, b, n.node))
+            if(proceed && (humanbot(d) && navbotready() ? navbotinterest(d, b, n) : makeroute(d, b, n.node)))
             {
                 d->ai->switchstate(b, n.state, n.targtype, n.target);
                 return true;
@@ -700,6 +703,7 @@ namespace ai
                 if(check(d, b) || find(d, b)) return 1;
                 if(target(d, b, 4, true)) return 1;
                 if(botmode(d) > 1) { int r = styleinterest(d, b); if(r >= 0) return r; }
+                if(b.target < -1 && humanbot(d)) return navbotnodegoal(d, b); // a node of the walk grid
                 if(iswaypoint(b.target) && vec(waypoints[b.target].o).sub(d->feetpos()).magnitude() > CLOSEDIST)
                     return makeroute(d, b, waypoints[b.target].o) ? 1 : 0;
                 break;
@@ -872,6 +876,7 @@ namespace ai
 
     bool hunt(fpsent *d, aistate &b)
     {
+        if(humanbot(d)) { int r = navbothunt(d, b); if(r >= 0) return r != 0; } // on the walk grid once it is ready
         if(!d->ai->route.empty())
         {
             int n = closenode(d);
@@ -901,6 +906,7 @@ namespace ai
 
     void jumpto(fpsent *d, aistate &b, const vec &pos)
     {
+        if(humanbot(d) && navbotjump(d, b)) return; // on the walk grid: only the jumps of its links (and Tiny Apa's own)
 		vec off = vec(pos).sub(d->feetpos()), dir(off.x, off.y, 0);
         bool sequenced = d->ai->blockseq || d->ai->targseq, offground = d->timeinair && !d->inwater,
             jump = !offground && lastmillis >= d->ai->jumpseed && (sequenced || off.z >= JUMPMIN || lastmillis >= d->ai->jumprand);
@@ -1144,7 +1150,8 @@ namespace ai
             d->move = ad.move;
             d->strafe = ad.strafe;
         }
-        if(botmode(d) > 1) stylesteps(d);
+        if(botmode(d) > 1) { stylesteps(d); netsteps(d); } // Tiny Apa: its moves from the network (botnet 1, ainet.h)
+        if(humanbot(d)) navbotkeys(d, b, result); // on the walk grid: the keys of a jump, a drop, a flight
         findorientation(dp, d->yaw, d->pitch, d->ai->target);
         return result;
     }
@@ -1185,6 +1192,7 @@ namespace ai
 
 	void timeouts(fpsent *d, aistate &b)
 	{
+        if(humanbot(d) && navbottimeouts(d, b)) return; // stuck on the walk grid: a new way, never a suicide
         if(d->blocked)
         {
             d->ai->blocktime += lastmillis-d->ai->lastrun;
@@ -1486,6 +1494,36 @@ namespace ai
             }
 
         }
+    }
+
+    int navbotmode(fpsent *d) { return d && d->ai ? botmode(d) : 0; } // the walk grid (ainav.cpp) is made only for Human and Tiny Apa bots
+    // what the walk grid (ainavbot.h) asks of a Human bot: a player it perceives (an enemy it sees, a team mate in its view),
+    // whether Tiny Apa moves on its own (1 it holds a place, 2 a few steps another way, 4 it walks to a waypoint), Tiny
+    // Apa's own jumps, and its view turned for a jump (its next gesture starts from there)
+    bool navbotsees(fpsent *d, fpsent *e)
+    {
+        if(!d->ai || !e || e == d) return false;
+        if(targetable(d, e)) { aiperceived *p = findperceived(d, e); return p && p->visible; }
+        vec dp = d->headpos(), ep = e->headpos(), to = vec(ep).sub(dp), hit;
+        float dist = to.magnitude();
+        if(dist < 1) return true;
+        vec f;
+        vecfromyawpitch(d->yaw, 0, 1, 0, f);
+        return f.dot(to)/dist >= 0.5f && raycubelos(dp, ep, hit);
+    }
+    int navbotstyle(fpsent *d)
+    {
+        if(!stylebot(d)) return 0;
+        aistyle *s = style(d);
+        if(!s || s->owner != d->ai || s->life != d->lifesequence) return 0;
+        return (s->mvmode == STYLE_MV_HOLD || s->mvmode == STYLE_MV_GUARD || s->covermode ? 1 : 0) | (lastmillis < s->escuntil ? 2 : 0) | (iswaypoint(s->walkto) ? 4 : 0);
+    }
+    bool navbotstylejump(fpsent *d, aistate &b) { return stylebot(d) && stylejump(d, b, false, 0); }
+    void navbotstyleview(fpsent *d)
+    {
+        if(!stylebot(d)) return;
+        aistyle *s = style(d);
+        if(s && s->owner == d->ai && s->phase == STYLE_GESTURE) s->phase = STYLE_NONE;
     }
 }
 

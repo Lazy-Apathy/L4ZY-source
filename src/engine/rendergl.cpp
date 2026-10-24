@@ -3472,3 +3472,55 @@ void demoxraydraw()
     glBindTexture(GL_TEXTURE_2D, oldtex0);
     glActiveTexture_(GLenum(oldactive));
 }
+
+// Lines between points of the world, drawn over the finished image like the
+// HUD (demo hitboxes): pts holds pairs of points; projected with the camera of
+// the frame without the DLAA/TAA sub-pixel shift, cut at the near plane, thick
+// pixels wide, in HUD pixel coordinates (w x h).
+void hudworldlines(const vec *pts, int n, int w, int h, int color, int alpha, float thick)
+{
+    if(n < 2 || w < 1 || h < 1 || alpha <= 0) return;
+    matrix4 proj, cp;
+    proj.perspective(fovy, aspect, nearplane, farplane);
+    cp.muld(proj, cammatrix);
+    float half = max(thick, 0.5f)*0.5f;
+    hudnotextureshader->set();
+    gle::colorub((color>>16)&0xFF, (color>>8)&0xFF, color&0xFF, uchar(min(alpha, 255)));
+    gle::defvertex(2);
+    gle::begin(GL_TRIANGLES);
+    for(int i = 0; i+1 < n; i += 2)
+    {
+        vec4 a, b;
+        cp.transform(pts[i], a);
+        cp.transform(pts[i+1], b);
+        if(a.w < nearplane && b.w < nearplane) continue;
+        if(a.w < nearplane) { float k = (nearplane - a.w)/(b.w - a.w); a = vec4(a.x + (b.x-a.x)*k, a.y + (b.y-a.y)*k, a.z + (b.z-a.z)*k, nearplane); }
+        else if(b.w < nearplane) { float k = (nearplane - b.w)/(a.w - b.w); b = vec4(b.x + (a.x-b.x)*k, b.y + (a.y-b.y)*k, b.z + (a.z-b.z)*k, nearplane); }
+        float ax = (a.x/a.w*0.5f + 0.5f)*w, ay = (0.5f - a.y/a.w*0.5f)*h,
+              bx = (b.x/b.w*0.5f + 0.5f)*w, by = (0.5f - b.y/b.w*0.5f)*h;
+        float dx = bx - ax, dy = by - ay, len = sqrtf(dx*dx + dy*dy);
+        if(len < 1e-3f) continue;
+        float nx = -dy/len*half, ny = dx/len*half;
+        gle::attribf(ax + nx, ay + ny); gle::attribf(ax - nx, ay - ny); gle::attribf(bx + nx, by + ny);
+        gle::attribf(bx + nx, by + ny); gle::attribf(ax - nx, ay - ny); gle::attribf(bx - nx, by - ny);
+    }
+    gle::end();
+    hudshader->set();
+}
+
+// The HUD pixel position (w x h) of a point of the world, with the camera of
+// the frame as in hudworldlines (names of the shooters at their shots); false
+// behind the camera.
+bool hudworldpoint(const vec &p, int w, int h, float &x, float &y)
+{
+    if(w < 1 || h < 1) return false;
+    matrix4 proj, cp;
+    proj.perspective(fovy, aspect, nearplane, farplane);
+    cp.muld(proj, cammatrix);
+    vec4 a;
+    cp.transform(p, a);
+    if(a.w < nearplane) return false;
+    x = (a.x/a.w*0.5f + 0.5f)*w;
+    y = (0.5f - a.y/a.w*0.5f)*h;
+    return true;
+}

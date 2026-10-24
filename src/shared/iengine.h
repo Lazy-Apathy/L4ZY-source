@@ -317,6 +317,8 @@ extern void disablezoom();
 extern float getzoomprogress();
 extern void forcezoom(float progress);
 extern void hudrect(float x, float y, float w, float h, int color, int alpha = 255);
+extern void hudworldlines(const vec *pts, int n, int w, int h, int color, int alpha, float thick);
+extern bool hudworldpoint(const vec &p, int w, int h, float &x, float &y);
 
 extern vec calcavatarpos(const vec &pos, float dist);
 extern vec calcmodelpreviewpos(const vec &radius, float &yaw);
@@ -630,6 +632,8 @@ struct g3d_gui
     virtual char *field(const char *name, int color, int length, int height = 0, const char *initval = NULL, int initmode = EDITORFOCUSED) = 0;
     virtual void textbox(const char *text, int width, int height, int color = 0xFFFFFF) = 0;
     virtual bool mergehits(bool on) = 0;
+    // the control just laid out is under the mouse (drawing pass only)
+    virtual bool lasthit() { return false; }
 };
 
 struct g3d_callback

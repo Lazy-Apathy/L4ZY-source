@@ -1466,6 +1466,7 @@ namespace server
     }
 
     int demotime() { return gamemillis; }
+    int demopackettime() { return demoplayback ? nextplayback : gamemillis; } // the packet being played (demohd.cpp)
 
     static bool reopenplayback()
     {
@@ -1515,6 +1516,9 @@ namespace server
         int prevmillis = gamemillis;
         if(millis < gamemillis)
         {
+#ifndef STANDALONE
+            demohd::seekkeep(); // going back restarts the demo: the player followed is kept
+#endif
             restartdemoplayback();
             if(!demoplayback) return;
         }
@@ -1523,6 +1527,9 @@ namespace server
             gamemillis = millis;
             readdemo();
         }
+#ifndef STANDALONE
+        demohd::seekrefollow();
+#endif
         if(gamemillis != prevmillis)
         {
             if(!interm) sendf(-1, 1, "ri2", N_TIMEUP, max((gamelimit - gamemillis)/1000, 1));

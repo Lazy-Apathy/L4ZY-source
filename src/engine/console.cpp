@@ -376,7 +376,7 @@ static void copyoverlay(int mode) // 0 all, 1 visible, 2 selection
 
 int rendercommand(int x, int y, int w)
 {
-    if(commandmillis < 0) return 0;
+    if(commandmillis < 0 || game::demotimeedit()) return 0; // a time typed in the demo controls is drawn there
 
     defformatstring(s, "%s %s", commandprompt ? commandprompt : ">", commandbuf);
     int width, height;

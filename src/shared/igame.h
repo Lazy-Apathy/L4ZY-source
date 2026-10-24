@@ -64,6 +64,7 @@ namespace game
     extern void physicstrigger(physent *d, bool local, int floorlevel, int waterlevel, int material = 0);
     extern void bounced(physent *d, const vec &surface);
     extern void edittrigger(const selinfo &sel, int op, int arg1 = 0, int arg2 = 0, int arg3 = 0, const VSlot *vs = NULL);
+    extern void worldchanged(const ivec &bbmin, const ivec &bbmax);
     extern void vartrigger(ident *id);
     extern void dynentcollide(physent *d, physent *o, const vec &dir);
     extern const char *getclientmap();
@@ -97,6 +98,8 @@ namespace game
     extern void skipkilllog(int n);
     extern bool demobarcursor();
     extern bool demobarkey(int code, bool isdown);
+    extern bool demolookcursor(int &x, int &y);
+    extern bool demotimeedit();
     extern bool demoxrayactive();
     extern void renderdemoxray();
     extern void g3d_gamemenus();

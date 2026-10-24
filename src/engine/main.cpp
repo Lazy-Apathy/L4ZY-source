@@ -745,6 +745,7 @@ static void syncinputgrab()
         {
             int cx, cy;
             windowcenter(cx, cy);
+            game::demolookcursor(cx, cy); // a demo: back where the cursor was before looking around
             SDL_WarpMouseInWindow(screen, cx, cy);
         }
         ignoremousemotion();

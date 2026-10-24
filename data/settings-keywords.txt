@@ -147,6 +147,9 @@
 =robot: bot bots botperception
 =robots: bot bots botperception
 =forme: form botstyleform
+=fatigue: tired botstyletired
+=fatigues: tired botstyletired
+=echauffement: warm botstylewarmup
 
 # --- extra words on settings ---
 soundvol: son general principal master volume
@@ -231,6 +234,13 @@ demohdvis: demo hd visibilite ennemis vus ecran enregistrer etude visibility rec
 demoxraystyle: demo rayons x xray x-ray travers murs silhouette contour voile couleur joueurs wallhack style
 demoxraystart: demo rayons x xray x-ray debut ouverture demarrage allume automatique travers murs
 spectatorlist: spectateur spec liste joueurs noms droite suivre cliquer choisir qui regarder
+demohitbox: demo hitbox hit box boite cylindre zone touche vraie collision tir touche rate a cote modele
+demohitboxshots: demo hitbox tirs trait tir impact point touche ligne fantome moment du tir nom tireur qui tire
+demohitboxuncertain: demo hitbox incertain uncertain rose rouge desaccord marge bord seuil precision proche triche
+demohitboxothercolour: demo hitbox couleur victimes tirs des autres bleu clair gris
+demohitboxdeath: demo hitbox mort tue victime figee reste endroit tir mortel juger triche duree secondes corps
+demopov: demo pov point de vue vue joueur suivi vraie vision client ping position adversaire decalage latence verite camera libre view kill feed temps de reaction estimee estimated locale
+demolookkey: demo regarder tourner tete souris bouton milieu maintenir curseur camera libre touche
 killfeedvs: compteur duel contre tue morte
 showvs: compteur duel contre tue morte
 showlang: langues langue
@@ -286,7 +296,7 @@ lookaoradius: ombre coins taille
 invmouse: inverser souris
 consize: console lignes taille
 miniconfilter: chat console
-demokeep: demos garder nombre
+demokeep: demos garder nombre combien conserver effacer anciennes
 hdlivedelay: retard spectateur direct visee hd fluide
 matchkeep: videos garder nombre
 flagtimer: drapeau chrono compteur temps ctf porteur
@@ -302,6 +312,8 @@ bilinear: filtrage bilineaire textures lisse
 trilinear: filtrage trilineaire mipmaps textures
 gui2d: menus 2d plat interface
 guiclicktab: onglet clic menus
+menuhelpdelay: explication infobulle aide survol souris delai attente bulle tooltip hover help
+menuhelpplace: explication infobulle aide position bas ecran souris bulle tooltip
 guifadein: fondu apparition menus
 scr_w: resolution largeur ecran taille pixels
 scr_h: resolution hauteur ecran taille pixels
@@ -401,9 +413,17 @@ showspectators: tableau scores spectateurs
 highlightscore: tableau scores surligner moi
 showconnecting: tableau scores connexion joueurs
 # --- bots ---
-botperception: bots classique tiny apa voient murs travers triche wallhack adversaires ia robots realiste style joueur pro visee serveur ligne nom apathy ajouter master
+botperception: bots classique tiny apa voient murs travers triche wallhack adversaires ia robots realiste style joueur pro visee serveur ligne nom ajouter master
 botstylelevel: bots niveau pourcentage force difficulte joueur pro facile difficile
 botstyleform: bots forme jour variation partie regularite
+botstyletired: bots fatigue fatigues fatiguee tard nuit soir forme parties moins precis
+botstylewarmup: bots echauffement echauffer debut partie premieres minutes demarrage froid
+botnet: bots reseau neurones appris apprentissage imitation deplacements esquive pas de cote sauts bouger comme moi style joueur tiny apa ia chemin
+botnavgrid: bots chemins grille marche waypoints trajets navigation deplacement coince bloque suicide sauts jump pad carte sans waypoints
+navbuildshare: bots grille construction calcul part image fps saccade chargement carte attente
+navcachemb: bots grille cache disque memoire taille mo cartes
+navvariety: bots chemins variete trajets differents itineraires couloir
+botnavsafe: bots chute fosse vide lave mort tomber tombent bord prudence prudent precipice sauts refus passerelle
 # --- HUD pieces (Adjust pages) ---
 ammobaralign: munitions alignement
 ammobarhorizontal: munitions horizontal
