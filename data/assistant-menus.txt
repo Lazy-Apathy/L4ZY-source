@@ -44,6 +44,7 @@
 4. {if "Borderless" chosen (windowmode 2) and not (fsaa > 0) and "Borderless at the chosen resolution (stretched, Windows unchanged)" ticked (borderlessres)} checkbox "Keep proportions (black bars)" borderlessaspect
 5. {if "Borderless" chosen (windowmode 2) and not "Borderless at the chosen resolution (stretched, Windows unchanged)" ticked (borderlessres) or fsaa > 0} status: Borderless: the game uses the monitor size (<desktopw>x<desktoph>).
 6. {if not ("Borderless" chosen (windowmode 2) and not "Borderless at the chosen resolution (stretched, Windows unchanged)" ticked (borderlessres) or fsaa > 0)} text "Resolution: <scr_w>x<scr_h> (Resolution tab)" (computed)
+7. {if getvarmax(permonitordpi)} checkbox "Sharp on a second screen with another scale (after a restart)" permonitordpi
 == Picture {only if tab "Screen" open}
 1. slider "Field of View (default: 100)" fov
 2. slider "Gamma (default: 100)" gamma
@@ -69,12 +70,13 @@
 
 ## gfx | Graphics | Options > Graphics
 == (top)
-1. button "General" : concat gfxtab "=" 0 | button "Ray tracing" : concat gfxtab "=" 1 | button "Performance" : concat gfxtab "=" 5 | button "HDR screen" : concat gfxtab "=" 3 | button "Classic" : concat gfxtab "=" 4
+1. button "General" : concat gfxtab "=" 0 | button "Ray tracing" : concat gfxtab "=" 1 | button "Path tracing" : concat gfxtab "=" 2 | button "Performance" : concat gfxtab "=" 5 | button "HDR screen" : concat gfxtab "=" 3 | button "Classic" : concat gfxtab "=" 4
 == Lighting {only if tab "General" open}
-1. choice hwrt: "Classic (no RT)"=0, "Ray tracing"=1
+1. choice GFX_light: "Classic (no RT)"=0, "Ray tracing"=1, "Path tracing"=2
 2. {if hwrtraison() != ""} status: <hwrtraison>
-3. {if "Ray tracing" chosen (hwrt 1) and RT lighting running} status: Ray-traced lighting is running. Its settings: Ray tracing tab.
-4. {if "Ray tracing" chosen (hwrt 1) and not (RT lighting running)} status: Ray tracing chosen, but not running yet (no map, or it failed: see console).
+3. {if hwrt on and RT lighting running and hwrtpt on and not hwrtptnobounce on and hwrtpteffective()} status: Path tracing is running. Its settings: Path tracing tab.
+4. {if hwrt on and RT lighting running and not (hwrtpt on and not hwrtptnobounce on and hwrtpteffective())} status: Ray-traced lighting is running. Its settings: Ray tracing tab.
+5. {if hwrt on and not (RT lighting running)} status: Ray tracing chosen, but not running yet (no map, or it failed: see console).
 == Anti-Aliasing {only if tab "General" open}
 1. checkbox "FXAA in Native (softer)" lookfxaa | "MSAA (Classic only)" choice fsaa: "Off"=<fsaa>, "2x"=2, "4x"=4, "8x"=8
 2. {if DLSS/FSR built in} choice hwrtngxmode: "Native"=0, "DLAA"=1, "DLSS Quality"=2, "DLSS Balanced"=3, "DLSS Performance"=4
@@ -93,12 +95,21 @@
 1. {if tab "General" open} (checkbox "Blood" blood | checkbox "Hide dead players" hidedead)
 2. {if tab "General" open} checkbox "Ragdoll deaths" ragdoll | {if tab "General" open and "Ragdoll deaths" ticked (ragdoll)} checkbox "Keep after respawn" ragdollmillis on=10000
 3. {if tab "General" open} slider "Ragdoll push (velocity multiplier)" deadpush
-4. {if tab "Ray tracing" open and not "Ray tracing" chosen (hwrt 1)} status: Ray tracing is off: choose it in General > Lighting.
-== Lights {only if tab "Ray tracing" open and not (not "Ray tracing" chosen (hwrt 1))}
-1. checkbox "Teleporters glow and light the room" hwrtteleportlight
-2. checkbox "Jump pads glow and light the room" hwrtjumppadlight
-3. checkbox "Weapons light the scene (flashes, rockets, explosions)" hwrtdynlights
-== Shadows {only if tab "Ray tracing" open and not (not "Ray tracing" chosen (hwrt 1))}
+4. {if tab "Ray tracing" open and not hwrt on} status: Ray tracing is off: choose it in General > Lighting.
+5. {if tab "Ray tracing" open and not (not hwrt on)} (button "Lights" : concat gfxrttab "=" 0 | button "Shadows" : concat gfxrttab "=" 1 | button "Surfaces" : concat gfxrttab "=" 2)
+== Lights {only if tab "Ray tracing" open and tab "Lights" open and hwrt on}
+1. "Light sources" choice hwrtptlogical: "Map lamps"=0, "Scene lights"=1
+2. {if "Scene lights" chosen (hwrtptlogical 1)} (field "Glowing textures strength" hwrtpttexpower | button "-" : hwrtpttexpower (maxf 0.25 (+fround $hwrtpttex... | button "+" : hwrtpttexpower (minf 4 (+fround $hwrtpttexpow...)
+3. {if "Scene lights" chosen (hwrtptlogical 1)} "Glowing textures reach" choice hwrtpttexreach: "64"=64, "128 (default)"=128, "256"=256, "512"=512
+4. {if "Scene lights" chosen (hwrtptlogical 1)} "Group glowing textures" choice hwrtpttexgroup: "Off"=0, "24"=24, "32 (default)"=32, "64"=64
+5. {if "Scene lights" chosen (hwrtptlogical 1)} checkbox "Torch light follows the flame" hwrtptflames
+6. {if "Scene lights" chosen (hwrtptlogical 1)} checkbox "Torches out of view keep flickering" hwrtptflamehidden
+7. {if "Scene lights" chosen (hwrtptlogical 1)} checkbox "Lamps behind windows are lights" hwrtptlogicwindows
+8. checkbox "Teleporters glow and light the room" hwrtteleportlight
+9. checkbox "Jump pads glow and light the room" hwrtjumppadlight
+10. checkbox "Weapons light the scene (flashes, rockets, explosions)" hwrtdynlights
+11. checkbox "Every lamp of the map lights (spotlights, lava, glowing auras)" hwrtlampsall
+== Shadows {only if tab "Ray tracing" open and tab "Shadows" open and hwrt on}
 1. "My own shadow (first person)" choice hwrtshadowself: "None"=0, "Sun (default)"=1, "+ glows"=2, "+ nearby lamps"=3, "+ sky"=4
 2. "Shadows of the others" choice hwrtshadowothers: "None"=0, "Sun and sky"=1, "+ glows (default)"=2, "+ map lamps"=3
 3. checkbox "Weapon smoke casts shadows" hwrtsmokeshadow
@@ -110,32 +121,44 @@
 9. {if "On (default)" chosen (hwrtsoftshadows 2) and "On (NRD SIGMA, default)" chosen (hwrtsoftsigma 1) and not "NRD (stronger, with Native, DLSS and FSR)" chosen (hwrtnrd 1)} status: Needs the NRD denoiser (Performance > Advanced).
 10. {if "On (default)" chosen (hwrtsoftshadows 2) and "On (NRD SIGMA, default)" chosen (hwrtsoftsigma 1)} "Denoiser steadiness" choice hwrtsoftsigmahistory: "0"=0, "3"=3, "5 (default)"=5, "7"=7
 == Surfaces
-1. {if tab "Ray tracing" open and not (not "Ray tracing" chosen (hwrt 1))} checkbox "Reflections on water and reflective surfaces" hwrtreflections
-2. {if tab "Ray tracing" open and not (not "Ray tracing" chosen (hwrt 1))} checkbox "Animated waves on water (ripples in the RT reflections)" hwrtwaterwaves
-3. {if tab "Ray tracing" open and not (not "Ray tracing" chosen (hwrt 1)) and "Animated waves on water (ripples in the RT reflections)" ticked (hwrtwaterwaves) and not "Reflections on water and reflective surfaces" ticked (hwrtreflections)} status: Needs the reflections above.
-4. {if tab "Ray tracing" open and not (not "Ray tracing" chosen (hwrt 1)) and "Animated waves on water (ripples in the RT reflections)" ticked (hwrtwaterwaves)} (field "Wave strength" waterwaveamp | button "-" : waterwaveamp (+fround $waterwaveamp -0.25) | button "+" : waterwaveamp (+fround $waterwaveamp 0.25) | field "Speed" waterwavespeed | button "-" : waterwavespeed (+fround $waterwavespeed -0.25) | button "+" : waterwavespeed (+fround $waterwavespeed 0.25))
-5. {if tab "Ray tracing" open and not (not "Ray tracing" chosen (hwrt 1)) and "Animated waves on water (ripples in the RT reflections)" ticked (hwrtwaterwaves)} "Wave detail" choice waterwavesize: "64"=64, "128 (default)"=128, "256"=256
-6. {if tab "Ray tracing" open and not (not "Ray tracing" chosen (hwrt 1))} checkbox "Shine of lamps and sun on glossy surfaces" hwrtspecular
-7. {if tab "Ray tracing" open and not (not "Ray tracing" chosen (hwrt 1))} checkbox "Smooth lighting across faceted floors and walls" hwrtsmoothnormals
-8. {if tab "Performance" open and not "Ray tracing" chosen (hwrt 1)} status: Ray tracing is off: choose it in General > Lighting.
+1. {if tab "Ray tracing" open and tab "Surfaces" open and hwrt on} checkbox "Reflections on water and reflective surfaces" hwrtreflections
+2. {if tab "Ray tracing" open and tab "Surfaces" open and hwrt on} checkbox "Animated waves on water (ripples in the RT reflections)" hwrtwaterwaves
+3. {if tab "Ray tracing" open and tab "Surfaces" open and hwrt on and "Animated waves on water (ripples in the RT reflections)" ticked (hwrtwaterwaves) and not "Reflections on water and reflective surfaces" ticked (hwrtreflections)} status: Needs the reflections above.
+4. {if tab "Ray tracing" open and tab "Surfaces" open and hwrt on and "Animated waves on water (ripples in the RT reflections)" ticked (hwrtwaterwaves)} (field "Wave strength" waterwaveamp | button "-" : waterwaveamp (+fround $waterwaveamp -0.25) | button "+" : waterwaveamp (+fround $waterwaveamp 0.25) | field "Speed" waterwavespeed | button "-" : waterwavespeed (+fround $waterwavespeed -0.25) | button "+" : waterwavespeed (+fround $waterwavespeed 0.25))
+5. {if tab "Ray tracing" open and tab "Surfaces" open and hwrt on and "Animated waves on water (ripples in the RT reflections)" ticked (hwrtwaterwaves)} "Wave detail" choice waterwavesize: "64"=64, "128 (default)"=128, "256"=256
+6. {if tab "Ray tracing" open and tab "Surfaces" open and hwrt on} checkbox "Shine of lamps and sun on glossy surfaces" hwrtspecular
+7. {if tab "Ray tracing" open and tab "Surfaces" open and hwrt on} checkbox "Smooth lighting across faceted floors and walls" hwrtsmoothnormals
+8. {if tab "Path tracing" open and not hwrt on or not hwrtpt on or hwrtptnobounce on} status: Path tracing is off: choose it in General > Lighting.
+== Bounces {only if tab "Path tracing" open and not (not hwrt on or not hwrtpt on or hwrtptnobounce on)}
+1. field "Bounce strength" hwrtptbouncegain | button "-" : hwrtptbouncegain (maxf 0 (+fround $hwrtptboun... | button "+" : hwrtptbouncegain (minf 2 (+fround $hwrtptboun... | button "Soft (1)" : hwrtptbouncegain 1 | button "Strong (1.5)" : hwrtptbouncegain 1.5
+2. checkbox "Steady light while moving" hwrtptskypixel
+== Sky {only if tab "Path tracing" open and not (not hwrt on or not hwrtpt on or hwrtptnobounce on)}
+1. checkbox "Sky light in the shade" hwrtptskyscale
+2. {if hwrtptskyscale != 0} checkbox "Use the map's sky strength" hwrtptskyforce on=0 off=1
+3. {if hwrtptskyscale != 0 and "Use the map's sky strength" ticked (hwrtptskyforce)} (field "Sky strength" hwrtptskyratio | button "-" : hwrtptskyratio (maxf 0.05 (+fround $hwrtptsky... | button "+" : hwrtptskyratio (minf 1 (+fround $hwrtptskyrat... | button "Hazy (0.3)" : hwrtptskyratio 0.3 | button "Clear (0.13)" : hwrtptskyratio 0.13)
+4. {if hwrtptskyscale != 0} "Sky light colour" choice hwrtptskyhue: "Map sky colour (default)"=1, "Sky picture"=0
+5. {if hwrtptskyscale != 0} checkbox "Extra ray toward the bright sky" hwrtptskyis
+== Glass
+1. {if tab "Path tracing" open and not (not hwrt on or not hwrtpt on or hwrtptnobounce on)} checkbox "Light through leaves and see-through parts" hwrtptglass
+2. {if tab "Performance" open and not hwrt on} status: Ray tracing is off: choose it in General > Lighting.
 == Profile
-1. {if tab "Performance" open and not (not "Ray tracing" chosen (hwrt 1))} choice GFX_prof: "Ultra"=0, "High"=1, "Medium"=2, "Low"=3, "Custom"=4
+1. {if tab "Performance" open and not (not hwrt on)} choice GFX_prof: "Ultra"=0, "High"=1, "Medium"=2, "Low"=3, "Custom"=4
 2. {if tab "Performance" open} (button "Main choices" : concat gfxperftab "=" 0 | button "Advanced: sky, lamps, textures" : concat gfxperftab "=" 1)
-3. {if tab "Performance" open and tab "Main choices" open and "Ray tracing" chosen (hwrt 1)} "RT quality" choice hwrtquality: "Full (best)"=2, "Half sky"=1, "Half sky, 1 glow"=0
-4. {if tab "Performance" open and tab "Main choices" open and "Ray tracing" chosen (hwrt 1)} "DLSS model" choice hwrtdlsscnn: "Transformer (sharper, slower)"=0, "CNN (faster, softer)"=1
-5. {if tab "Performance" open and tab "Main choices" open and "Ray tracing" chosen (hwrt 1)} "Leaves" choice hwrtskyopaque: "See-through (exact)"=0, "Solid (faster under trees)"=1
-6. {if tab "Performance" open and tab "Main choices" open and "Ray tracing" chosen (hwrt 1)} "NRD denoiser" choice hwrtnrdlight: "Full"=0, "Light (faster)"=1, "Lightest (more flicker)"=2
-7. {if tab "Performance" open and tab "Main choices" open and "Ray tracing" chosen (hwrt 1)} "Still models" choice hwrtvelstatic: "Drawn again (exact)"=0, "From depth (less CPU)"=1
-8. {if tab "Performance" open and tab "Main choices" open and "Ray tracing" chosen (hwrt 1)} "Sky reach" choice hwrtskyrange: "Full"=0, "1024"=1024, "512"=512, "256"=256
-9. {if tab "Performance" open and tab "Main choices" open and "Ray tracing" chosen (hwrt 1)} "Adaptive rays" choice hwrtrtadapt: "Off"=0, "On (fewer rays at edges, far, in motion)"=1
+3. {if tab "Performance" open and tab "Main choices" open and hwrt on} "RT quality" choice hwrtquality: "Full (best)"=2, "Half sky"=1, "Half sky, 1 glow"=0
+4. {if tab "Performance" open and tab "Main choices" open and hwrt on} "DLSS model" choice hwrtdlsscnn: "Transformer (sharper, slower)"=0, "CNN (faster, softer)"=1
+5. {if tab "Performance" open and tab "Main choices" open and hwrt on} "Leaves" choice hwrtskyopaque: "See-through (exact)"=0, "Solid (faster under trees)"=1
+6. {if tab "Performance" open and tab "Main choices" open and hwrt on} "NRD denoiser" choice hwrtnrdlight: "Full"=0, "Light (faster)"=1, "Lightest (more flicker)"=2
+7. {if tab "Performance" open and tab "Main choices" open and hwrt on} "Still models" choice hwrtvelstatic: "Drawn again (exact)"=0, "From depth (less CPU)"=1
+8. {if tab "Performance" open and tab "Main choices" open and hwrt on} "Sky reach" choice hwrtskyrange: "Full"=0, "1024"=1024, "512"=512, "256"=256
+9. {if tab "Performance" open and tab "Main choices" open and hwrt on} "Adaptive rays" choice hwrtrtadapt: "Off"=0, "On (fewer rays at edges, far, in motion)"=1
 == Sky light {only if tab "Performance" open and tab "Advanced: sky, lamps, textures" open}
 1. {if NRD built in} "Sky light denoiser" choice hwrtnrd: "Built-in filter"=0, "NRD (stronger, with Native, DLSS and FSR)"=1
 2. {if NRD built in and hwrtnrdfallback() = 1 and RT lighting running} status: NRD is unavailable here: the built-in filter is used.
-3. {if "Ray tracing" chosen (hwrt 1)} "Rays per pixel (NRD)" choice hwrtskyrays: "1"=1, "2"=2, "3"=3, "4"=4
-4. {if "Ray tracing" chosen (hwrt 1)} slider "Built-in filter: smoothing over frames (default: 32, 0 = off)" hwrtskytemporal
-5. {if "Ray tracing" chosen (hwrt 1)} checkbox "Blur between neighbouring pixels (both denoisers)" hwrtskyfilter
-6. {if "Ray tracing" chosen (hwrt 1)} checkbox "Draw the sun as a disk (instead of the map's sky picture)" hwrtsundisk
-== Lamps and textures {only if tab "Performance" open and tab "Advanced: sky, lamps, textures" open and "Ray tracing" chosen (hwrt 1)}
+3. {if hwrt on} "Rays per pixel (NRD)" choice hwrtskyrays: "1"=1, "2"=2, "3"=3, "4"=4
+4. {if hwrt on} slider "Built-in filter: smoothing over frames (default: 32, 0 = off)" hwrtskytemporal
+5. {if hwrt on} checkbox "Blur between neighbouring pixels (both denoisers)" hwrtskyfilter
+6. {if hwrt on} checkbox "Draw the sun as a disk (instead of the map's sky picture)" hwrtsundisk
+== Lamps and textures {only if tab "Performance" open and tab "Advanced: sky, lamps, textures" open and hwrt on}
 1. "Lamps with a shadow" choice hwrtdlights: "1"=1, "2"=2, "3"=3, "4"=4
 2. slider "Glowing lights traced (teleporters, lava; default: 8)" hwrtglowdlights
 3. "Texture upscaling" choice hwrtdiffupscale: "Bicubic"=2, "Lanczos (sharper)"=3, "Nearest"=0
@@ -376,7 +399,7 @@ also: Chat Translation
 
 ## record | Recording | Options > Recording
 == (top)
-1. button "Match videos" : concat recordtab "=" 0 | button "Demos (HD aim)" : concat recordtab "=" 1 | button "Demo playback" : concat recordtab "=" 3
+1. button "Match videos" : concat recordtab "=" 0 | button "Demos (HD aim)" : concat recordtab "=" 1 | button "Demo playback" : concat recordtab "=" 3 | button "Demo analysis" : concat recordtab "=" 4
 == Match videos {only if tab "Match videos" open}
 1. {if matchrecord on} button "Match Recording: ON" : togglematchrecord
 2. {if not (matchrecord on)} button "Match Recording: OFF" : togglematchrecord
@@ -396,7 +419,7 @@ also: Chat Translation
 7. slider "Live HD spectating delay in ms (same for every player)" hdlivedelay
 == Saved demos {only if tab "Demos (HD aim)" open}
 1. button "<localdemofolder>" : openfolder demo
-2. {if numlocaldemos() > 0 and repeated for each i (count known in game: <numlocaldemos>)} (text "<localdemoname $i>" | button "Play" : playlocaldemo <i> | button "Extract" : localdemoextract <i>)
+2. {if numlocaldemos() > 0 and repeated for each i (count known in game: <numlocaldemos>)} (text "<localdemoname $i>" | button "Play" : playlocaldemo <i> | button "Extract" : localdemoextract <i>) | {if numlocaldemos() > 0 and repeated for each i (count known in game: <numlocaldemos>) and <DA_suspect>} button "Mark as checked" : demoanalysecheck (localdemostem <i>)
 3. {if not (numlocaldemos() > 0)} note: No Local Demos Yet
 == Watching demos {only if tab "Demo playback" open}
 1. "Followed player's view" choice demopov: "As their game showed them"=1, "Real positions"=0
@@ -405,6 +428,65 @@ also: Chat Translation
 4. "Hitbox of a killed player" choice demohitboxdeath: "Off"=0, "1 s"=1000, "1.5 s"=1500, "2 s"=2000, "3 s"=3000
 5. "Uncertain (pink) up to" choice demohitboxuncertain: "0.25 unit"=0.25, "0.5 unit"=0.5, "1 unit"=1, "Off (all red)"=0
 6. "Victims of the others' shots" choice demohitboxothercolour: "Light blue"=8440063, "Grey"=8160140, "Cyan"=6353151, "Green"=4259712, "Purple"=12615935
+== Demo analysis {only if tab "Demo playback" open and "Demo analysis" ticked (demoanalysis) and demoanalyseplaying()}
+1. button "Analyze this demo..." > page demoanalysis
+== Indications of cheating in demos {only if tab "Demo analysis" open}
+1. checkbox "Demo analysis" demoanalysis
+2. {if "Demo analysis" ticked (demoanalysis)} checkbox "History of the players after each recorded game" demoanalysishistory
+3. {if "Demo analysis" ticked (demoanalysis)} checkbox "Player stats from the recorded games" demoanalysisstats
+4. {if "Demo analysis" ticked (demoanalysis)} checkbox "Analyze each recorded game when it ends" demoanalysisauto
+5. {if "Demo analysis" ticked (demoanalysis)} field "Line of sight per frame (ms)" demoanalysisms
+6. {if "Demo analysis" ticked (demoanalysis)} field "Shortest game analyzed (s)" demoanalysisminsecs
+7. {if "Demo analysis" ticked (demoanalysis)} button "Open the last analysis..." > page demoanalysis | {if "Demo analysis" ticked (demoanalysis) and "Player stats from the recorded games" ticked (demoanalysisstats)} button "Player stats..." > page playerstats
+== Alert levels (default: the studies) {only if tab "Demo analysis" open and "Demo analysis" ticked (demoanalysis)}
+1. button "Hitbox, clock, movement" : concat DA_set "=" 0 | button "Aim" : concat DA_set "=" 1 | button "Hidden enemies" : concat DA_set "=" 2 | button "Walls, lag, air" : concat DA_set "=" 4 | button "Names" : concat DA_set "=" 3 | button "Player stats" : concat DA_set "=" 5
+2. {if tab "Hitbox, clock, movement" open} field "Hitbox: hits checked, at least" demoanalysishitboxhits
+3. {if tab "Hitbox, clock, movement" open} field "Hitbox: share off the body (%)" demoanalysishitboxshare
+4. {if tab "Hitbox, clock, movement" open} field "Hitbox: median distance (units)" demoanalysishitboxdist
+5. {if tab "Hitbox, clock, movement" open} field "Shot clock ahead (ms)" demoanalysisclock
+6. {if tab "Hitbox, clock, movement" open} field "Shots too early, at least" demoanalysisearly
+7. {if tab "Hitbox, clock, movement" open} field "Over the speed limit (ms)" demoanalysisspeedtime
+8. {if tab "Hitbox, clock, movement" open} field "Fast movement (units/s)" demoanalysismovespeed
+9. {if tab "Hitbox, clock, movement" open} field "Fast movement during (ms)" demoanalysismovetime
+10. {if tab "Hitbox, clock, movement" open} field "Fast movement: highest ping (ms)" demoanalysismoveping
+11. {if tab "Hitbox, clock, movement" open} field "Distance / announced speed" demoanalysisratio
+12. {if tab "Hitbox, clock, movement" open} field "Same, 2 s windows at least" demoanalysisratiowindows
+13. {if tab "Hitbox, clock, movement" open} field "Jumps with no teleporter" demoanalysisjumps
+14. {if tab "Aim" open} field "Snap: shots, at least" demoanalysissnaprepeat
+15. {if tab "Aim" open} field "Snap: distance to players (dev.)" demoanalysissnapz
+16. {if tab "Aim" open} field "Tracking: windows, at least" demoanalysistrackwindows
+17. {if tab "Aim" open} field "Tracking: near an enemy (s)" demoanalysistrackseconds
+18. {if tab "Aim" open} field "Tracking: distance to players (dev.)" demoanalysistrackz
+19. {if tab "Aim" open} field "Trigger: flick shots, at least" demoanalysistriggerflicks
+20. {if tab "Aim" open} field "Trigger: distance to players (dev.)" demoanalysistriggerz
+21. {if tab "Hidden enemies" open} field "Range of a shot's sound (units)" demoanalysissound
+22. {if tab "Hidden enemies" open} field "Not seen nor heard for (ms)" demoanalysiscold
+23. {if tab "Hidden enemies" open} field "Time near hidden enemies (s)" demoanalysisexposure
+24. {if tab "Hidden enemies" open} field "View on a hidden enemy, times" demoanalysishiddenrepeat
+25. {if tab "Hidden enemies" open} field "Distance to chance (dev.)" demoanalysishiddenz
+26. {if tab "Hidden enemies" open} field "Shots at hidden enemies, at least" demoanalysishiddenshots
+27. {if tab "Hidden enemies" open} field "With the view: hidden shots" demoanalysiscombinedshots
+28. {if tab "Hidden enemies" open} field "With the view: shots to chance" demoanalysiscombinedz
+29. {if tab "Hidden enemies" open} field "Following a hidden enemy (points)" demoanalysisfollow
+30. {if tab "Hidden enemies" open} field "Waiting: fast reaction (ms)" demoanalysiswaitfast
+31. {if tab "Hidden enemies" open} field "Waiting: reactions, at least" demoanalysiswaitcount
+32. {if tab "Hidden enemies" open} field "Waiting: fast ones, at least" demoanalysiswaitfastcount
+33. {if tab "Hidden enemies" open} checkbox "No hidden enemy alert against a single enemy" demoanalysisduel
+34. {if tab "Walls, lag, air" open} field "Walls: hits through walls, at least" demoanalysiswalls
+35. {if tab "Walls, lag, air" open} field "Walls: share of his hits (%)" demoanalysiswallshare
+36. {if tab "Walls, lag, air" open} field "Lag: frags after his gaps, at least" demoanalysislagfrags
+37. {if tab "Walls, lag, air" open} field "Lag: distance to chance (dev.)" demoanalysislagz
+38. {if tab "Walls, lag, air" open} field "Lag: gaps in his positions, at least" demoanalysislaggaps
+39. {if tab "Walls, lag, air" open} field "Air: seconds without falling" demoanalysisair
+40. {if tab "Walls, lag, air" open} field "Jumps: look from (events)" demoanalysisjumplook
+41. {if tab "Walls, lag, air" open} field "Noclip: look from (events)" demoanalysisnocliplook
+42. {if tab "Names" open} field "Usual games of a name, at least" demoanalysisrupturegames
+43. {if tab "Names" open} field "Measures far from them, at least" demoanalysisrupturemeasures
+44. {if tab "Names" open} field "Far: deviations, at least" demoanalysisrupturez
+45. {if tab "Player stats" open} field "Field of view of the others (degrees)" demoanalysisfov
+46. {if tab "Player stats" open} field "Near his flag: radius (units)" demoanalysisbaseradius
+47. {if tab "Player stats" open} field "Staying still: at least (s)" demoanalysisstill
+48. {if tab "Player stats" open} field "Staying still: circle radius (units)" demoanalysisstillradius
 
 ## importsettings | Import settings | Options > Import settings from another client
 == (top)
@@ -423,6 +505,11 @@ also: Chat Translation
 1. slider "Size" crosshairsize
 2. colours "Crosshair colour (hex)" crosshaircolour
 3. {if repeated for each row (count known in game: <div (+ (listlen $crosshairs) 6) 7>) and repeated for each col (count known in game: 7) and <ch> != ""} button "image" : cleargui 1 loadcrosshair @(at <ch> 0) 0 loadc...
+== My crosshairs
+1. {if mycrosshairlist = ""} status: No picture yet: put PNG files in your crosshair folder.
+2. {if repeated for each row (count known in game: <min 2 (div (+ (listlen $mycrosshairlist) 6) 7)>) and repeated for each col (count known in game: 7) and <ch> != ""} button "image" : cleargui 1 mycrosshairpick @(escape <ch>)
+3. {if listlen($mycrosshairlist) > 14} status: +<- (listlen $mycrosshairlist) 14> more pictures in the folder (14 shown).
+4. button "Open my crosshair folder" : openfolder crosshairs | button "Default crosshair" : loadcrosshair data/crosshair.png 0; loadcross...
 == Effects
 1. checkbox "Crosshair effects" crosshairfx
 2. {if "Crosshair effects" ticked (crosshairfx)} [ checkbox "Colour shows my health" crosshaircolors / checkbox "Other crosshair on teammates" teamcrosshair / checkbox "Hit marker" hitcrosshair on=425 / checkbox "Dim while reloading" crosshairreloaddim ]
@@ -522,6 +609,50 @@ also: Chat Translation
 == Columns
 1. [ checkbox "Server name" showservinfo / checkbox "Frags" showfrags / checkbox "Frags in CTF / Collect" hidefrags on=0 off=1 / checkbox "Deaths" showdeaths / checkbox "K/D" showkd / checkbox "Flags / skulls" showflags / checkbox "Accuracy" showaccuracy / checkbox "Languages" showlang / checkbox "Vs you (kills-deaths)" showvs / checkbox "Status (dead / lag)" showstatus ] | [ checkbox "Ping" showping / checkbox "Packet jump" showpj / checkbox "Client number" showclientnum / checkbox "Spectators" showspectators / checkbox "Highlight me" highlightscore / checkbox "Connecting players" showconnecting ]
 
+## demoanalysis | Demo analysis | Options > Recording > Analyze this demo...
+also: <demoanalysealert> (next to Sauerbraten RT)
+== (top)
+1. {if demoanalysebusy()} text "<demoanalysestatus>"
+2. {if not (demoanalysebusy())} text "<demoanalysestatus>"
+3. {if not (demoanalysebusy()) and not (demoanalyserows() = 0)} text "<demoanalysegameinfo>" | {if not (demoanalysebusy()) and not (demoanalyserows() = 0) and demoanalysegames() > 1} button "Game <demoanalysegamesel> of <demoanalysegames>" : demoanalysenextgame
+4. {if not (demoanalysebusy()) and not (demoanalyserows() = 0)} text "Indications, not proof."
+5. {if not (demoanalysebusy()) and not (demoanalyserows() = 0) and not (strcmp(demoanalysesightnote() ))} text "<demoanalysesightnote>"
+6. {if not (demoanalysebusy()) and not (demoanalyserows() = 0)} (button "Players" : concat DA_view "=" 0 | button "Aim" : concat DA_view "=" 5 | button "Wallhack" : concat DA_view "=" 1 | button "Movement" : concat DA_view "=" 4 | button "Moments" : concat DA_view "=" 2 | button "Names" : concat DA_view "=" 3)
+7. {if not (demoanalysebusy()) and not (demoanalyserows() = 0) and tab "Players" open} (text "Player" | text "Verdict" | text "What was found")
+8. {if not (demoanalysebusy()) and not (demoanalyserows() = 0) and tab "Players" open and repeated for each DA_r (count known in game: <demoanalyserows>)} (text "<demoanalysecell $DA_r $arg1>" | text "<demoanalysecell $DA_r $arg1>" | text "<demoanalysecell $DA_r $arg1>")
+9. {if not (demoanalysebusy()) and not (demoanalyserows() = 0) and tab "Players" open and demoanalyserowpages() > 1} (button "Previous players" : demoanalyserowpage -1 | text "<demoanalyserowpage 0>" | button "Next players" : demoanalyserowpage 1)
+10. {if not (demoanalysebusy()) and not (demoanalyserows() = 0) and tab "Aim" open} (text "Player" | text "Snap" | text "Tracking" | text "Trigger" | text "Reaction" | text "Hitbox")
+11. {if not (demoanalysebusy()) and not (demoanalyserows() = 0) and tab "Aim" open and repeated for each DA_r (count known in game: <demoanalyserows>)} (text "<demoanalysecell $DA_r $arg1>" | text "<demoanalysecell $DA_r $arg1>" | text "<demoanalysecell $DA_r $arg1>" | text "<demoanalysecell $DA_r $arg1>" | text "<demoanalysecell $DA_r $arg1>" | text "<demoanalysecell $DA_r $arg1>")
+12. {if not (demoanalysebusy()) and not (demoanalyserows() = 0) and tab "Aim" open and demoanalyserowpages() > 1} (button "Previous players" : demoanalyserowpage -1 | text "<demoanalyserowpage 0>" | button "Next players" : demoanalyserowpage 1)
+13. {if not (demoanalysebusy()) and not (demoanalyserows() = 0) and tab "Wallhack" open} (text "Player" | text "View on hidden" | text "Shots at hidden" | text "Follows hidden" | text "Walls")
+14. {if not (demoanalysebusy()) and not (demoanalyserows() = 0) and tab "Wallhack" open and repeated for each DA_r (count known in game: <demoanalyserows>)} (text "<demoanalysecell $DA_r $arg1>" | text "<demoanalysecell $DA_r $arg1>" | text "<demoanalysecell $DA_r $arg1>" | text "<demoanalysecell $DA_r $arg1>" | text "<demoanalysecell $DA_r $arg1>")
+15. {if not (demoanalysebusy()) and not (demoanalyserows() = 0) and tab "Wallhack" open and demoanalyserowpages() > 1} (button "Previous players" : demoanalyserowpage -1 | text "<demoanalyserowpage 0>" | button "Next players" : demoanalyserowpage 1)
+16. {if not (demoanalysebusy()) and not (demoanalyserows() = 0) and tab "Movement" open} (text "Player" | text "Speed, warps" | text "Air" | text "Jumps" | text "Noclip" | text "Clock" | text "Lag")
+17. {if not (demoanalysebusy()) and not (demoanalyserows() = 0) and tab "Movement" open and repeated for each DA_r (count known in game: <demoanalyserows>)} (text "<demoanalysecell $DA_r $arg1>" | text "<demoanalysecell $DA_r $arg1>" | text "<demoanalysecell $DA_r $arg1>" | text "<demoanalysecell $DA_r $arg1>" | text "<demoanalysecell $DA_r $arg1>" | text "<demoanalysecell $DA_r $arg1>" | text "<demoanalysecell $DA_r $arg1>")
+18. {if not (demoanalysebusy()) and not (demoanalyserows() = 0) and tab "Movement" open and demoanalyserowpages() > 1} (button "Previous players" : demoanalyserowpage -1 | text "<demoanalyserowpage 0>" | button "Next players" : demoanalyserowpage 1)
+19. {if not (demoanalysebusy()) and not (demoanalyserows() = 0) and tab "Moments" open} checkbox "Moments of every player" demoanalysisallmoments
+20. {if not (demoanalysebusy()) and not (demoanalyserows() = 0) and tab "Moments" open and demoanalysemoments() = 0} text "No moment to show."
+21. {if not (demoanalysebusy()) and not (demoanalyserows() = 0) and tab "Moments" open and not (demoanalysemoments() = 0) and repeated for each DA_m (count known in game: 14) and not (strcmp(<DA_t> ))} button "<DA_t>" : demoanalysegoto <DA_m>
+22. {if not (demoanalysebusy()) and not (demoanalyserows() = 0) and tab "Moments" open and not (demoanalysemoments() = 0)} (button "Previous moments" : demoanalysemomentpage -1 | text "<demoanalysemomentpage 0>" | button "Next moments" : demoanalysemomentpage 1)
+23. {if not (demoanalysebusy()) and not (demoanalyserows() = 0) and tab "Names" open and demoanalysenotes() = 0} text "Nothing to say about the names in this demo."
+24. {if not (demoanalysebusy()) and not (demoanalyserows() = 0) and tab "Names" open and not (demoanalysenotes() = 0) and repeated for each DA_n (count known in game: <demoanalysenotes>)} text "<demoanalysenote $DA_n>"
+25. {if not (demoanalysebusy()) and not (demoanalyserows() = 0) and tab "Names" open and not (demoanalysenotes() = 0) and demoanalysenotepages() > 1} (button "Previous notes" : demoanalysenotepage -1 | text "<demoanalysenotepage 0>" | button "Next notes" : demoanalysenotepage 1)
+
+## playerstats | Player stats | Options > Recording > Player stats...
+== (top)
+1. text "<playerstatsinfo>"
+2. button "<playerstatsmode 0> v" : PS_dropopen 1 | button "<playerstatsmap 0> v" : PS_dropopen 2
+3. button "Overview" : concat PS_view "=" 0 | button "Kills" : concat PS_view "=" 1 | button "Weapons" : concat PS_view "=" 2 | button "You" : concat PS_view "=" 3 | button "Behind" : concat PS_view "=" 4 | button "Flags" : concat PS_view "=" 5 | button "Field" : concat PS_view "=" 6 | button "Checks" : concat PS_view "=" 7
+4. {if tab "Weapons" open} button "<playerstatsweapon 0> v" : PS_dropopen 3
+5. {if <PS_mine>} (text "My list (<playerstatspicks>)" (computed) | button "Show everyone" : playerstatsshowlist 0) | {if not (<PS_mine>)} field "Find a name" PS_find | {if not (<PS_mine>) and !=s()} button "Clear" : PS_find = "" | {if not (<PS_mine>) and playerstatspicks() > 0} (text "My list (<playerstatspicks>):" (computed) | button "Show" : playerstatsshowlist 1; PS_drop = 0 | button "Empty" : playerstatsclearlist) | {if not (<PS_mine>) and not (playerstatspicks() > 0)} text "My list: tick names"
+6. {if not <PS_mine> and !=s() and <PS_nf> = 0} note: No name found | {if not <PS_mine> and !=s() and not (<PS_nf> = 0) and repeated for each PS_s (count known in game: <PS_nf>)} button "<playerstatsfound $PS_s>" : playerstatsfoundpick <PS_s>; PS_find = ""
+7. {if PS_drop > 0 and repeated for each PS_c (count known in game: <div (+ $PS_left 15) 16>) and repeated for each PS_r (count known in game: <min 16 (- $PS_left (* $PS_c 16))>)} button "<playerstatschoice $PS_k $PS_i>" : playerstatschoose -1 <PS_i>; PS_drop = 0
+8. {if PS_drop > 0 and <PS_pp> > 1} (button "Previous choices" : PS_dpage = (max 0 (- 0 1)) | text "1 / <PS_pp>" | button "Next choices" : PS_dpage = (min (- <PS_pp> 1) (+ 0 1)))
+9. {if not (PS_drop > 0) and repeated for each PS_c (count known in game: <playerstatscols $PS_view>)} button "<playerstatshead $PS_view $PS_c>" : playerstatssort @PS_view <PS_c>
+10. {if not (PS_drop > 0) and repeated for each PS_r (count known in game: <playerstatsrows $PS_view>) and repeated for each PS_c (count known in game: <playerstatscols $PS_view>) and <PS_c> = 0 and not <PS_mine>} button "checkbox off icon" : playerstatsrowpick @PS_view <PS_r> | text "<playerstatscell $PS_view $PS_r 0>" | {if not (PS_drop > 0) and repeated for each PS_r (count known in game: <playerstatsrows $PS_view>) and repeated for each PS_c (count known in game: <playerstatscols $PS_view>) and not (<PS_c> = 0 and not <PS_mine>)} text "<playerstatscell $PS_view $PS_r $PS_c>"
+11. {if not (PS_drop > 0) and playerstatsrows($PS_view) = 0 and <PS_mine> or !=s()} note: No name to show with these filters
+12. {if not (PS_drop > 0)} text "<playerstatssorted $PS_view>" | {if not (PS_drop > 0) and playerstatspages($PS_view) > 1} (button "Previous names" : playerstatspage @PS_view -1 | text "<playerstatspage $PS_view 0>" | button "Next names" : playerstatspage @PS_view 1)
+
 ## trailsme | Weapon Trails: Me | Options > HUD > Weapons and trails... > Me...
 == (top)
 1. text "Shotgun"
@@ -603,9 +734,10 @@ also: Chat Translation
 15. {if tupdateavail = 3} button "Restart to update" : tupdaterestart
 16. {if not (tupdateavail = 3) and tupdateavail = 2} button "<tupdatelabel>" > page updates
 17. {if not (tupdateavail = 3) and not (tupdateavail = 2) and tupdateavail = 1} button "Update available" > page updates
-18. note: L4ZY <tupdateinstalled>
-19. button "Updates" > page updates
-20. [ player preview (click: cyclemycolor) / colours "My colour" mycolor / field name / button "<playermodelname>" > page playermodel ]
+18. {if demoanalysealert() != ""} button "<demoanalysealert>" > page demoanalysis
+19. note: L4ZY <tupdateinstalled>
+20. button "Updates" > page updates
+21. [ player preview (click: cyclemycolor) / colours "My colour" mycolor / field name / button "<playermodelname>" > page playermodel ]
 == floating panel
 == Friends {in columns side by side}
 1. field friendaddname (Enter runs addfriend) | {if friendaddname != "" or textfocus() = "friendaddname" and textcurrentline() != ""} button "Add" : addfriend
@@ -682,15 +814,37 @@ also: Chat Translation
 5. {if "Tiny Apa" chosen (botperception 2)} slider "their level: <botstylelevel> %" botstylelevel (50..100)
 6. {if "Tiny Apa" chosen (botperception 2)} (checkbox "a different form each game" botstyleform | button "form settings.." > page botform)
 7. {if "Tiny Apa" chosen (botperception 2)} checkbox "moves learned from recorded games (work in progress)" botnet
-8. {if "Tiny Apa" chosen (botperception 2)} checkbox "find their way on the map's walk grid" botnavgrid
-9. {if "Tiny Apa" chosen (botperception 2) and "find their way on the map's walk grid" ticked (botnavgrid)} button "walk grid settings.." > page botnav
-10. button "start match.." > page gamemode
+8. {if "Tiny Apa" chosen (botperception 2)} (button "shot settings.." > page botshot | button "attention settings.." > page botattention)
+9. {if "Tiny Apa" chosen (botperception 2)} checkbox "find their way on the map's walk grid" botnavgrid
+10. {if "Tiny Apa" chosen (botperception 2) and "find their way on the map's walk grid" ticked (botnavgrid)} button "walk grid settings.." > page botnav
+11. button "start match.." > page gamemode
 
 ## botform | Tiny Apa Form | Bot Match > form settings..
 == (top)
 1. checkbox "a different form each game" botstyleform
 2. {if "a different form each game" ticked (botstyleform)} slider "very tired games: <botstyletired> %" botstyletired (0..100)
 3. checkbox "warm up in the first two minutes" botstylewarmup
+
+## botshot | Tiny Apa Shots | Bot Match > shot settings..
+== (top)
+1. slider "patience before a wider shot: <botstylepatience> ms" botstylepatience (100..2000)
+2. slider "wait counted once the crosshair is near: off" botstylepatnear (0..50)
+3. slider "widest shot out of a flick: no limit" botstyletolmax (0..50)
+4. slider "a hard to predict target widens the shot: <botstyleunpredtol> %" botstyleunpredtol (0..100)
+5. slider "quicker reaction in a duel: <botstylereactduel> ms" botstylereactduel (0..150)
+6. slider "quicker shot at you in front of it, in a duel: <botstylereflexduel> ms" botstylereflexduel (0..100)
+7. checkbox "no shot while its crosshair is on a wall" botstylewallwait
+8. slider "spread of the point it aims at: <botstyleaimspread> %" botstyleaimspread (50..300)
+9. button "as before these fixes" : botstylepatience 300; botstylepatnear 0; bots...
+10. button "default" : botstylepatience 300; botstylepatnear 20; bot...
+
+## botattention | Tiny Apa Attention | Bot Match > attention settings..
+== (top)
+1. checkbox "turn round when a shot passes close (even from a cover)" botstylefelt
+2. slider "in a duel, a sound heard elsewhere: at once" botstyleheardwait (0..3000)
+3. slider "... at least this far from where they lost you: <botstyleheardfar> units" botstyleheardfar (0..512)
+4. button "as before this fix" : botstylefelt 0; botstyleheardwait 1500; botst...
+5. button "default" : botstylefelt 1; botstyleheardwait 0; botstyle...
 
 ## botnav | Walk Grid | Bot Match > walk grid settings..
 == (top)

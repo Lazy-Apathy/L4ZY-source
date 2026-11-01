@@ -18,6 +18,10 @@
 #include "shaders/hitlight_half_norefl_comp.h"
 #include "shaders/skycompose_comp.h"
 #include "shaders/bluenoise_tab.h"
+// Path tracing (hwrtpt): the lighting pass with bounce rays, its compose pass, the radiance cache's resolve pass.
+#include "shaders/hitlight_pt_comp.h"
+#include "shaders/skycompose_pt_comp.h"
+#include "shaders/ptcache_comp.h"
 
 int hwrtfencestalls = 0;
 
@@ -1217,10 +1221,13 @@ bool hwrtinittrace()
     return true;
 }
 
+static void ptdestroy(); // path tracing (below recordlight)
+
 void hwrtdestroytrace()
 {
-    if(!hwrtdev.device) { memset(&tr, 0, sizeof(tr)); memset(skyhist, 0, sizeof(skyhist)); memset(skyage, 0, sizeof(skyage)); skyhistw = skyhisth = 0; memset(nrdimg, 0, sizeof(nrdimg)); nrdimgw = nrdimgh = 0; memset(sigimg, 0, sizeof(sigimg)); sigimgw = sigimgh = 0; return; }
+    if(!hwrtdev.device) { ptdestroy(); memset(&tr, 0, sizeof(tr)); memset(skyhist, 0, sizeof(skyhist)); memset(skyage, 0, sizeof(skyage)); skyhistw = skyhisth = 0; memset(nrdimg, 0, sizeof(nrdimg)); nrdimgw = nrdimgh = 0; memset(sigimg, 0, sizeof(sigimg)); sigimgw = sigimgh = 0; return; }
     vkDeviceWaitIdle(hwrtdev.device);
+    ptdestroy();
     hwrtdestroynrd();
     destroyskyhistory();
     skyhistfailed = false;
@@ -1764,6 +1771,542 @@ static VkPipeline softsigmapipeline()
     return p;
 }
 
+// ---------------------------------------------------------------------------
+// Path tracing (hwrtpt): the third lighting mode, next to Classic (hwrt 0) and Ray tracing (hwrt 1). Same direct
+// light as ray tracing; the sky rays of the world pixels become bounce rays that read a world-space radiance cache
+// (hitlight.comp -DHWRT_PT, ptcache.comp), and the compose pass adds that light to the direct light without the
+// ambient floor (skycompose.comp -DHWRT_PT). Nothing below exists until path tracing is first chosen: with hwrtpt 0
+// the ray tracing pipelines, sets, bindings and dispatches are exactly those of before.
+// ---------------------------------------------------------------------------
+static void hwrtptchanged();
+static void hwrtptreset() { extern void hwrtptclearcache(); hwrtptclearcache(); }
+// 0 ray tracing, 1 path tracing (with hwrt 1). Saved (PT 7).
+VARFP(hwrtpt, 0, 0, 1, hwrtptchanged());
+// Bounce rays per pixel (1, 2 or 4): the bounced light and sky fraction of each world pixel.
+VAR(hwrtptspp, 1, 1, 4);
+// 1: light bounced once (the cache holds the direct light and the sky). 2: many times (the cache also reads itself).
+VARF(hwrtptbounces, 1, 2, 2, hwrtptreset());
+// The share of the light a surface sends on: its texture colour to this power, at most 0.9. 1 (strong): what the
+// screen shows of a surface bounces on (texture x light); 1.6 (soft, the default) and
+// 2.2: weaker bounced light, darker shade.
+FVARF(hwrtptalbedo, 0.5f, 1.6f, 2.2f, hwrtptreset());
+// Floor at this fraction of the map's ambient (the "anti-black floor"); 0: none, the bounces light the dark places.
+FVAR(hwrtptfloor, 0, 0, 1);
+// How the direct light (sun, lamps), the sky and the bounced light add up. 0: as the maps were baked, the larger of
+// the direct light and the sky, plus the bounced light (the sky never adds to the sun, the bounced light adds
+// everywhere); 1: the sum of the three in the game's light values (brighter in the sun where the map's sky is strong);
+// 2 (PT 4): the sky added to the direct light in physical light (values taken to the power 2.2, added, shown again),
+// plus the bounced light: in the sun the sky adds little, in the shade it is all there is.
+// 3 (PT 5): all of it in physical light: the sky a place sees through an opening and the light bounced to it are
+// summed and averaged in physical light (the radiance cache holds physical light), added to the direct light there,
+// and shown again: a place lit from a few bright directions (under a roof, beside a sunlit floor) gets its real share.
+// PT 6: 3 is the default (decision of 26/10).
+VARFP(hwrtptcombine, 0, 3, 3, hwrtptreset());
+// PT 5: the bounce strength with hwrtptcombine 3: the reflectance in physical light (texture colour to the power 2.2)
+// times this, at most 0.9 (1: as physical light bounces). PT 6: a free slider (menu), 1 soft (default), 1.5 strong.
+FVARFP(hwrtptbouncegain, 0, 1, 4, hwrtptreset());
+// Radiance cache: 1 on, 0 the light of every bounce computed for every pixel (much slower, for comparison).
+VARF(hwrtptcache, 0, 1, 1, hwrtptreset());
+// One warp in N writes the cache each frame (sun, one lamp and one more ray at its bounce).
+// PT 7: 32, the value every path tracing test and measurement ran with (PT 2 to 6).
+VAR(hwrtptupdate, 1, 32, 256);
+// A bounce that finds an empty cell computes that light at once (more work when new places come into view).
+VAR(hwrtptmissupdate, 0, 0, 1);
+// Cache cells: size near the camera (units), distance after which they double, the "short ray" separation.
+FVARF(hwrtptcell, 1, 8, 64, hwrtptreset());
+FVARF(hwrtptcellband, 16, 256, 4096, hwrtptreset());
+VARF(hwrtptshortray, 0, 1, 1, hwrtptreset());
+// The 5x5 of the sky filter applied to the bounced light before NRD.
+VAR(hwrtptfilter, 0, 1, 1);
+// One sample never brings more than this (display units): no firefly.
+FVAR(hwrtptclamp, 0.5f, 4, 64);
+// Samples a cell keeps behind its average, frames before an untouched cell is freed, 2^N cells.
+// 1024 (was 256): the map's lights do not move, a slower cache keeps the bounced light steadier.
+VAR(hwrtptframes, 1, 1024, 65536);
+VAR(hwrtptevict, 16, 600, 1000000);
+VARF(hwrtptcachebits, 16, 20, 22, hwrtptreset());
+// 0 play, 1 the bounced light alone on the textures, 2 the bounced light alone, 3 (PT 3) the sky's light alone,
+// 4 (PT 5) the direct light alone (sun and lamps).
+VAR(hwrtptdebug, 0, 0, 4);
+// PT 4 (prototype): the ray tracing with the path tracing's own direct sources (logical lighting: lamps of the
+// scenery, torches that follow their flame, the sky of the skybox added to the sun) and no bounced light: the bounce
+// rays only look for the sky, the map's ambient is the floor (hwrtptfloor 1), as in the ray tracing. RT and PT then
+// differ only by the bounces. 0: path tracing.
+// PT 7: saved (the ray tracing with the scene's lights is a choice of the ray tracing page).
+VARFP(hwrtptnobounce, 0, 0, 1, hwrtptchanged());
+// Its floor: this fraction of the map's ambient (1: as the ray tracing; hwrtptfloor stays the path tracing's own).
+FVAR(hwrtptrtfloor, 0, 1, 1);
+static float ptfloor() { return clamp(hwrtptnobounce ? float(hwrtptrtfloor) : float(hwrtptfloor), 0.0f, 1.0f); }
+
+// Logical lighting (prototype), with path tracing only. 1: the map's placed finite lamps, its
+// ambient and the glow auras give way to the light of the scene's own sources, emitters with a size and a power
+// (flames, glowing textures, teleporters, lava; the map's sun, sky and radius-0 lamps stay): lights.cpp
+// ptlogical.inc, hitlight.comp ptLogicFalloff. 0: the map's lighting (default, decision of 23/10). Saved (PT 7).
+static void hwrtptlogicalchanged();
+VARFP(hwrtptlogical, 0, 0, 1, hwrtptlogicalchanged());
+// Strength of each family of logical sources (1 = the prototype's calibration): fires, glowing textures, teleporters,
+// lava; how far their light reaches (1 = down to about 4/255 of screen light); flame flicker (+/- 12 %).
+FVARF(hwrtptlogicfire, 0, 1, 16, hwrtptreset());
+FVARF(hwrtptlogicglow, 0, 1, 16, hwrtptreset());
+FVARF(hwrtptlogicportal, 0, 1, 16, hwrtptreset());
+FVARF(hwrtptlogiclava, 0, 1, 16, hwrtptreset());
+FVARF(hwrtptlogicreach, 0.25f, 1, 4, hwrtptreset());
+VAR(hwrtptlogicflicker, 0, 1, 1);
+// Proposal (off): hanging lamp models with no flame emitter (objects/lamp01, lamp02, *lantern*) light too.
+VARF(hwrtptlogiclamps, 0, 0, 1, hwrtptreset());
+
+struct hwrtptstate
+{
+    VkShaderModule lightmodule, composemodule, cachemodule;
+    VkDescriptorSetLayout setlayout;
+    VkPipelineLayout lightlayout, cachelayout;
+    VkDescriptorPool pool;
+    VkDescriptorSet set;
+    // [soft sources][soft rays - 1][extended lamps][SIGMA]
+    VkPipeline lightpipe[2][8][2][2];
+    bool lighttried[2][8][2][2];
+    VkPipeline composepipe, composepipesigma, cachepipe;
+    VkBuffer params, keys, accum, vals;
+    VkDeviceMemory paramsmem, keysmem, accummem, valsmem;
+    void *paramsmap;
+    // PT 3 (prototype): the sky as a light (binding 4, ptsky.inc), written by the CPU, made with the set.
+    VkBuffer sky;
+    VkDeviceMemory skymem;
+    void *skymap;
+    bool skyok;
+    uint32_t entries;
+    int bits;
+    int epoch;
+    uint32_t frame;
+    bool inited, failed, clear;
+    PFN_vkCmdFillBuffer fill;
+};
+static hwrtptstate pts;
+// Set by hwrtdispatch for the frame it records: path tracing runs, with this lighting pipeline.
+static bool ptframe = false;
+static VkPipeline ptlightpipe = VK_NULL_HANDLE;
+static int ptlitmillis = -100000;
+
+void hwrtptclearcache() { pts.clear = true; }
+
+#include "ptsky.inc"
+// PT 3 (prototype), glass: the path tracing's own rays (bounces, sky, the cache's shadow rays) let the light through
+// the see-through texels of the scenery's model skins (window panes, gaps in foliage), tinted by the texel and dimmed by
+// its opacity (hwrtptglasstint: the share of the opacity that tints instead of blocking), as the direct light's
+// shadow rays already do. 0: those models are solid for them (PT 1 and PT 2).
+// PT 6: 1 every ray of the path tracing (the PT 3 to 5), 2 only the pixels' bounce rays (the cache's rays see the
+// models' see-through texels as solid: cheaper on maps with much foliage), 3 only the cache's rays.
+// PT 7: saved, 1 by default (every path tracing test and measurement ran with it); the menu offers 1 and 0.
+VARFP(hwrtptglass, 0, 1, 3, hwrtptreset());
+FVARF(hwrtptglasstint, 0, 0.5f, 1, hwrtptreset());
+
+static void hwrtptchanged()
+{
+    // The denoiser's history and the sky's hold a different light: start them again; the cache too.
+    hwrtinvalidateskyhistory();
+    pts.clear = true;
+}
+
+static void hwrtptlogicalchanged()
+{
+    hwrtptchanged();
+    extern void hwrtptlogicgrassreset();
+    hwrtptlogicgrassreset();
+}
+
+// Path tracing runs with the logical lighting this frame (lights.cpp packs its sources).
+bool hwrtptlogicframe() { return ptframe && hwrtptlogical; }
+// PT 5 (prototype): glowing textures as lights (pttex.inc): 1 the light textures (the light fittings the logical
+// lighting knows, the textures with a glow map) light from their surface, with the map's lighting (added to its lamps)
+// and with the logical lighting (in place of the fitting lamps and glowing panels). Their strength (1: a surface that
+// emits what a white wall shows in the lumel's full light) and the farthest reach of their light (units): 128 keeps
+// most of their light under and around the fittings for a third of the time of 512 (every lit point then elects
+// them among its nearest lamps, each with its shadow rays); more lights farther, for more time.
+// PT 7: 1 by default (with the logical lighting the glowing textures light, rule of 25/10); strength and reach saved.
+VARF(hwrtpttexlights, 0, 1, 1, hwrtptreset());
+FVARFP(hwrtpttexpower, 0, 1, 16, hwrtptreset());
+FVARFP(hwrtpttexreach, 64, 128, 2048, hwrtptreset());
+// PT 7 (decision of 28/10: group them): neighbouring glowing textures facing the same way become one light (pttex.inc
+// pttexmerge): a group joins the strongest group within this many units of it. 0: every 24-unit group is a light (PT 6).
+FVARFP(hwrtpttexgroup, 0, 32, 512, hwrtptreset());
+// PT 5 (prototype): the map's spotlights (lamps attached to a spotlight entity, left out by the ray tracing) light in
+// their cone as the lightmaps do (lights.cpp, hitlight.comp ptSpotAtten); with the map's lighting.
+VARF(hwrtptspot, 0, 1, 1, hwrtptreset());
+// PT 6 (rule of 25/10: the map's lamps OR the logical lights, never both): the glowing textures light only with the
+// logical lighting, where they take the place of the lamps set against them.
+bool hwrtpttexframe() { return ptframe && hwrtpttexlights && hwrtptlogical; }
+// PT 6: the path tracing runs this frame (lights.cpp: the ray tracing's own choices otherwise).
+bool hwrtptrunsframe() { return ptframe; }
+// PT 5: the path tracing with the map's lighting packs the lava and the glowing auras the ray tracing meant to light
+// (lights.cpp; the ray tracing never gets them: buildshade's destroyshade() sets hwrtglowomnicount back to 0 right
+// after the clusters are made, a known bug left as it is so the ray tracing does not change).
+VARF(hwrtptlava, 0, 1, 1, hwrtptreset());
+bool hwrtptlavaframe() { return ptframe && hwrtptlava && !hwrtptlogical; }
+bool hwrtptspotframe() { return ptframe && hwrtptspot && !hwrtptlogical; }
+// PT 5: more lamps than the table holds (256): the path tracing with the map's lighting keeps those whose light comes
+// nearest the camera (pttex.inc ptpackmaplamps); 0: the first ones of the map, as the ray tracing.
+VARF(hwrtptlampsort, 0, 1, 1, hwrtptreset());
+bool hwrtptlampsortframe() { return ptframe && hwrtptlampsort && !hwrtptlogical; }
+// Same, for what GL still lights itself (lightreaching, grass, water): path tracing with the logical lighting is
+// chosen and the ray tracing lighting view is on.
+bool hwrtptlogicactive() { return hwrtpt && hwrtptlogical && !pts.failed && hwrtnobake(); }
+
+static bool ptfail(const char *what, VkResult r = VK_SUCCESS)
+{
+    if(!pts.failed)
+    {
+        if(r != VK_SUCCESS) conoutf(CON_WARN, "hwrt pt: %s failed (%s), path tracing off", what, hwrtresultstr(r));
+        else conoutf(CON_WARN, "hwrt pt: %s, path tracing off", what);
+    }
+    pts.failed = true;
+    return false;
+}
+
+static void ptdestroybuf(VkBuffer &b, VkDeviceMemory &m)
+{
+    if(b) vkDestroyBuffer(hwrtdev.device, b, NULL);
+    if(m) vkFreeMemory(hwrtdev.device, m, NULL);
+    b = VK_NULL_HANDLE;
+    m = VK_NULL_HANDLE;
+}
+
+static void ptdestroybuffers()
+{
+    if(pts.paramsmap && pts.paramsmem) vkUnmapMemory(hwrtdev.device, pts.paramsmem);
+    pts.paramsmap = NULL;
+    ptdestroybuf(pts.params, pts.paramsmem);
+    ptdestroybuf(pts.keys, pts.keysmem);
+    ptdestroybuf(pts.accum, pts.accummem);
+    ptdestroybuf(pts.vals, pts.valsmem);
+    pts.entries = 0;
+}
+
+static void ptdestroy()
+{
+    if(!hwrtdev.device) { memset(&pts, 0, sizeof(pts)); return; }
+    ptdestroybuffers();
+    if(pts.skymap && pts.skymem) vkUnmapMemory(hwrtdev.device, pts.skymem);
+    pts.skymap = NULL;
+    ptdestroybuf(pts.sky, pts.skymem);
+    ptskyforget();
+    loopi(2) loopj(8) loopk(2) loopl(2) if(pts.lightpipe[i][j][k][l]) vkDestroyPipeline(hwrtdev.device, pts.lightpipe[i][j][k][l], NULL);
+    if(pts.composepipe) vkDestroyPipeline(hwrtdev.device, pts.composepipe, NULL);
+    if(pts.composepipesigma) vkDestroyPipeline(hwrtdev.device, pts.composepipesigma, NULL);
+    if(pts.cachepipe) vkDestroyPipeline(hwrtdev.device, pts.cachepipe, NULL);
+    if(pts.lightlayout) vkDestroyPipelineLayout(hwrtdev.device, pts.lightlayout, NULL);
+    if(pts.cachelayout) vkDestroyPipelineLayout(hwrtdev.device, pts.cachelayout, NULL);
+    if(pts.pool) vkDestroyDescriptorPool(hwrtdev.device, pts.pool, NULL);
+    if(pts.setlayout) vkDestroyDescriptorSetLayout(hwrtdev.device, pts.setlayout, NULL);
+    if(pts.lightmodule) vkDestroyShaderModule(hwrtdev.device, pts.lightmodule, NULL);
+    if(pts.composemodule) vkDestroyShaderModule(hwrtdev.device, pts.composemodule, NULL);
+    if(pts.cachemodule) vkDestroyShaderModule(hwrtdev.device, pts.cachemodule, NULL);
+    memset(&pts, 0, sizeof(pts));
+    ptframe = false;
+    ptlightpipe = VK_NULL_HANDLE;
+}
+
+static bool ptcreatebuf(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags props, VkBuffer &b, VkDeviceMemory &m)
+{
+    VkBufferCreateInfo info = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+    info.size = size;
+    info.usage = usage;
+    info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    VkResult r = vkCreateBuffer(hwrtdev.device, &info, NULL, &b);
+    if(r != VK_SUCCESS) return ptfail("vkCreateBuffer (cache)", r);
+    VkMemoryRequirements req;
+    vkGetBufferMemoryRequirements(hwrtdev.device, b, &req);
+    int memtype = hwrtfindmemtype(req.memoryTypeBits, props);
+    if(memtype < 0) return ptfail("no memory type for the radiance cache");
+    VkMemoryAllocateInfo alloc = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+    alloc.allocationSize = req.size;
+    alloc.memoryTypeIndex = uint32_t(memtype);
+    r = vkAllocateMemory(hwrtdev.device, &alloc, NULL, &m);
+    if(r != VK_SUCCESS) return ptfail("vkAllocateMemory (cache)", r);
+    r = vkBindBufferMemory(hwrtdev.device, b, m, 0);
+    if(r != VK_SUCCESS) return ptfail("vkBindBufferMemory (cache)", r);
+    return true;
+}
+
+// The cache's buffers at 2^hwrtptcachebits entries and the set that names them (re-created when the size changes).
+static bool ptensurebuffers()
+{
+    int bits = clamp(int(hwrtptcachebits), 16, 22);
+    if(pts.keys && pts.bits == bits) return true;
+    if(pts.keys && !hwrtwaitidle("vkDeviceWaitIdle (pt cache resize)")) return false;
+    ptdestroybuffers();
+    uint32_t n = 1u << bits;
+    VkMemoryPropertyFlags local = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+    VkBufferUsageFlags su = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    if(!ptcreatebuf(VkDeviceSize(n) * 8, su, local, pts.keys, pts.keysmem)) return false;
+    if(!ptcreatebuf(VkDeviceSize(n) * 16, su, local, pts.accum, pts.accummem)) return false;
+    if(!ptcreatebuf(VkDeviceSize(n) * 16, su, local, pts.vals, pts.valsmem)) return false;
+    if(!ptcreatebuf(256, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, pts.params, pts.paramsmem)) return false;
+    VkResult r = vkMapMemory(hwrtdev.device, pts.paramsmem, 0, 256, 0, &pts.paramsmap);
+    if(r != VK_SUCCESS || !pts.paramsmap) return ptfail("vkMapMemory (pt params)", r);
+    memset(pts.paramsmap, 0, 256);
+    pts.entries = n;
+    pts.bits = bits;
+    pts.clear = true;
+    VkDescriptorBufferInfo binfo[4] = {
+        { pts.params, 0, VK_WHOLE_SIZE }, { pts.keys, 0, VK_WHOLE_SIZE }, { pts.accum, 0, VK_WHOLE_SIZE }, { pts.vals, 0, VK_WHOLE_SIZE }
+    };
+    VkWriteDescriptorSet writes[4];
+    loopi(4)
+    {
+        writes[i] = VkWriteDescriptorSet{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+        writes[i].dstSet = pts.set;
+        writes[i].dstBinding = uint32_t(i);
+        writes[i].descriptorCount = 1;
+        writes[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writes[i].pBufferInfo = &binfo[i];
+    }
+    vkUpdateDescriptorSets(hwrtdev.device, 4, writes, 0, NULL);
+    logoutf("hwrt pt: radiance cache %u cells (%.0f MB)", n, double(n) * 40.0 / (1024.0 * 1024.0));
+    return true;
+}
+
+static bool ptmodule(const uint32_t *code, size_t bytes, VkShaderModule &m, const char *what)
+{
+    VkShaderModuleCreateInfo modinfo = { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+    modinfo.codeSize = bytes;
+    modinfo.pCode = code;
+    VkResult r = vkCreateShaderModule(hwrtdev.device, &modinfo, NULL, &m);
+    if(r != VK_SUCCESS) return ptfail(what, r);
+    return true;
+}
+
+// First use of path tracing: modules, the cache's set (params, keys, sums, values), the layouts (the lighting pass
+// takes the ray tracing light set as set 0 and the cache set as set 1), the compose and resolve pipelines.
+static bool ptinit()
+{
+    if(pts.inited) return !pts.failed;
+    pts.inited = true;
+    if(!hwrtdev.rayquery || !tr.lightsetlayout || !tr.composepipelayout) return ptfail("ray tracing pipelines not ready");
+    pts.fill = (PFN_vkCmdFillBuffer)vkGetDeviceProcAddr(hwrtdev.device, "vkCmdFillBuffer");
+    if(!pts.fill) return ptfail("vkCmdFillBuffer missing");
+    if(!ptmodule(hwrthitlightptspv, sizeof(hwrthitlightptspv), pts.lightmodule, "path tracing shader")) return false;
+    if(!ptmodule(hwrtskycomposeptspv, sizeof(hwrtskycomposeptspv), pts.composemodule, "path tracing compose shader")) return false;
+    if(!ptmodule(hwrtptcachespv, sizeof(hwrtptcachespv), pts.cachemodule, "radiance cache shader")) return false;
+    conoutf(CON_INIT, "hwrt pt: hitlight SPIR-V %u words (path tracing)", unsigned(sizeof(hwrthitlightptspv) / 4));
+
+    // 0 params, 1 keys, 2 sums, 3 values (the cache); PT 3: 4 the sky.
+    VkDescriptorSetLayoutBinding bindings[5];
+    memset(bindings, 0, sizeof(bindings));
+    loopi(5)
+    {
+        bindings[i].binding = uint32_t(i);
+        bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        bindings[i].descriptorCount = 1;
+        bindings[i].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    }
+    VkDescriptorSetLayoutCreateInfo setinfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+    setinfo.bindingCount = 5;
+    setinfo.pBindings = bindings;
+    VkResult r = vkCreateDescriptorSetLayout(hwrtdev.device, &setinfo, NULL, &pts.setlayout);
+    if(r != VK_SUCCESS) return ptfail("descriptor layout", r);
+
+    VkDescriptorPoolSize poolsize = { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 5 };
+    VkDescriptorPoolCreateInfo poolinfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+    poolinfo.maxSets = 1;
+    poolinfo.poolSizeCount = 1;
+    poolinfo.pPoolSizes = &poolsize;
+    r = vkCreateDescriptorPool(hwrtdev.device, &poolinfo, NULL, &pts.pool);
+    if(r != VK_SUCCESS) return ptfail("descriptor pool", r);
+    VkDescriptorSetAllocateInfo allocinfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+    allocinfo.descriptorPool = pts.pool;
+    allocinfo.descriptorSetCount = 1;
+    allocinfo.pSetLayouts = &pts.setlayout;
+    r = vkAllocateDescriptorSets(hwrtdev.device, &allocinfo, &pts.set);
+    if(r != VK_SUCCESS) return ptfail("descriptor set", r);
+    // PT 3: the sky (written after a map or sky change), host visible.
+    {
+        VkMemoryPropertyFlags host = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+        if(!ptcreatebuf(PTSKY_BYTES, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, host, pts.sky, pts.skymem)) return false;
+        r = vkMapMemory(hwrtdev.device, pts.skymem, 0, PTSKY_BYTES, 0, &pts.skymap);
+        if(r != VK_SUCCESS || !pts.skymap) return ptfail("vkMapMemory (pt sky)", r);
+        memset(pts.skymap, 0, size_t(PTSKY_BYTES));
+        VkDescriptorBufferInfo binfo = { pts.sky, 0, VK_WHOLE_SIZE };
+        VkWriteDescriptorSet write = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+        write.dstSet = pts.set;
+        write.dstBinding = 4;
+        write.descriptorCount = 1;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        write.pBufferInfo = &binfo;
+        vkUpdateDescriptorSets(hwrtdev.device, 1, &write, 0, NULL);
+        ptskyforget();
+    }
+
+    VkPushConstantRange range = {};
+    range.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    range.size = sizeof(hwrtlightparams);
+    VkDescriptorSetLayout sets[2] = { tr.lightsetlayout, pts.setlayout };
+    VkPipelineLayoutCreateInfo layoutinfo = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+    layoutinfo.setLayoutCount = 2;
+    layoutinfo.pSetLayouts = sets;
+    layoutinfo.pushConstantRangeCount = 1;
+    layoutinfo.pPushConstantRanges = &range;
+    r = vkCreatePipelineLayout(hwrtdev.device, &layoutinfo, NULL, &pts.lightlayout);
+    if(r != VK_SUCCESS) return ptfail("pipeline layout", r);
+    VkPushConstantRange crange = {};
+    crange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    crange.size = 16;
+    layoutinfo.setLayoutCount = 1;
+    layoutinfo.pSetLayouts = &pts.setlayout;
+    layoutinfo.pPushConstantRanges = &crange;
+    r = vkCreatePipelineLayout(hwrtdev.device, &layoutinfo, NULL, &pts.cachelayout);
+    if(r != VK_SUCCESS) return ptfail("cache pipeline layout", r);
+
+    VkComputePipelineCreateInfo pipeinfo = { VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
+    pipeinfo.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    pipeinfo.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+    pipeinfo.stage.pName = "main";
+    pipeinfo.stage.module = pts.cachemodule;
+    pipeinfo.layout = pts.cachelayout;
+    r = vkCreateComputePipelines(hwrtdev.device, VK_NULL_HANDLE, 1, &pipeinfo, NULL, &pts.cachepipe);
+    if(r != VK_SUCCESS) return ptfail("radiance cache pipeline", r);
+    // Compose: the ray tracing compose layout, the path tracing module; the SIGMA variant like the ray tracing one.
+    pipeinfo.stage.module = pts.composemodule;
+    pipeinfo.layout = tr.composepipelayout;
+    r = vkCreateComputePipelines(hwrtdev.device, VK_NULL_HANDLE, 1, &pipeinfo, NULL, &pts.composepipe);
+    if(r != VK_SUCCESS) return ptfail("compose pipeline", r);
+    VkSpecializationMapEntry sigentry = { 0, 0, sizeof(VkBool32) };
+    VkBool32 sigon = VK_TRUE;
+    VkSpecializationInfo sigspec = { 1, &sigentry, sizeof(sigon), &sigon };
+    pipeinfo.stage.pSpecializationInfo = &sigspec;
+    r = vkCreateComputePipelines(hwrtdev.device, VK_NULL_HANDLE, 1, &pipeinfo, NULL, &pts.composepipesigma);
+    if(r != VK_SUCCESS) pts.composepipesigma = VK_NULL_HANDLE;
+    pts.epoch = hwrtshadeepoch;
+    return true;
+}
+
+// The path tracing lighting pipeline for this frame's soft shadow state, built on first use with the same
+// specialization constants as lightoptpipeline (one-ray-per-source soft sources, rays, extended lamps, SIGMA).
+static VkPipeline ptlightpipefor(bool soft, int rays, bool lamps, bool sigma)
+{
+    if(!soft) { rays = 1; lamps = false; sigma = false; }
+    rays = clamp(rays, 1, 8);
+    if(rays == 1) lamps = false;
+    int si = soft ? 1 : 0, li = lamps ? 1 : 0, gi = sigma ? 1 : 0;
+    VkPipeline &pipe = pts.lightpipe[si][rays - 1][li][gi];
+    bool &tried = pts.lighttried[si][rays - 1][li][gi];
+    if(pipe || tried || !pts.lightlayout) return pipe;
+    tried = true;
+    VkSpecializationMapEntry entries[8];
+    VkBool32 values[8] = { VK_TRUE, VK_TRUE, VK_FALSE, VK_FALSE, VK_FALSE, VkBool32(rays), VkBool32(lamps ? rays : 1), sigma ? VK_TRUE : VK_FALSE };
+    loopi(8) { entries[i].constantID = uint32_t(i); entries[i].offset = uint32_t(i * sizeof(VkBool32)); entries[i].size = sizeof(VkBool32); }
+    VkSpecializationInfo spec = { 8, entries, 8 * uint32_t(sizeof(VkBool32)), values };
+    VkComputePipelineCreateInfo pipeinfo = { VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
+    pipeinfo.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    pipeinfo.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+    pipeinfo.stage.module = pts.lightmodule;
+    pipeinfo.stage.pName = "main";
+    pipeinfo.stage.pSpecializationInfo = soft ? &spec : NULL;
+    pipeinfo.layout = pts.lightlayout;
+    VkResult r = vkCreateComputePipelines(hwrtdev.device, VK_NULL_HANDLE, 1, &pipeinfo, NULL, &pipe);
+    if(r != VK_SUCCESS)
+    {
+        conoutf(CON_WARN, "hwrt pt: lighting pipeline (soft %d, %d rays%s%s) failed (%s), ray tracing is used", int(soft), rays, lamps ? ", lamps" : "", sigma ? ", SIGMA" : "", hwrtresultstr(r));
+        pipe = VK_NULL_HANDLE;
+    }
+    return pipe;
+}
+
+// The parameters the path tracing passes read (set 1 binding 0): written every frame (64 bytes).
+static void ptwriteparams()
+{
+    if(!pts.paramsmap) return;
+    float p[32];
+    memset(p, 0, sizeof(p));
+    // PT 3 (prototype). e: the sky as a light (on, importance sampling, pixel mode).
+    p[16] = hwrtptsky && pts.skyok ? 1.0f : 0.0f;
+    p[17] = hwrtptskyis ? 1.0f : 0.0f;
+    p[18] = hwrtptskypixel ? 1.0f : 0.0f;
+    // g: the glass (on, the share of the opacity that tints).
+    p[24] = float(clamp(int(hwrtptglass), 0, 3));
+    p[25] = hwrtptglasstint;
+    p[0] = float(clamp(int(hwrtptspp), 1, 4));
+    p[1] = float(clamp(int(hwrtptbounces), 1, 2));
+    p[2] = hwrtptalbedo;
+    p[3] = ptfloor();
+    p[4] = hwrtptcell;
+    p[5] = hwrtptcellband;
+    p[6] = float(max(int(hwrtptupdate), 1));
+    p[7] = hwrtptlogical ? 1.0f : 0.0f;
+    p[11] = float(pts.entries - 1);
+    p[12] = float((hwrtptcache ? 1 : 0) | (hwrtptmissupdate ? 2 : 0) | (hwrtptshortray ? 4 : 0) | (hwrtptfilter ? 8 : 0) | (hwrtptnobounce ? 16 : 0));
+    p[13] = float(hwrtptdebug);
+    p[14] = hwrtptclamp;
+    p[15] = float(clamp(int(hwrtptcombine), 0, 3));
+    // PT 5: c.x the bounce strength in physical light; e.w the glowing textures light by themselves (the bounce rays
+    // then leave out the glow of what they hit: it is sampled as a light).
+    p[8] = hwrtptbouncegain;
+    // PT 6: e.w follows the rule of the logical lighting (the glowing textures light only with it).
+    p[19] = hwrtpttexlights && hwrtptlogical ? 1.0f : 0.0f;
+    memcpy(pts.paramsmap, p, sizeof(p));
+}
+
+// Before the lighting pass: empty the cache when asked (first use, world rebuilt, settings changed), then fold the
+// last pass's sums into the cells. Barriers on both sides: the previous frame's writes, this frame's reads.
+static void ptrecordresolve(VkCommandBuffer cmd)
+{
+    VkMemoryBarrier mb = { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+    mb.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    mb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         0, 1, &mb, 0, NULL, 0, NULL);
+    if(pts.epoch != hwrtshadeepoch) { pts.epoch = hwrtshadeepoch; pts.clear = true; }
+    if(pts.clear)
+    {
+        pts.fill(cmd, pts.keys, 0, VK_WHOLE_SIZE, 0);
+        pts.fill(cmd, pts.accum, 0, VK_WHOLE_SIZE, 0);
+        pts.fill(cmd, pts.vals, 0, VK_WHOLE_SIZE, 0);
+        VkMemoryBarrier fb = { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+        fb.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        fb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &fb, 0, NULL, 0, NULL);
+        pts.clear = false;
+    }
+    uint32_t pcv[4] = { pts.entries, ++pts.frame, uint32_t(max(int(hwrtptevict), 16)), uint32_t(max(int(hwrtptframes), 1)) };
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pts.cachepipe);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pts.cachelayout, 0, 1, &pts.set, 0, NULL);
+    vkCmdPushConstants(cmd, pts.cachelayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pcv), pcv);
+    vkCmdDispatch(cmd, (pts.entries + 255) / 256, 1, 1);
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &mb, 0, NULL, 0, NULL);
+}
+
+// Path tracing wanted and possible this frame (hwrtdispatch decides once, before recording).
+static bool ptprepare(bool sigma)
+{
+    ptframe = false;
+    ptlightpipe = VK_NULL_HANDLE;
+    if(!hwrtpt || pts.failed || !hwrtdev.rayquery) return false;
+    if(!ptinit() || !ptensurebuffers()) return false;
+    extern bool hwrtsoftactive();
+    extern int hwrtsoftshadowrays;
+    extern bool hwrtsoftlampsextended();
+    if(sigma && !pts.composepipesigma) return false;
+    ptlightpipe = ptlightpipefor(hwrtsoftactive(), hwrtsoftshadowrays, hwrtsoftlampsextended(), sigma);
+    if(!ptlightpipe) return false;
+    pts.skyok = ptskyupdate(pts.skymap);
+    ptwriteparams();
+    ptframe = true;
+    return true;
+}
+
+// 1 = the path tracing lighting pass ran within the last second (campaigns check it like hwrtlighteffective).
+ICOMMAND(hwrtpteffective, "", (), intret(ptframe && totalmillis - ptlitmillis < 1000 ? 1 : 0));
+ICOMMAND(hwrtptstatus, "", (),
+{
+    conoutf("hwrt pt: wanted %d, running %d, failed %d, cache %u cells (2^%d), spp %d, bounces %d, albedo %.2f, floor %.2f, combine %d, cell %.1f band %.0f, update 1/%d, missupdate %d, shortray %d, filter %d, clamp %.1f, frames %d, evict %d, debug %d",
+            hwrtpt, int(ptframe), int(pts.failed), pts.entries, pts.bits, hwrtptspp, hwrtptbounces, hwrtptalbedo, hwrtptfloor, hwrtptcombine,
+            hwrtptcell, hwrtptcellband, hwrtptupdate, hwrtptmissupdate, hwrtptshortray, hwrtptfilter, hwrtptclamp, hwrtptframes, hwrtptevict, hwrtptdebug);
+    conoutf("hwrt pt: bounce gain %.2f (physical light, combine 3), texture lights %d (power %.2f, reach %.0f), spotlights %d", hwrtptbouncegain,
+            hwrtpttexlights, hwrtpttexpower, hwrtpttexreach, hwrtptspot);
+    conoutf("hwrt pt: logical %d (fire %.2f, glow %.2f, portal %.2f, lava %.2f, reach %.2f, flicker %d, lamps %d), no bounce %d (floor %.2f)", hwrtptlogical,
+            hwrtptlogicfire, hwrtptlogicglow, hwrtptlogicportal, hwrtptlogiclava, hwrtptlogicreach, hwrtptlogicflicker, hwrtptlogiclamps,
+            hwrtptnobounce, ptfloor());
+});
+
 static void recordlight(VkCommandBuffer cmd, int mode, int slot)
 {
     hwrtlightparams params;
@@ -1862,9 +2405,19 @@ static void recordlight(VkCommandBuffer cmd, int mode, int slot)
         if(!soft) soft = tr.lightpipelinesoft;
         if(soft) lightpipe = soft;
     }
+    // Path tracing this frame: its pipeline and layout (the light set, plus the radiance cache's set as set 1).
+    VkPipelineLayout lightlayout = tr.lightpipelayout;
+    if(ptframe && ptlightpipe)
+    {
+        lightpipe = ptlightpipe;
+        lightlayout = pts.lightlayout;
+        ptlitmillis = totalmillis;
+    }
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, lightpipe);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, tr.lightpipelayout, 0, 1, &tr.lightset[slot], 0, NULL);
-    vkCmdPushConstants(cmd, tr.lightpipelayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(params), &params);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, lightlayout, 0, 1, &tr.lightset[slot], 0, NULL);
+    if(lightlayout != tr.lightpipelayout)
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, lightlayout, 1, 1, &pts.set, 0, NULL);
+    vkCmdPushConstants(cmd, lightlayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(params), &params);
     // hitlight.comp is 16x16 so the skyvis filter has a usable radius. An
     // apron of extra skyvis (12x12 owned tile) was measured slower than
     // four unfiltered rays, so the tile stays 16x16 with no extra traces.
@@ -1944,6 +2497,26 @@ static void recordcompose(VkCommandBuffer cmd, int mode, int slot, int src, int 
         // Bit 28: SIGMA did not run, the fractions are the noisy ones (not square root encoded).
         if(sigsrc != 3) params.mode |= 0x10000000;
     }
+    // Path tracing: its compose (same layout and bindings); the floor is a fraction of the ambient; bits 20-21 the
+    // debug view.
+    if(ptframe)
+    {
+        composepipe = sigsrc >= 0 ? pts.composepipesigma : pts.composepipe;
+        loopi(3) params.lighting[i] *= ptfloor();
+        // PT 5: hwrtptdebug 4 (the direct light alone) is bit 27.
+        params.mode |= (clamp(int(hwrtptdebug), 0, 3) << 20);
+        if(hwrtptdebug >= 4) params.mode = (params.mode & ~(3 << 20)) | 0x8000000;
+        // PT 5: bit 26 all in physical light (hwrtptcombine 3).
+        if(hwrtptcombine == 3) params.mode |= 0x4000000;
+        if(hwrtptcombine == 1) params.mode |= 0x400000;
+        // PT 4: bit 25 the sky added in physical light (hwrtptcombine 2).
+        if(hwrtptcombine == 2) params.mode |= 0x2000000;
+        // Logical lighting: the compose pass clips the direct light keeping its hue (skycompose.comp).
+        if(hwrtptlogical) params.mode |= 0x800000;
+        // PT 3, the sky as a light: bit 24 the sky's light of each pixel rides in p3.rgb (0 with hwrtptskypixel 1: it is
+        // in the bounced light), its glow then in p2.rgb.
+        if(hwrtptsky && pts.skyok) params.mode |= 0x1000000;
+    }
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, composepipe);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, tr.composepipelayout, 0, 1, &tr.composeset[slot], 0, NULL);
     vkCmdPushConstants(cmd, tr.composepipelayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(params), &params);
@@ -2003,11 +2576,16 @@ bool hwrtdispatch(int mode)
         extern int hwrtsigmaactive;
         if(!sigmalightpipe) hwrtsigmaactive = 0;
     }
+    // Path tracing this frame (hwrtpt): decided once here, after SIGMA's, as its pipeline follows SIGMA's state.
+    if(light && hwrtpt) ptprepare(sigmalightpipe != VK_NULL_HANDLE);
+    else ptframe = false;
     if(light)
     {
         hwrtlightrecorded = true;
         double tl = hwrtnow();
         hwrtupdatelights();
+        // The parameters that follow the lights packed this frame.
+        if(ptframe) ptwriteparams();
         hwrttime.cpulights = float((hwrtnow() - tl) * 1000.0);
         light = hwrthaslights();
     }
@@ -2107,6 +2685,8 @@ bool hwrtdispatch(int mode)
             recordskyhistbarrier(cmd);
             recordnrdbarrier(cmd);
             recordsigbarrier(cmd);
+            // Path tracing: the radiance cache takes in the last pass's samples first.
+            if(ptframe) ptrecordresolve(cmd);
             recordlight(cmd, mode, slot);
             hwrtwritestamp(cmd, slot, HWRT_TS_LIGHT);
             if(hwrtnrdsession() && tr.composepipeline && nrdimgw == hwrtio.w && nrdimgh == hwrtio.h)

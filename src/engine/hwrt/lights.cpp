@@ -21,7 +21,13 @@ int hwrtwaterplanecount = 0;
 int hwrtsunon = 0;
 int hwrtskyon = 0;
 
-enum { HWRT_MAX_LIGHTS = 256 };
+// PT 6: the table holds every light of the map: 4096 slots (triforts has 906 lamps; Alloy 526 lamps and 92 glowing
+// auras, 1124 groups of glowing textures with the logical lighting). hitlight.comp's tile culling tests them 256 at a
+// time. hwrtlampsall 0 packs as before (the first HWRT_OLD_LIGHTS, glows chosen by the camera, no spotlights or lava in
+// the ray tracing).
+enum { HWRT_MAX_LIGHTS = 4096, HWRT_OLD_LIGHTS = 256 };
+// The slots this frame may use (HWRT_MAX_LIGHTS, or HWRT_OLD_LIGHTS with hwrtlampsall 0).
+static int hwrtlightcap = HWRT_OLD_LIGHTS;
 
 extern int sunlight, skylight, hwrtskyrays, hwrtskyfilter, hwrtskytemporal;
 extern int fullbrightmodels;
@@ -206,7 +212,7 @@ struct hwrtlightupload
     hwrtlight water[HWRT_MAX_WATERPLANES];
     float waterrect[HWRT_MAX_WATERRECTS][4];
 };
-static_assert(sizeof(hwrtlightupload) == 480 + 256 * 32 + 256 * 4 + HWRT_MAX_WATERPLANES * 32 + HWRT_MAX_WATERRECTS * 16, "light ssbo");
+static_assert(sizeof(hwrtlightupload) == 480 + HWRT_MAX_LIGHTS * 32 + HWRT_MAX_LIGHTS * 4 + HWRT_MAX_WATERPLANES * 32 + HWRT_MAX_WATERRECTS * 16, "light ssbo");
 
 // Animated water (water.cpp hwrtwaterwaves): 12 floats of parameters then up
 // to HWRT_WAVE_MAXN^2 slopes (x, y) behind the table, rewritten each frame;
@@ -520,6 +526,16 @@ VAR(hwrtdynshadow, 0, 1, 1);
 // Bounds the cost of a frame full of explosions (16 soft lights: about 0.2 ms
 // more at 1600x900, against 0.05 ms hard).
 VAR(hwrtdynsoftmax, 0, 4, 32);
+// PT 6, every light of the map (Options > Graphics > Ray tracing, saved; decision of 26/10: also in the ray tracing,
+// without losing its speed). 1 (default): the light table holds all of the map's lamps (no longer the first 256: Alloy,
+// laucin, triforts), the spotlights light their cone, the lava and the glowing auras light (the ray tracing had none:
+// buildshade's destroyshade() set the count back to 0), and none of them is chosen by where the camera is (no light
+// that appears or goes out as you move: the lava of cavefire, the 256 nearest lamps of the path tracing 5 on Alloy).
+// The lava is elected in each point by its light (the hwrtglowpick strongest, next to the hwrtdlights nearest lamps).
+// 0: the table of before (the first 256, glows chosen by the camera, no spotlights, no lava or auras in the ray tracing).
+VARFP(hwrtlampsall, 0, 1, 1, { extern void hwrtptclearcache(); hwrtptclearcache(); });
+// Debug, not saved: the lava clusters elected per point (0 none, 1, 2).
+VAR(hwrtglowpick, 0, 2, 2);
 int hwrtdynlightcount = 0;
 extern int numalldynlights();
 extern bool getalldynlight(int n, vec &o, float &radius, vec &color, int &kind, float &src);
@@ -604,6 +620,7 @@ struct hwrtglowcand
     float dist;
     bool ring;      // in a teleporter ring's hole
     float ringang;  // world angle (radians) of the ring's horizontal normal, -1 unknown
+    bool lava;      // PT 6: a lava cluster (elected per point by its light with hwrtlampsall)
 };
 
 // Close enough to light the room you are in (including behind the camera),
@@ -668,6 +685,7 @@ static int hwrtmergeglow(hwrtglowcand *c, int nc, float mergedist)
         float flags = c[i].flags;
         bool ring = c[i].ring;
         float ringang = c[i].ringang;
+        bool lava = c[i].lava;
         int n = 1;
         for(int j = i+1; j < nc; j++)
         {
@@ -689,6 +707,7 @@ static int hwrtmergeglow(hwrtglowcand *c, int nc, float mergedist)
         o.dist = 0;
         o.ring = ring;
         o.ringang = ringang;
+        o.lava = lava;
     }
     return nout;
 }
@@ -927,8 +946,8 @@ static float softglowradius(const vec &o, bool ring)
 {
     if(hwrtglowsize <= 0) return 0.0f;
     // Few glow lamps, merged per frame: a small cache by position.
-    static vec gpos[64];
-    static float gval[64];
+    static vec gpos[HWRT_MAX_GLOWOMNI];
+    static float gval[HWRT_MAX_GLOWOMNI];
     static int gnum = 0, gents = -2;
     if(gents != softcachegen) { gnum = 0; gents = softcachegen; }
     float clear = -1.0f;
@@ -936,7 +955,7 @@ static float softglowradius(const vec &o, bool ring)
     if(clear < 0)
     {
         clear = softclearance(o);
-        if(gnum < 64) { gpos[gnum] = o; gval[gnum] = clear; gnum++; }
+        if(gnum < HWRT_MAX_GLOWOMNI) { gpos[gnum] = o; gval[gnum] = clear; gnum++; }
     }
     float r = clamp(float(hwrtglowsize), 0.0f, min(0.8f * clear, 60.0f));
     if(ring) r = min(r, 0.95f * (hwrtteleportholeradius > 0 ? hwrtteleportholeradius : 2.0f));
@@ -953,6 +972,8 @@ ICOMMAND(hwrtsoftstats, "", (),
             s.glows, s.glowcut, s.glows ? s.gmin : 0.0f, s.gmax, hwrtteleportholeradius, hwrtteleportholeaxis);
 });
 
+#include "ptlogical.inc"
+
 // Sky rays actually traced. hwrtskyrays (default 1) is tuned for NRD + blue
 // noise; whenever NRD is not the effective denoiser (off, unavailable or
 // failed: the Sauer filter / skyage path with the pcg hash), at least 4 rays,
@@ -968,8 +989,11 @@ void hwrtupdatelights()
     if(!hwrtdev.ok() || !hwrtdev.rayquery) return;
     if(!ensurelightbuf()) return;
 
-    hwrtlightupload packed;
+    // PT 6: 4096 slots (about 150 KB): kept off the stack.
+    static hwrtlightupload packed;
     memset(&packed, 0, sizeof(packed));
+    const bool all = hwrtlampsall != 0;
+    hwrtlightcap = all ? int(HWRT_MAX_LIGHTS) : int(HWRT_OLD_LIGHTS);
 
     packed.env.sunDir[0] = sunlightdir.x;
     packed.env.sunDir[1] = sunlightdir.y;
@@ -1013,6 +1037,8 @@ void hwrtupdatelights()
     packed.env.softMinTan = (hwrtsoftopt & 17) == 17 ? tanf(0.5f * hwrtsoftminangle * RAD) : 0.0f;
     packed.env.softTemporal = hwrtsofttemporal;
     packed.env.softFilterScale = hwrtsoftfilter;
+    // PT 6 (soft2.z): the lava clusters each point elects by their light (RT quality Low: one).
+    packed.env.softPad0 = all ? float(min(int(hwrtglowpick), hwrtquality < 1 ? 1 : 2)) : 0.0f;
         packed.env.diffPad1 = float(hwrtskyhold + (hwrtskyhistfilter ? 2 : 0) + ((hwrtskyvisdbg & 3) << 2) + (hwrtskyage ? 16 : 0) + (hwrtnrdsession() ? 32 : 0) + ((hwrtnrddbg & 15) << 6) + (hwrthiddenretry ? 4096 : 0) + (hwrtskybluenoise && hwrtskybluenoiseready() ? 8192 : 0) + (hwrtsmoothnormals ? 16384 : 0) + ((3 - clamp(hwrtshadowothers, 0, 3)) << 10));
     {
         matrix4 w2v, v2c;
@@ -1045,6 +1071,25 @@ void hwrtupdatelights()
     const vector<extentity *> &ents = entities::getents();
     softcachecheck(ents.length());
     softstat.reset();
+    // Path tracing with the logical lighting (ptlogical.inc): the map's teleport / lava / aura / finite lamps give
+    // way to the scenery's own sources, packed after the radius-0 lamps; ptlkind holds their kind word bits.
+    const bool logical = hwrtptlogicframe();
+    // PT 5 (pttex.inc): glowing textures as lights, the map's spotlights (with the map's lighting).
+    // PT 6: with hwrtlampsall the spotlights light in the ray tracing too (the path tracing keeps hwrtptspot).
+    extern bool hwrtptrunsframe();
+    const bool texl = hwrtpttexframe(), spot = hwrtptrunsframe() ? hwrtptspotframe() : all;
+    // PT 5 (pttex.inc ptpackmaplamps): the map's lamps chosen by distance when they do not all fit.
+    const bool ptsort = !logical && hwrtptlampsortframe();
+    // PT 5 (hwrtptlava): the glow clusters of the last world build (the count the ray tracing reads is 0, see trace.cpp).
+    // PT 6: with hwrtlampsall the ray tracing and the path tracing both take them (the lava and the glowing auras).
+    extern bool hwrtptlavaframe();
+    extern int hwrtglowomnifinal;
+    const int glowcount = (all && !logical) || hwrtptlavaframe() ? min(hwrtglowomnifinal, int(HWRT_MAX_GLOWOMNI)) : hwrtglowomnicount;
+    static uint ptlkind[HWRT_MAX_LIGHTS];
+    // PT 6: the slots of the lava clusters (kind: elected per point by their light, not always evaluated).
+    static uchar lavaslot[HWRT_MAX_LIGHTS];
+    memset(lavaslot, 0, sizeof(lavaslot));
+    if(logical || texl || spot || ptsort) memset(ptlkind, 0, sizeof(ptlkind));
     // Radius 0 is the baker's unlimited omni (old-map "sun"). Pack those
     // first so the 256-cap cannot drop them behind a pile of lamps.
     loopv(ents)
@@ -1053,7 +1098,7 @@ void hwrtupdatelights()
         if(e.type != ET_LIGHT) continue;
         if(e.attr1 != 0) continue;
         if(e.attached && e.attached->type == ET_SPOTLIGHT) continue;
-        if(n >= HWRT_MAX_LIGHTS) { dropped++; continue; }
+        if(n >= hwrtlightcap) { dropped++; continue; }
         hwrtlight &L = packed.lights[n++];
         L.pos[0] = e.o.x;
         L.pos[1] = e.o.y;
@@ -1082,6 +1127,7 @@ void hwrtupdatelights()
     loopv(ents)
     {
         extentity &e = *ents[i];
+        if(logical) break;
         const char *nm = entities::entname(e.type);
         if(!nm || !nm[0]) continue;
         bool tp = !strcmp(nm, "teleport");
@@ -1095,7 +1141,7 @@ void hwrtupdatelights()
         vec col = tp ? teleportcol : jumppadcol;
         float radius = tp ? 128.0f : 96.0f;
         bool fromglow = false;
-        loopj(hwrtglowomnicount)
+        loopj(glowcount)
         {
             vec gp(hwrtglowomnis[j].pos[0], hwrtglowomnis[j].pos[1], hwrtglowomnis[j].pos[2]);
             if(gp.dist(e.o) < 40.0f)
@@ -1116,6 +1162,7 @@ void hwrtupdatelights()
         g.flags = 3.0f;
         g.ring = ring;
         g.ringang = -1.0f;
+        g.lava = false;
         if(ring)
         {
             vec o;
@@ -1137,8 +1184,9 @@ void hwrtupdatelights()
         }
         else g.pos = vec(e.o.x, e.o.y, e.o.z + (tp ? 20.0f : 10.0f));
     }
-    loopi(hwrtglowomnicount)
+    loopi(glowcount)
     {
+        if(logical) break;
         if(hwrtglowomnis[i].flags < 2.5f) continue; // lava: shadowed, same budget
         if(ngcand >= HWRT_MAX_GLOWOMNI) { dropped++; continue; }
         hwrtglowcand &g = gcands[ngcand++];
@@ -1148,20 +1196,23 @@ void hwrtupdatelights()
         g.flags = hwrtglowomnis[i].flags;
         g.ring = false;
         g.ringang = -1.0f;
+        g.lava = true;
     }
     ngcand = hwrtmergeglow(gcands, ngcand, 40.0f);
-    int nsel = hwrtpickglow(gcands, ngcand, hwrtglowcap());
+    // PT 6: with hwrtlampsall every glow is packed, in the map's order, never chosen by the camera.
+    int nsel = all ? ngcand : hwrtpickglow(gcands, ngcand, hwrtglowcap());
     // Extended teleporter rings: the source is a disc in the ring's plane (kind bit 2,
     // bits 8-15 the normal's angle / 2pi), so no sample sits behind the rim.
-    uint orient[HWRT_MAX_LIGHTS];
+    static uint orient[HWRT_MAX_LIGHTS];
     memset(orient, 0, sizeof(orient));
     int nglow = 0;
     vec eglowpos[HWRT_MAX_GLOWOMNI];
     int neglow = 0;
     loopi(nsel)
     {
-        if(n >= HWRT_MAX_LIGHTS) { dropped++; break; }
+        if(n >= hwrtlightcap) { dropped++; break; }
         hwrtlight &L = packed.lights[n++];
+        if(all && gcands[i].lava) lavaslot[n-1] = 1;
         L.pos[0] = gcands[i].pos.x;
         L.pos[1] = gcands[i].pos.y;
         L.pos[2] = gcands[i].pos.z;
@@ -1181,14 +1232,17 @@ void hwrtupdatelights()
         if(neglow < HWRT_MAX_GLOWOMNI) eglowpos[neglow++] = gcands[i].pos;
         nglow++;
     }
-    loopi(hwrtglowomnicount)
+    loopi(glowcount)
     {
+        if(logical) break;
         if(hwrtglowomnis[i].flags >= 2.5f) continue; // lava already in the pick
+        // PT 5: the glowing textures light by themselves (pttex.inc): no aura for them.
+        if(texl) continue;
         vec gp(hwrtglowomnis[i].pos[0], hwrtglowomnis[i].pos[1], hwrtglowomnis[i].pos[2]);
         bool nearent = false;
         loopj(neglow) if(gp.dist(eglowpos[j]) < 40.0f) { nearent = true; break; }
         if(nearent) continue;
-        if(n >= HWRT_MAX_LIGHTS) { dropped++; continue; }
+        if(n >= hwrtlightcap) { dropped++; continue; }
         hwrtlight &L = packed.lights[n++];
         L.pos[0] = hwrtglowomnis[i].pos[0];
         L.pos[1] = hwrtglowomnis[i].pos[1];
@@ -1205,16 +1259,18 @@ void hwrtupdatelights()
     loopv(ents)
     {
         extentity &e = *ents[i];
+        if(logical || ptsort) break;
         if(e.type != ET_LIGHT) continue;
         if(e.attr1 <= 0) continue;
-        // v1: skip spot cones entirely (do not evaluate, do not treat as omni).
-        if(e.attached && e.attached->type == ET_SPOTLIGHT) continue;
+        // v1: skip spot cones entirely (do not evaluate, do not treat as omni). PT 5: with hwrtptspot they light in
+        // their cone (kind bits, below).
+        if(e.attached && e.attached->type == ET_SPOTLIGHT && !spot) continue;
         // Vanilla rings often have a mapper ET_LIGHT a few units in front of
         // the hole (academy: ~4 and ~8 units, hole height) plus one on the
         // trigger floor. Edit mode shows those bulbs in front of the portal.
         // Packing them would light from there; the punched-hole omni replaces them.
         if(hwrtnearvanillateleport(e.o, 16.0f)) continue;
-        if(n >= HWRT_MAX_LIGHTS) { dropped++; continue; }
+        if(n >= hwrtlightcap) { dropped++; continue; }
         hwrtlight &L = packed.lights[n++];
         L.pos[0] = e.o.x;
         L.pos[1] = e.o.y;
@@ -1224,10 +1280,16 @@ void hwrtupdatelights()
         L.color[1] = float(e.attr3) / 255.0f;
         L.color[2] = float(e.attr4) / 255.0f;
         L.flags = (e.flags & EF_NOSHADOW) ? 1.0f : softlampradius(ents, i, e) / 128.0f;
+        if(spot && e.attached && e.attached->type == ET_SPOTLIGHT) ptlkind[n-1] = ptspotkind(e);
     }
 
+    // PT 5: the glowing textures' lights after the map's lamps (the logical lighting packs them in ptlpack).
+    if(ptsort) n = ptpackmaplamps(packed, n, dropped, ptlkind, ents, spot, texl);
+    else if(texl && !logical) n = pttexpack(packed, n, dropped, ptlkind);
+    if(logical) n = ptlpack(packed, n, dropped, ptlkind, nglow);
+
     // Weapon lights last (flags 4/5): every map lamp above keeps its slot.
-    int ndyn = hwrtdynlights && n < HWRT_MAX_LIGHTS ? packdynlights(&packed.lights[n], HWRT_MAX_LIGHTS - n) : 0;
+    int ndyn = hwrtdynlights && n < hwrtlightcap ? packdynlights(&packed.lights[n], hwrtlightcap - n) : 0;
     n += ndyn;
     hwrtdynlightcount = ndyn;
 
@@ -1235,23 +1297,28 @@ void hwrtupdatelights()
     // with the shader's own float tests and counting order.
     {
         int nunlimk = 0, nglowk = 0;
+        // PT 6: with hwrtlampsall every glow of the table (auras, teleporters) is evaluated where the tile reaches it.
+        const int glowalways = all ? int(HWRT_MAX_GLOWOMNI) : 96;
         loopi(n)
         {
             const hwrtlight &L = packed.lights[i];
             // Weapon lights: always evaluated, outside the 16 / 96 counts and
             // never elected by nearest-N (they are last, so no count moves).
             if(L.flags >= 3.5f) { packed.kind[i] = 1; continue; }
+            // PT 6: a lava cluster is elected per point by its light (hitlight.comp KIND_GLOWNEAR), not always evaluated.
+            if(lavaslot[i]) { packed.kind[i] = 2 | 64 | orient[i]; continue; }
             bool unlim = L.radius <= 0.0f;
             bool glowL = L.flags >= 1.5f && !unlim;
             uint k = 0;
             if(unlim && nunlimk < 16) { k |= 1; nunlimk++; }
-            else if(glowL && nglowk < 96) { k |= 1; nglowk++; }
+            else if(glowL && nglowk < glowalways) { k |= 1; nglowk++; }
             else if(unlim) nunlimk++;
             else if(glowL) nglowk++;
             if(!unlim && L.flags < 1.5f) k |= 2;
             packed.kind[i] = k | orient[i];
         }
     }
+    if(logical || texl || spot || ptsort) loopi(n) packed.kind[i] |= ptlkind[i];
     {
         float planes[HWRT_MAX_WATERPLANES][8];
         int np = hwrtreflections ? hwrtgatherwaterplanes(planes, HWRT_MAX_WATERPLANES, packed.waterrect, HWRT_MAX_WATERRECTS) : 0;
@@ -1277,7 +1344,14 @@ void hwrtupdatelights()
         lightfail("vkMapMemory (lights)", r);
         return;
     }
-    memcpy(mapped, &packed, sizeof(packed));
+    // PT 6: the header and the used slots, their kind words, the water planes and rectangles (the shader reads no more).
+    {
+        char *dst = (char *)mapped;
+        size_t used = size_t(max(n, 0));
+        memcpy(dst, &packed, offsetof(hwrtlightupload, lights) + used * sizeof(hwrtlight));
+        memcpy(dst + offsetof(hwrtlightupload, kind), packed.kind, used * sizeof(uint));
+        memcpy(dst + offsetof(hwrtlightupload, water), packed.water, sizeof(packed) - offsetof(hwrtlightupload, water));
+    }
     hwrtwavewrite((char *)mapped + sizeof(packed), HWRT_WAVE_MAXN);
     vkUnmapMemory(hwrtdev.device, lights.memory);
 
@@ -1292,7 +1366,7 @@ void hwrtupdatelights()
         static bool loggedoverflow = false;
         if(!loggedoverflow)
         {
-            conoutf(CON_WARN, "hwrt: %d lights over the %d cap, extras dropped", dropped, int(HWRT_MAX_LIGHTS));
+            conoutf(CON_WARN, "hwrt: %d lights over the %d cap, extras dropped", dropped, hwrtlightcap);
             loggedoverflow = true;
         }
     }

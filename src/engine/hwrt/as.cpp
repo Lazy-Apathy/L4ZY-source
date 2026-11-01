@@ -21,6 +21,16 @@ int hwrtworldtris = 0, hwrtworldverts = 0;
 int hwrtshadeepoch = 0, hwrtshadelm = 0, hwrtshadediff = 0, hwrtshadeglow = 0;
 int hwrtglowomnicount = 0;
 hwrtglowomni hwrtglowomnis[HWRT_MAX_GLOWOMNI];
+// Path tracing, logical lighting (lights.cpp ptlogical.inc): each glow cluster's area and normal, and every
+// glowing world triangle.
+float hwrtglowomniarea[HWRT_MAX_GLOWOMNI];
+vec hwrtglowomninormal[HWRT_MAX_GLOWOMNI];
+vector<hwrtglowtri> hwrtglowtris;
+// PT 3 (prototype): the world triangles whose texture is a light fitting's (lights.cpp ptlum.inc, the logical lighting).
+vector<hwrtglowtri> hwrtlumtris;
+extern bool hwrtptlumslot(Slot *slot);
+// The clusters finalizeglowomnis() made (buildshade's destroyshade() then sets hwrtglowomnicount back to 0).
+int hwrtglowomnifinal = 0;
 
 struct hwrtbuf
 {
@@ -1734,6 +1744,21 @@ static void emitworldtri(vector<vec> &positions, vector<uint> &indices, vector<h
 {
     indices.add(i0); indices.add(i1); indices.add(i2);
     stris.add(st);
+    // PT 3 (prototype): a light fitting's texture (ptlum.inc) is kept for the logical lighting's lamps.
+    if(slot && hwrtlumtris.length() < 65536 && i0 < uint(positions.length()) && i1 < uint(positions.length()) &&
+       i2 < uint(positions.length()) && hwrtptlumslot(slot))
+    {
+        vec la = positions[i0], lb = positions[i1], lc = positions[i2];
+        vec ln;
+        ln.cross(vec(lb).sub(la), vec(lc).sub(la));
+        float larea = ln.magnitude()*0.5f;
+        if(larea > 1e-4f)
+        {
+            hwrtglowtri &lt = hwrtlumtris.add();
+            lt.c = vec(la).add(lb).add(lc).mul(1.0f/3.0f); lt.n = ln.mul(1.0f/ln.magnitude()); lt.col = vec(1, 1, 1);
+            lt.area = larea; lt.slot = slot->index;
+        }
+    }
     bool lava = slotislava(slot);
     if(glowlayer < 0 && !lava) return;
     if(i0 >= uint(positions.length()) || i1 >= uint(positions.length()) || i2 >= uint(positions.length())) return;
@@ -1755,6 +1780,13 @@ static void emitworldtri(vector<vec> &positions, vector<uint> &indices, vector<h
         col = vec(glowavg).mul(glowcol);
         if(col.squaredlen() < 1e-4f) col = glowcol;
         kind = GLOWKIND_TEX;
+    }
+    // Path tracing, logical lighting (lights.cpp ptlogical.inc): every glowing triangle, however small (a cluster
+    // keeps only those of 8 units^2 and more), for the emitters of the logical lighting.
+    if(kind == GLOWKIND_TEX && area > 1e-4f && hwrtglowtris.length() < 65536)
+    {
+        hwrtglowtri &gt = hwrtglowtris.add();
+        gt.c = cen; gt.n = nrm; gt.col = col; gt.area = area; gt.slot = slot ? slot->index : -1;
     }
     addglowcluster(cen, nrm, area, col, kind);
 }
@@ -2038,8 +2070,11 @@ static void finalizeglowomnis()
         o.radius = radius;
         o.color[0] = col.x; o.color[1] = col.y; o.color[2] = col.z;
         o.flags = lava ? 3.0f : 2.0f;
+        hwrtglowomniarea[hwrtglowomnicount-1] = g.area;
+        hwrtglowomninormal[hwrtglowomnicount-1] = n;
         if(lava) hwrtlavalights++;
     }
+    hwrtglowomnifinal = hwrtglowomnicount;
 }
 
 // hwrtdiffmip 2. Every world diffuse layer is stretched (nearest) to the
@@ -2381,6 +2416,8 @@ static bool gatherworld(vector<vec> &positions, vector<uint> &indices,
     if(!seednormspecs) worldnormspecs.setsize(0);
     worldnormoverflow = 0;
     glowclusters.setsize(0);
+    hwrtglowtris.setsize(0);
+    hwrtlumtris.setsize(0);
     hwrtglowomnicount = 0;
     gatherlavaomnis();
     nblend = 0;

@@ -32,6 +32,11 @@ TARGETS = [
     ("hitlight.comp", "hwrthitlighthalfspv", ["HWRT_SKY_HALF"], "hitlight_half_comp.h"),
     ("hitlight.comp", "hwrthitlighthalfnoreflspv", ["HWRT_NO_REFL", "HWRT_SKY_HALF"], "hitlight_half_norefl_comp.h"),
     ("skycompose.comp", "hwrtskycomposespv"),
+    # Path tracing (hwrtpt, trace.cpp): the lighting pass with the bounce rays and the radiance cache, its compose
+    # pass, and the pass that folds the cache's samples in. The variants above are built without that code.
+    ("hitlight.comp", "hwrthitlightptspv", ["HWRT_PT"], "hitlight_pt_comp.h"),
+    ("skycompose.comp", "hwrtskycomposeptspv", ["HWRT_PT"], "skycompose_pt_comp.h"),
+    ("ptcache.comp", "hwrtptcachespv"),
 ]
 
 

@@ -1216,12 +1216,16 @@ void renderwater()
             materialsurface &m = *ref.matsurfs[j];
 
             entity *light = (m.light && m.light->type==ET_LIGHT ? m.light : NULL);
+            // Path tracing with the logical lighting: no placed finite lamp and no ambient in the highlight.
+            const bool ptlogic = hwrtptlogicactive();
+            if(ptlogic && light && light->attr1 > 0) light = NULL;
             if(light!=lastlight)
             {
                 flushwater();
                 vec lightpos = light ? light->o : vec(worldsize/2, worldsize/2, worldsize);
                 float lightrad = light && light->attr1 ? light->attr1 : worldsize*8.0f;
                 vec lightcol = (light ? vec(light->attr2, light->attr3, light->attr4) : vec(ambient)).div(255.0f).mul(wspec/100.0f);
+                if(ptlogic && !light) lightcol = vec(0, 0, 0);
                 LOCALPARAM(lightpos, lightpos);
                 LOCALPARAM(lightcolor, lightcol);
                 LOCALPARAMF(lightradius, lightrad);

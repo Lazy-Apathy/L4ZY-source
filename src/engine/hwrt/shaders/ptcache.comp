@@ -1,0 +1,48 @@
+#version 460
+
+// Path tracing (hwrtpt, trace.cpp): once per frame, before the lighting pass, fold the samples the update warps of
+// the previous pass summed into each cell of the radiance cache (hitlight.comp -DHWRT_PT) into its running average,
+// weighted by sample count (at most pc.maxn samples behind the old value, so the cell keeps following the light), and
+// free the cells nothing wrote for pc.evict frames. One invocation per cache entry. Same set as the PT lighting pass.
+
+layout(local_size_x = 256) in;
+
+layout(std430, set = 0, binding = 0) readonly buffer PtParams { vec4 a; vec4 b; vec4 c; vec4 d; } ptp;
+layout(std430, set = 0, binding = 1) buffer PtKeys { uvec2 k[]; } ptkeys;
+layout(std430, set = 0, binding = 2) buffer PtAccum { uvec4 s[]; } ptacc;
+layout(std430, set = 0, binding = 3) buffer PtVal { vec4 v[]; } ptval;
+
+layout(push_constant) uniform Params
+{
+    uint count;  // cache entries
+    uint frame;  // the lighting pass's frame counter
+    uint evict;  // frames without a sample before a cell is freed
+    uint maxn;   // samples kept behind the running average
+} pc;
+
+const float PT_ACC_SCALE = 1024.0;
+
+void main()
+{
+    uint i = gl_GlobalInvocationID.x;
+    if(i >= pc.count) return;
+    uvec2 key = ptkeys.k[i];
+    if(key.x == 0u) return;
+    uvec4 a = ptacc.s[i];
+    if(a.w > 0u)
+    {
+        vec4 old = ptval.v[i];
+        float n = min(max(old.w, 0.0), float(pc.maxn));
+        // PT 5: hwrtptcombine 3 (d.w) sums physical light with a finer fixed point (hitlight.comp ptWrite).
+        vec3 sum = vec3(a.xyz) * (1.0 / (ptp.d.w > 2.5 ? 16384.0 : PT_ACC_SCALE));
+        float m = float(a.w);
+        ptval.v[i] = vec4((old.rgb * n + sum) / (n + m), n + m);
+        ptacc.s[i] = uvec4(0u);
+        ptkeys.k[i].y = pc.frame;
+    }
+    else if(pc.frame - key.y > pc.evict)
+    {
+        ptkeys.k[i] = uvec2(0u);
+        ptval.v[i] = vec4(0.0);
+    }
+}

@@ -704,7 +704,8 @@ extern int hwrtnrdguidemem();
 // World glow clusters, rebuilt with the BLAS. lights.cpp uploads them as
 // always-eval finite omnis so a jumppad floor or a screen actually lights
 // the room instead of only painting itself.
-enum { HWRT_MAX_GLOWOMNI = 96 };
+// PT 6: 256 clusters (laucin had 96 lava clusters at the old cap of 96: the lava after them never lit).
+enum { HWRT_MAX_GLOWOMNI = 256 };
 struct hwrtglowomni
 {
     float pos[3];
@@ -714,6 +715,10 @@ struct hwrtglowomni
 };
 extern int hwrtglowomnicount;
 extern hwrtglowomni hwrtglowomnis[HWRT_MAX_GLOWOMNI];
+// Path tracing, logical lighting: every glowing world triangle (as.cpp), for lights.cpp ptlogical.inc.
+struct hwrtglowtri { vec c, n, col; float area; int slot; };
+extern vector<hwrtglowtri> hwrtglowtris;
+extern vector<hwrtglowtri> hwrtlumtris;   // PT 3 (prototype): light-fitting texture triangles (ptlum.inc)
 
 // ---------------------------------------------------------------------------
 // Shared helpers

@@ -241,6 +241,60 @@ demohitboxothercolour: demo hitbox couleur victimes tirs des autres bleu clair g
 demohitboxdeath: demo hitbox mort tue victime figee reste endroit tir mortel juger triche duree secondes corps
 demopov: demo pov point de vue vue joueur suivi vraie vision client ping position adversaire decalage latence verite camera libre view kill feed temps de reaction estimee estimated locale
 demolookkey: demo regarder tourner tete souris bouton milieu maintenir curseur camera libre touche
+demoanalysis: analyse demo demos triche tricheur triches cheat cheater wallhack aimbot triggerbot hitbox speedhack indice indices verifier controle
+demoanalysishistory: historique joueurs moyenne habitude pseudo nom usurpe faux rupture comparer partie enregistree
+demoanalysisms: ligne de vue temps image fluidite rapidite vitesse analyse saccade
+demoanalysisminsecs: partie courte duree minimum secondes ignorer analyse
+demoanalysisallmoments: moments tous joueurs liste afficher alerte
+demoanalysishitboxhits: hitbox touches nombre minimum alerte boite
+demoanalysishitboxshare: hitbox part pourcentage hors corps touche alerte
+demoanalysishitboxdist: hitbox distance axe corps mediane unites alerte
+demoanalysisclock: horloge cadence tir jeu accelere speedhack avance ms alerte
+demoanalysisearly: tir trop tot cadence arme rechargement alerte
+demoanalysisspeedtime: vitesse limite annoncee depassement temps ms alerte
+demoanalysismovespeed: deplacement vitesse reelle rapide unites seconde teleportation
+demoanalysismovetime: deplacement rapide duree temps ms alerte
+demoanalysismoveping: ping latence paquets deplacement rapide alerte
+demoanalysisratio: rapport distance vitesse annoncee jeu accelere alerte
+demoanalysisratiowindows: rapport fenetres nombre minimum alerte
+demoanalysisjumps: saut position teleportation teleporteur jump pad alerte
+demoanalysissnaprepeat: snap aimbot visee saut tir nombre alerte
+demoanalysissnapz: snap aimbot ecart moyenne joueurs ecarts-types alerte
+demoanalysistrackwindows: suivi visee aimbot doux fenetres nombre alerte
+demoanalysistrackseconds: suivi temps secondes ennemi proche alerte
+demoanalysistrackz: suivi temps sur la cible ecart moyenne joueurs alerte
+demoanalysistriggerflicks: trigger triggerbot coup de poignet tirs nombre alerte
+demoanalysistriggerz: trigger triggerbot avant le centre bord ecart joueurs alerte
+demoanalysissound: son tir portee distance entendre ennemi cache wallhack
+demoanalysiscold: froid inconnu vu entendu temps ennemi cache wallhack
+demoanalysisexposure: exposition temps ennemis caches secondes wallhack alerte
+demoanalysishiddenrepeat: visee ennemi cache mur wallhack esp nombre fois alerte
+demoanalysishiddenz: hasard ecart ennemi cache wallhack esp alerte
+demoanalysishiddenshots: tir ennemi cache mur wallhack nombre alerte
+demoanalysiscombinedshots: visee et tirs ensemble ennemi cache wallhack alerte
+demoanalysiscombinedz: visee et tirs hasard ecart wallhack alerte
+demoanalysisfollow: suivi suivre traquer ennemi cache mur wallhack esp points alerte
+demoanalysiswaitfast: attendre reaction rapide apparition sortie ms
+demoanalysiswaitcount: attendre reactions nombre
+demoanalysiswaitfastcount: attendre reactions rapides nombre
+demoanalysisduel: duel un contre un ennemi seul alerte wallhack
+demoanalysisrupturegames: historique parties habituelles nom pseudo comparer nombre
+demoanalysisrupturemeasures: historique rupture pseudo usurpe faux joueur different mesures
+demoanalysisrupturez: historique ecart ecarts-types rupture pseudo loin
+demoanalysiswalls: mur murs tir a travers wallhack wallbang touche cache alerte
+demoanalysiswallshare: mur murs part pourcentage touches alerte
+demoanalysislagfrags: lag switch lagswitch faux lag trou positions frags alerte
+demoanalysislagz: lag hasard ecart frags trou alerte
+demoanalysislaggaps: lag trous positions coupure reseau nombre alerte
+demoanalysisair: vol voler fly gravite chute air secondes alerte
+demoanalysisjumplook: sauts saut double saut gravite fly a regarder
+demoanalysisnocliplook: noclip mur murs traverser dedans a regarder
+demoanalysisstats: stats statistiques joueurs tableau frags morts precision armes degats drapeaux pseudo carte mode
+demoanalysisauto: analyse automatique fin de partie entracte alerte demo suspecte tout seul
+demoanalysisfov: champ de vision fov dos hors champ stats autres joueurs
+demoanalysisbaseradius: drapeau base camp rayon pres stats
+demoanalysisstill: immobile sans bouger camper campeur secondes stats
+demoanalysisstillradius: immobile cercle rayon camper strafe stats
 killfeedvs: compteur duel contre tue morte
 showvs: compteur duel contre tue morte
 showlang: langues langue
@@ -319,12 +373,31 @@ scr_w: resolution largeur ecran taille pixels
 scr_h: resolution hauteur ecran taille pixels
 borderlessres: resolution etiree stretched stretch plein ecran fenetre sans bordure borderless 4:3 resolution choisie
 borderlessaspect: proportions bandes noires black bars aspect ratio etirer letterbox
+permonitordpi: net nettete flou deuxieme second ecran moniteur echelle mise a l'echelle dpi 125 150 200 pourcent scale hidpi per-monitor
 # --- graphics ---
 hdroutref: blanc reference nits luminosite hdr
 hdroutmax: pic luminosite crete nits hdr manuel automatique
 hdrouthud: luminosite hud interface hdr
 hwrtteleportlight: lumiere teleporteur rt
 hwrtjumppadlight: lumiere jumppad trampoline rt
+hwrtlampsall: toutes les lampes 256 lampes lampes qui n'eclairent pas clignote clignotement projecteurs spot cone lave auras panneaux lumineux rt
+GFX_light: eclairage mode classique ray tracing path tracing pt rebonds lumiere rebondie
+hwrtptlogical: lumieres logiques sources lampes du mappeur torches luminaires textures lumineuses lave teleporteurs rt pt
+hwrtpttexpower: force textures lumineuses luminaires panneaux lumineux pt
+hwrtpttexreach: portee textures lumineuses luminaires distance pt
+hwrtpttexgroup: regroupement regrouper textures lumineuses panneaux lumineux alloy i/s fps performance lent pt
+hwrtptcombine: lumiere physique rebonds ombre sombre pt
+hwrtptbouncegain: force des rebonds rebond ombre trop sombre trop claire curseur pt
+hwrtptskypixel: stable mouvement bruit grain scintillement points clairs pt
+hwrtptskyis: rayon du ciel rayon d'importance ciel stable mouvement fps pt
+hwrtptskyscale: lumiere du ciel ciel ombre pt
+hwrtptskyforce: force du ciel carte ciel soleil pt
+hwrtptskyratio: force du ciel ombre claire sombre soleil curseur pt
+hwrtptskyhue: couleur du ciel bleu mappeur skybox pt
+hwrtptglass: verre feuillage feuilles arbres vitres transparence fps pt
+hwrtptflames: torches flammes vacillement lumiere qui bouge pt
+hwrtptflamehidden: torches hors de vue flammes pt
+hwrtptlogicwindows: fenetres vitraux lampes derriere fenetre pt
 hwrtnrd: debruitage denoise denoiser ciel bruit grain filtre rt nrd integre builtin sauer
 ragdollmillis: cadavre corps rester garder reapparition ragdoll
 deadpush: cadavre projection vitesse ragdoll mort
@@ -418,6 +491,17 @@ botstylelevel: bots niveau pourcentage force difficulte joueur pro facile diffic
 botstyleform: bots forme jour variation partie regularite
 botstyletired: bots fatigue fatigues fatiguee tard nuit soir forme parties moins precis
 botstylewarmup: bots echauffement echauffer debut partie premieres minutes demarrage froid
+botstylepatience: bots tir patience attente vise trop tot precision tiny apa
+botstylepatnear: bots tir viseur proche sur moi attente trop tot precision tiny apa
+botstyletolmax: bots tir tolerance plafond large trop tot precision tiny apa
+botstyleunpredtol: bots tir imprevisible contre pied change de sens tolerance precision tiny apa
+botstylereactduel: bots reaction rapide reflexe duel premier tir apparition temps tiny apa
+botstylereflexduel: bots reflexe centre ecran devant viseur premier tir rapide duel apparition tiny apa
+botstylewallwait: bots tir mur decor abri bord coin viseur attendre precision tiny apa
+botstyleaimspread: bots visee dispersion point vise precision a cote niveau tiny apa
+botstylefelt: bots tir proche frole retourne retourner dos derriere attention reagir tiny apa
+botstyleheardwait: bots son sons bruit entendu saut tir duel attention retourne delai tiny apa
+botstyleheardfar: bots son sons bruit entendu loin distance ailleurs duel attention retourne tiny apa
 botnet: bots reseau neurones appris apprentissage imitation deplacements esquive pas de cote sauts bouger comme moi style joueur tiny apa ia chemin
 botnavgrid: bots chemins grille marche waypoints trajets navigation deplacement coince bloque suicide sauts jump pad carte sans waypoints
 navbuildshare: bots grille construction calcul part image fps saccade chargement carte attente

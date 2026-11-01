@@ -145,6 +145,7 @@ CLIENT_OBJS= \
 	fpsgame/ainav.o \
 	fpsgame/client.o \
 	fpsgame/demohd.o \
+	fpsgame/demoanalyse.o \
 	fpsgame/translate.o \
 	fpsgame/friends.o \
 	fpsgame/entities.o \
@@ -208,9 +209,13 @@ $(CLIENT_PCH): CXXFLAGS += $(CLIENT_INCLUDES)
 $(filter shared/%,$(CLIENT_OBJS)): $(filter shared/%,$(CLIENT_PCH))
 $(filter engine/%,$(CLIENT_OBJS)): $(filter engine/%,$(CLIENT_PCH))
 $(filter fpsgame/%,$(CLIENT_OBJS)): $(filter fpsgame/%,$(CLIENT_PCH))
+# the demo analysis computes as the studies did (numpy, double precision): no -ffast-math
+fpsgame/demoanalyse.o: CXXFLAGS += -fno-fast-math
 
 $(filter engine/hwrt/%,$(CLIENT_OBJS)): engine/hwrt/hwrt.h
-engine/hwrt/trace.o: engine/hwrt/shaders/debug_comp.h engine/hwrt/shaders/silhouette_comp.h engine/hwrt/shaders/rtao_comp.h engine/hwrt/shaders/hitshade_comp.h engine/hwrt/shaders/hitlight_comp.h engine/hwrt/shaders/hitlight_norefl_comp.h engine/hwrt/shaders/hitlight_half_comp.h engine/hwrt/shaders/hitlight_half_norefl_comp.h engine/hwrt/shaders/skycompose_comp.h
+engine/hwrt/trace.o: engine/hwrt/shaders/debug_comp.h engine/hwrt/shaders/silhouette_comp.h engine/hwrt/shaders/rtao_comp.h engine/hwrt/shaders/hitshade_comp.h engine/hwrt/shaders/hitlight_comp.h engine/hwrt/shaders/hitlight_norefl_comp.h engine/hwrt/shaders/hitlight_half_comp.h engine/hwrt/shaders/hitlight_half_norefl_comp.h engine/hwrt/shaders/skycompose_comp.h engine/hwrt/shaders/hitlight_pt_comp.h engine/hwrt/shaders/skycompose_pt_comp.h engine/hwrt/shaders/ptcache_comp.h
+engine/hwrt/lights.o: engine/hwrt/ptlogical.inc engine/hwrt/ptflames.inc engine/hwrt/ptlum.inc engine/hwrt/pttex.inc
+engine/hwrt/trace.o: engine/hwrt/ptsky.inc
 engine/hwrt/nrd.o: include/nrd_gateway/sauer_nrd.h
 engine/hwrt/fsr.o: include/fsr_gateway/sauer_fsr.h
 
@@ -539,6 +544,9 @@ fpsgame/client.o: fpsgame/capture.h fpsgame/ctf.h fpsgame/collect.h
 fpsgame/demohd.o: fpsgame/game.h shared/cube.h shared/tools.h shared/geom.h
 fpsgame/demohd.o: shared/ents.h shared/command.h shared/glexts.h
 fpsgame/demohd.o: shared/glemu.h shared/iengine.h shared/igame.h fpsgame/ai.h
+fpsgame/demoanalyse.o: fpsgame/game.h shared/cube.h shared/tools.h shared/geom.h
+fpsgame/demoanalyse.o: shared/ents.h shared/command.h shared/glexts.h
+fpsgame/demoanalyse.o: shared/glemu.h shared/iengine.h shared/igame.h fpsgame/ai.h
 fpsgame/entities.o: fpsgame/game.h shared/cube.h shared/tools.h shared/geom.h
 fpsgame/entities.o: shared/ents.h shared/command.h shared/glexts.h
 fpsgame/entities.o: shared/glemu.h shared/iengine.h shared/igame.h

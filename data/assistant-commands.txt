@@ -77,6 +77,7 @@ action toggledemopov | while watching a demo played on this computer: when you f
 action demonextview | while watching a demo played on this computer with the free camera: show the real positions (in a local demo, its recorder's game), then the game of each player in turn (also the VIEW line of the demo bar) | demo vue libre camera libre vision joueur vraie vision suivant view estimee
 action demogotoprompt | while watching a demo played on this computer: type a time to go to, to the millisecond, the demo paused there, for example 9:00.842 (also the GO TO button of the demo bar, or a click on its time) | demo aller a temps precis milliseconde moment seek goto taper temps compteur clic
 action toggledemoxray | while watching a demo played on this computer: show every player through the walls in their colour, or not (also the X-RAY button of the demo bar) | demo rayons x xray travers murs silhouettes
+action demoanalyse WORD? | with the demo analysis on (Recording, Demo analysis): analyze the demo being watched on this computer, or the demo file given, and open its page (also Analyze this demo, Recording, Demo playback) | analyse demo triche tricheur cheat verifier analyser
 action allowspedit | hold it to enter edit mode in single player modes (Ctrl by default) | edition editer solo ctrl
 action editcopy | edit mode: copy the selection | edition copier
 action editpaste | edit mode: paste | edition coller

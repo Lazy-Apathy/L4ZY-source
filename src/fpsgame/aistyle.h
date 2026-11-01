@@ -39,14 +39,48 @@
     VARP(botstyleform, 0, 1, 1);
     // with a form drawn for each game (botstyleform 1): how often a game is played "very tired" (%), and a warm-up during
     // the first two minutes of its game (as measured on the reference player); local games only (online the bots play at
-    // the skill they were added with, never tired nor warming up)
+    // the skill they were added with, never tired nor warming up); the warm-up is off by default (in a short duel the whole
+    // game was its warm-up)
     VARP(botstyletired, 0, 25, 100);
-    VARP(botstylewarmup, 0, 1, 1);
+    VARP(botstylewarmup, 0, 0, 1);
+    // its shot: the time it waits on him only widens its shot tolerance once its crosshair came within botstylepatnear
+    // tenths of his half width of the point it aims at (0: counted from the moment it noticed him), the tolerance
+    // doubling after botstylepatience ms; out of a flick it stays under botstyletolmax tenths of his half width (0: no
+    // limit); a target hard to predict widens it at botstyleunpredtol % (its aim already follows where he was a moment
+    // ago, which makes it miss him when he changes sides): measured against the reference player's moves in their duels
+    // against it (with 300, 0, 0 and 100, the shots left too early: it fired before its crosshair was on them)
+    VARP(botstylepatience, 100, 300, 2000);
+    VARP(botstylepatnear, 0, 20, 50);
+    VARP(botstyletolmax, 0, 20, 50);
+    VARP(botstyleunpredtol, 0, 50, 100);
+    // what it does once it lost the enemy from sight: botstylefelt 1 = a shot of his that passes close to it (or hits it)
+    // makes it turn to where that shot came from (the reference player: "I turn round when a shot nearly hits me"), and
+    // such a shot or a sound of his elsewhere makes it leave a cover it holds; 0 = it keeps watching where it lost him (as
+    // before: only a hit made it leave its cover). In a duel, a sound of his heard botstyleheardwait ms or more after it
+    // lost him, more than botstyleheardfar u (and 0.4 of how far the sound is) from where it lost him, makes it look there
+    // (measured in the reference player's duels: they turned to 40 such sounds out of 40, 29 of them heard within 1.5 s and
+    // 39 within 192 u of that line); with several enemies alive, 1500 ms and 192 u as before
+    VARP(botstylefelt, 0, 1, 1);
+    VARP(botstyleheardwait, 0, 0, 3000);
+    VARP(botstyleheardfar, 0, 0, 512);
+    // in a duel (a single enemy alive) its reaction to an enemy coming into view is that many ms quicker than in team games
+    // (measured on the reference player: 240 ms against 305 in median)
+    VARP(botstylereactduel, 0, 100, 150);
+    // in a duel, its reflex (it was already looking where the enemy comes into view) is that many ms quicker too: the
+    // reference player's first shot at someone appearing in the middle of the screen comes 324 ms after he appears in
+    // median, gesture and trigger included (0: the reflex alone was set to that time, as before)
+    VARP(botstylereflexduel, 0, 40, 100);
+    // its shot waits while the line of its crosshair runs into the walls before reaching the enemy (a player sees his
+    // crosshair is on the edge of the wall; measured: 4 % of the reference player's shots stop in the walls short of
+    // the enemy, 12 to 16 % of this bot's before; 0: it shoots anyway, as before)
+    VARP(botstylewallwait, 0, 1, 1);
+    // how far around his body the point it aims at is drawn, in % of the spread measured before the shot waited for a
+    // clear line (100: as before; that spread had been set while about one shot in six still went into the walls)
+    VARP(botstyleaimspread, 50, 120, 300);
 
     // measured on the reference player (instagib rifle unless said otherwise), then fitted on real target paths
     static const float SREACTFORM = 41,    // ms, spread of the median reaction from one game to the next
                        SREACTLEVEL = 3,    // ms added to the median reaction per level point under 100
-                       SREACTDUEL = 75,    // ms less in a duel
                        // gesture duration = SDUR0 * amplitude^SDURK ms; fitted so that the peak speed follows the
                        // reference player's by size of gesture (240 deg/s at 10-20 deg up to 1 400 deg/s at 160-400 deg)
                        SDUR0 = 82.5f, SDURK = 0.24f, SDURSD = 0.25f,
@@ -64,14 +98,13 @@
                        SOFF = 0.65f, SOFFV = 1.32f,     // aimed point around the body, in half widths of the target
                        // the shot leaves as soon as the crosshair passes close enough to the middle of the target: within
                        // SCLIC half widths (drawn for each shot, log-normal spread SCLICSD, wider against a target hard to
-                       // predict, x2 after waiting SPATIENCE ms), or within SFLICKTOL for a part SFLICK of the shots (on the
+                       // predict, x2 after waiting botstylepatience ms), or within SFLICKTOL for a part SFLICK of the shots (on the
                        // move); after a shot the hand notices the weapon is ready again SREPRISE ms late (median): measured
                        // in duels, the reference player fires about 90 ms after the crosshair reaches the target, and about
                        // 140 ms after the weapon is ready again when the target is still in sight
                        SCLIC = 1.3f, SCLICSD = 0.325f, SFLICK = 0.05f, SFLICKTOL = 2.85f,
                        SREPRISE = 100, SREPRISESD = 1.0f,
                        STRIG = 30, STRIGSD = 0.5f,       // ms, trigger delay
-                       SPATIENCE = 300,   // ms, the tolerance doubles after waiting this long
                        SMINSHOT = 60,     // ms, no shot earlier than this after a gesture starts
                        SLEVELERR = 0.8f,  // aiming error at level 50: x (1 + SLEVELERR)
                        SFORMACC = 0.09f,  // spread of the aiming error from one game to the next (log)
@@ -312,6 +345,7 @@
         float restyaw, restpitch, restfrom[3];
         float hvy, hvp;     // the speed of its hand (deg/s)
         int shotsoon;       // when its shot was last near (0: not now)
+        int nearat;         // since when its crosshair is near the point it aims at (0: not now)
         bool shotmove;      // and whether it moves for that shot
 
         void reset(aiinfo *ai)
@@ -369,6 +403,7 @@
             hvy = hvp = 0;
             shotsoon = 0;
             shotmove = false;
+            nearat = 0;
         }
 
         void resetpreaim()
@@ -490,7 +525,7 @@
     // (plus SREFLEXPLUS ms: measured in the reference player's duels, the first shot at someone appearing in the middle of
     // the screen comes 324 ms after he appears in median)
     static const float SREFLEXPLUS = 35;
-    static float stylereflex(fpsent *d) { return (botreflex + SREFLEXPLUS)*styleslow(d); }
+    static float stylereflex(fpsent *d) { return max(botreflex + SREFLEXPLUS - (aliveenemies(d) == 1 ? botstylereflexduel : 0), 110.0f)*styleslow(d); }
 
     static float stylereactshift(fpsent *d) // ms added to the median reaction of human perception
     {
@@ -498,7 +533,7 @@
         bool own = s && s->owner == d->ai;
         float form = own ? s->formreact : 0, tired = own && s->formtired ? STIREDREACT : 0;
         // a single enemy alive (a duel): expected, noticed sooner (measured: 240 ms in duels against 305 in team games)
-        float duel = aliveenemies(d) == 1 ? -SREACTDUEL : 0;
+        float duel = aliveenemies(d) == 1 ? -float(botstylereactduel) : 0;
         return SREACTFORM*form + SREACTLEVEL*(100 - stylelevel(d)) - (100 - clamp(d->skill, 1, 100))*2.2f + duel + tired;
     }
 
@@ -680,8 +715,9 @@
 
     static void stylenewaim(aistyle &s, bool flickok) // a new point to aim at, around the body (scaled by s.spread)
     {
-        s.oy = SOFF*rndgauss();
-        s.op = SOFF*SOFFV*rndgauss();
+        float k = botstyleaimspread/100.0f;
+        s.oy = k*SOFF*rndgauss();
+        s.op = k*SOFF*SOFFV*rndgauss();
         s.flick = flickok && rndscale(1) < SFLICK + (s.formtired ? STIREDFLICK : 0);
         s.clic = lognormal(SCLIC, SCLICSD);
     }
@@ -1031,12 +1067,19 @@
         return s.prenum > 0;
     }
 
-    // heard well away from where it lost him from sight, a good while after (he went elsewhere: that line no longer holds)
-    static bool styleheardaway(aiperceived &p, const vec &dp)
+    // heard well away from where it lost him from sight, a good while after (he went elsewhere: that line no longer holds):
+    // with several enemies alive SPREHEARD ms after and SPREHEARDDIST u away, in a duel botstyleheardwait ms and
+    // botstyleheardfar u; always more than 0.4 of how far the sound is (it only tells roughly where he is)
+    static bool styleheardaway(fpsent *d, aiperceived &p, const vec &dp)
     {
-        return p.knownsrc == AI_P_HEARD && p.knownmillis - p.linemillis >= SPREHEARD &&
-               p.knownpos.dist(p.linepos) > max(float(SPREHEARDDIST), 0.4f*p.knownpos.dist(dp));
+        bool multi = aliveenemies(d) > 1;
+        return p.knownsrc == AI_P_HEARD && p.knownmillis - p.linemillis >= (multi ? int(SPREHEARD) : botstyleheardwait) &&
+               p.knownpos.dist(p.linepos) > max(multi ? float(SPREHEARDDIST) : float(botstyleheardfar), 0.4f*p.knownpos.dist(dp));
     }
+
+    // a shot of his that passed close to it or hit it, felt since it lost him from sight (botstylefelt): he is where that shot
+    // came from, that line no longer holds
+    static bool stylefeltaway(aiperceived &p) { return botstylefelt && p.knownsrc == AI_P_HIT && p.knownmillis > p.linemillis; }
 
     // what it watches for a lost enemy: his line (where he went out, a little ahead along his way, then the spot itself),
     // the view resting on it; now and then, once he has been gone SPRESWITCH ms, a short glance at his nearest way out or a
@@ -1045,9 +1088,10 @@
     static bool stylepreaim(fpsent *d, aistyle &s, aiperceived &p, const vec &dp, fpsent *e, vec &at)
     {
         // where from: where it lost him from sight (a sound heard since does not move that: it only tells roughly where he is,
-        // often tens of units off; unless it heard him well away from there a good while later, in a duel too);
+        // often tens of units off; unless it heard him well away from there a good while later, in a duel too, or felt a shot
+        // of his pass close by since);
         // when it has not seen him in this life, where it knows him to be (a sound, its killer)
-        bool multi = aliveenemies(d) > 1, seen = p.linemillis && !styleheardaway(p, dp);
+        bool multi = aliveenemies(d) > 1, seen = p.linemillis && !styleheardaway(d, p, dp) && !stylefeltaway(p);
         // only heard: not that spot behind a wall or under the floor, but where he can come into its view from there, his ways
         // out one after the other (styleexitsweep, from human perception's guess)
         if(!seen && p.knownsrc == AI_P_HEARD) { s.prepick = -1; return false; }
@@ -1709,6 +1753,19 @@
     }
 
     // the enemy part of process() for a style bot (called by processhuman): same knowledge as human perception
+    // since when its wait for the shot counts: since it noticed him or its weapon was ready again, and (botstylepatnear)
+    // only once its crosshair came near the point it aims at (off: in his half widths)
+    static int stylewaitfrom(aistyle &s, float off)
+    {
+        int from = max(s.readyat, s.onset);
+        if(!botstylepatnear) return from;
+        if(off*10 > botstylepatnear) { s.nearat = 0; return lastmillis; }
+        if(!s.nearat) s.nearat = lastmillis;
+        return max(s.nearat, from);
+    }
+    // how much a target hard to predict widens its shot tolerance
+    static float styleunpredtol(aistyle &s) { return botstyleunpredtol >= 100 ? s.spread : powf(s.spread, botstyleunpredtol/100.0f); }
+
     static int styleenemy(fpsent *d, aistate &b, fpsent *e, aiperceived &p, const vec &dp, bool insight, bool quick, const vec &guess)
     {
         aistyle &s = claimstyle(d);
@@ -1798,7 +1855,8 @@
         {
             bool ground = d->physstate >= PHYS_SLOPE && !d->timeinair;
             if(insight && ground) { if(!s.coverseen) s.coverseen = lastmillis; } else if(!insight) s.coverseen = 0;
-            if(m_teammode || lastmillis >= s.coveruntil || (s.coverseen && lastmillis - s.coverseen > 300) || lastmillis - d->lastpain < 300) s.covermode = 0;
+            if(m_teammode || lastmillis >= s.coveruntil || (s.coverseen && lastmillis - s.coverseen > 300) || lastmillis - d->lastpain < 300 ||
+               (botstylefelt && !insight && (stylefeltaway(p) || styleheardaway(d, p, dp)))) s.covermode = 0; // something felt or heard elsewhere: it leaves
             else if(!insight)
             {
                 if(p.linemillis > s.coverstart)
@@ -1922,10 +1980,18 @@
         if(!see || lastmillis - s.onset < SMINSHOT*styleslow(d) || (!jumpshot && (lastmillis < s.settleuntil || (s.phase == STYLE_GESTURE && !s.gflick)))) return 2;
         float aerr = styleerr(d, s), ey = stylewrap(ty + s.oy*s.spread*aerr*half - d->yaw), ez = tp + s.op*s.spread*aerr*half - d->pitch,
               off = sqrtf(ey*ey + ez*ez)/max(whole, 0.05f), // how far the crosshair is from the point it aims at on the target it sees
-              waited = max(0, lastmillis - max(s.readyat, s.onset)),
-              tol = (s.flick || jumpshot ? SFLICKTOL : s.clic)*styleerr(d, s)*s.spread*(1 + waited/SPATIENCE);
+              waited = max(0, lastmillis - stylewaitfrom(s, off)),
+              tol = (s.flick || jumpshot ? SFLICKTOL : s.clic)*styleerr(d, s)*styleunpredtol(s)*(1 + waited/float(botstylepatience));
+        if(botstyletolmax && !s.flick && !jumpshot) tol = min(tol, botstyletolmax/10.0f);
         if(burst) tol = max(tol, 1.5f);
         if(off < SSOON*tol) stylesoon(d, s);
+        if(off < tol && botstylewallwait && !burst)
+        { // its crosshair on the walls in front of him: not yet
+            vec aimdir;
+            vecfromyawpitch(d->yaw, d->pitch, 1, 0, aimdir);
+            float wall = raycube(dp, aimdir, dist, RAY_CLIPMAT|RAY_ALPHAPOLY);
+            if(wall > 0 && wall < dist - e->radius - 1) return 2;
+        }
         if(off < tol)
         {
             s.fireat = lastmillis + (burst ? 0 : max(1, int(lognormal(STRIG, STRIGSD)*styleslow(d))));

@@ -76,10 +76,10 @@ namespace game
                 {
                     if(!alive++)
                     {
-                        settexture((demoplayback ? demohd::ally(d) : isteam(d->team, player1->team)) ? "packages/hud/blip_blue_alive.png" : "packages/hud/blip_red_alive.png");
-                        if(k && friendhascolor(true))
+                        settexture((demohd::visteam(d) ? demohd::visteam(d)==1 : isteam(d->team, player1->team)) ? "packages/hud/blip_blue_alive.png" : "packages/hud/blip_red_alive.png");
+                        if(k && friendhascolor(isfriendally(o)))
                         {
-                            vec c = friendcolorvec(true);
+                            vec c = friendcolorvec(isfriendally(o));
                             gle::color(c);
                         }
                         else gle::colorf(1, 1, 1);
@@ -98,10 +98,10 @@ namespace game
                 {
                     if(!dead++)
                     {
-                        settexture((demoplayback ? demohd::ally(d) : isteam(d->team, player1->team)) ? "packages/hud/blip_blue_dead.png" : "packages/hud/blip_red_dead.png");
-                        if(k && friendhascolor(true))
+                        settexture((demohd::visteam(d) ? demohd::visteam(d)==1 : isteam(d->team, player1->team)) ? "packages/hud/blip_blue_dead.png" : "packages/hud/blip_red_dead.png");
+                        if(k && friendhascolor(isfriendally(o)))
                         {
-                            vec c = friendcolorvec(true);
+                            vec c = friendcolorvec(isfriendally(o));
                             gle::color(c);
                         }
                         else gle::colorf(1, 1, 1);

@@ -2203,7 +2203,7 @@ void addlookao()
 // each lumel. Off by default; with RT lighting the bake is skipped and RT
 // has its own sky visibility, so it does nothing there.
 void cleanupgtao();
-VARFP(gtao, 0, 1, 2, cleanupgtao());
+VARFP(gtao, 0, 0, 2, cleanupgtao());
 VAR(gtaodebug, 0, 0, 3);
 FVAR(gtaolowradius, 1, 5, 64);
 FVAR(gtaohighradius, 1, 10, 64);
@@ -2896,7 +2896,7 @@ VAR(hidehud, 0, 0, 1);
 VARP(crosshairsize, 0, 15, 50);
 VARP(cursorsize, 0, 30, 50);
 VARP(crosshairfx, 0, 1, 1);
-VARP(crosshaircolors, 0, 1, 1);
+VARP(crosshaircolors, 0, 1, 1); // low-health colours only (game::selectcrosshair)
 HVARP(crosshaircolour, 0, 0xFFFFFF, 0xFFFFFF); // resting colour; hit/teammate/health tints still override
 
 static vec crosshairbase()
@@ -2927,9 +2927,10 @@ static Texture *crosshairs[MAXCROSSHAIRS] = { NULL, NULL, NULL, NULL };
 void loadcrosshair(const char *name, int i)
 {
     if(i < 0 || i >= MAXCROSSHAIRS) return;
-	crosshairs[i] = name ? textureload(name, 3, true) : notexture;
+	crosshairs[i] = name ? textureload(name, 3, true, false) : notexture;
     if(crosshairs[i] == notexture) 
     {
+        if(name) logoutf("crosshair picture not found or not readable: %s (default crosshair used)", name);
         name = game::defaultcrosshair(i);
         if(!name) name = "data/crosshair.png";
         crosshairs[i] = textureload(name, 3, true);
@@ -2986,7 +2987,7 @@ void drawcrosshair(int w, int h)
         if(index >= 0)
         {
             if(!crosshairfx) index = 0;
-            if(!crosshairfx || !crosshaircolors) color = base;
+            if(!crosshairfx) color = base; // hit and teammate colours show over any resting colour
             Texture *crosshair = crosshairs[index];
             if(!crosshair)
             {

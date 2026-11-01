@@ -369,6 +369,7 @@ static const struct { const char *name; float play, alsook; } hwrtonlineonly[] =
     { "hwrtskyvisdbg", 0, 0 },      // sky visibility heatmaps
     { "hdrlightdbg", 0, 0 },        // classic world: light alone / texture alone
     { "gtaodebug", 0, 0 },          // classic GTAO: grey AO / raw AO / multiplier alone
+    { "hwrtptdebug", 0, 0 },        // path tracing: bounced light, sky or direct light alone (white walls)
     { "hwrtdepthmask", 1, 1 },      // 0 draws traced hits over grass, water, world alpha
     // test drives: they move or pin the camera, the player, other players or a mapmodel
     { "hwrtvelwalk", 0, 0 },

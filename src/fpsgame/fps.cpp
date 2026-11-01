@@ -1,7 +1,7 @@
 #include "game.h"
 
 extern float curfov, fovy, aspect;
-extern int fov;
+extern int fov, crosshaircolors;
 extern int screenw, screenh, zoomfov;
 extern float forceaspect;
 
@@ -264,6 +264,7 @@ namespace game
 
     void updateworld()        // main game update loop
     {
+        demoanalyse::frame(); demohd::syncviewteam();
         if(!maptime) { maptime = lastmillis; maprealtime = totalmillis; return; }
         if(!curtime) { gets2c(); updatespecqueue(); if(demoplayback) demohd::freefly(); if(player1->clientnum>=0) c2sinfo(); return; }
 
@@ -1520,6 +1521,7 @@ namespace game
 
             execident("intermission");
             matchrec::onintermission();
+            demohd::onintermission();
         }
     }
 
@@ -2579,24 +2581,24 @@ namespace game
         bool tinted = false;
         if(crosshair==2 && lasthitcn >= 0)
         {
-            // hit crosshair in the colour of the friend you hit
+            // hit crosshair: the side of the player you hit, seen by the shooter (you or the watched player)
             fpsent *t = getclient(lasthitcn);
-            if(t && isfriend(t) && friendhascolor(isfriendally(t)))
+            int vt = t ? demohd::visteam(t) : 0;
+            bool ally = t && (vt ? vt==1 : (m_teammode && isteam(t->team, d->team)));
+            if(t && isfriend(t) && friendhascolor(ally))
             {
-                color = friendcolorvec(isfriendally(t));
+                color = friendcolorvec(ally); // a friend: his friend colour for that side
                 tinted = true;
             }
             else if(t)
             {
                 // anyone else: blue if on the watched player's team, red otherwise (FFA too)
-                int vt = demohd::visteam(t);
-                bool ally = vt ? vt==1 : (m_teammode && isteam(t->team, d->team));
                 color = ally ? vec(0.25f, 0.5f, 1) : vec(1, 0.2f, 0.1f);
                 tinted = true;
             }
         }
 
-        if(crosshair!=1 && !tinted && !editmode && !m_insta)
+        if(crosshaircolors && crosshair!=1 && !tinted && !editmode && !m_insta)
         {
             if(d->health<=25) color = vec(1, 0, 0);
             else if(d->health<=50) color = vec(1, 0.5f, 0);

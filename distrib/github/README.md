@@ -1,6 +1,6 @@
 # L4ZY
 
-A Cube 2: Sauerbraten (2020) client with **hardware ray-traced lighting**, **NVIDIA DLAA/DLSS** and **AMD FSR**, **native HDR output**, **local AI chat translation** and a **settings assistant**, **3D sound**, a **drag-and-drop HUD editor**, and other additions: friends list, kill feed, CTF flag timer, automatic match recording, HD-aim demos with X-ray, Tiny Apa bots and more.
+A Cube 2: Sauerbraten (2020) client with **hardware ray-traced lighting** (and an optional **path-traced** mode), **NVIDIA DLAA/DLSS** and **AMD FSR**, **native HDR output**, **local AI chat translation** and a **settings assistant**, **3D sound**, a **drag-and-drop HUD editor**, and other additions: friends list, kill feed, CTF flag timer, automatic match recording, HD-aim demos with X-ray, Tiny Apa bots and more.
 
 It plays on normal Sauerbraten servers. The only extra thing it sends is one `__L4ZY <version>` line when you connect, which vanilla servers ignore (see [Online rules](#online-rules)).
 
@@ -51,7 +51,7 @@ How updates are applied:
 
 | What | Where | Updated by the installer? |
 |---|---|---|
-| Game settings, screenshots, demos, match videos | `Documents\My Games\L4ZY` | never |
+| Game settings, screenshots, demos, match videos, your crosshair pictures, demo analysis history and player stats | `Documents\My Games\L4ZY` | never |
 | Translation settings, learned corrections, optional API key, logs | `%LOCALAPPDATA%\L4ZY\translation` | never |
 | Translation models (GGUF) | `%LOCALAPPDATA%\L4ZY\models` | never |
 | The game itself | `%LOCALAPPDATA%\Programs\L4ZY` | yes |
@@ -78,6 +78,7 @@ Windows 10/11 64-bit with an up-to-date graphics driver. Vulkan is only started 
   - NVIDIA drivers provide both.
   - AMD and Intel cards have hardware RT, but this sharing has not been checked on their drivers.
   - If something is missing, the game stays on *Classic* lighting and says so in the menu.
+- **Path tracing** needs the same as ray tracing, and costs more.
 - **DLAA/DLSS** need NVIDIA Tensor cores (RTX).
 - **AMD FSR** uses the same OpenGL/Vulkan memory sharing as ray tracing.
 - **Native HDR** uses the NVIDIA OpenGL/Direct3D bridge.
@@ -104,19 +105,26 @@ L4ZY ships its own `menus.cfg`: a new main menu, and an Options hub with pages f
 ### Ray-traced lighting
 
 - Hardware ray tracing (Vulkan `ray_query`, computed next to the OpenGL renderer). It draws:
-  - point lights with a shadow ray
-  - glowing lamps
+  - point lights with a shadow ray (every lamp of the map, with the mapper's spotlights in their cone)
+  - glowing lamps, lava and glowing auras
   - the sun with a shadow ray
   - sky light
   - lit player models
-- This is not full path tracing.
+- The light can come from the lamps the mapper placed (*Map lamps*, default) or from what you see in the room (*Scene lights*: torches, light fittings, glowing textures, lava and teleporters). The same choice is used by path tracing.
+- *Path tracing* adds the light that bounces into the shade (see [Path tracing](#path-tracing)).
 - *Classic* keeps the original Sauerbraten lighting and builds no RT scene.
 
-**Menu:** Options → Graphics → *General* tab → *Lighting*
+**Menu:** Options → Graphics → *General* tab → *Lighting* (*Classic*, *Ray tracing* or *Path tracing*); its settings are in the *Ray tracing* tab (*Lights*, *Shadows*, *Surfaces*)
 
 | Setting | Values | Default |
 |---|---|---|
 | `hwrt` | `0` Classic (no RT), `1` ray tracing | `0` |
+| `hwrtlampsall` | every lamp of the map lights, with spotlights, lava and glowing auras (Options → Graphics → *Ray tracing* → *Lights*); `0` only the first 256 lamps, without them (as before) | `1` |
+| `hwrtptlogical` | light sources (Options → Graphics → *Ray tracing* → *Lights*), for ray tracing and path tracing: `0` Map lamps, `1` Scene lights | `0` |
+| `hwrtpttexpower` / `hwrtpttexreach` | Scene lights: how strongly the glowing textures light the room (`1` as bright as they look) / how far their light goes, in units (64, 128, 256, 512) | `1` / `128` |
+| `hwrtpttexgroup` | Scene lights: glowing textures side by side light as one, within this many units (`0` off, 24, 32, 64); faster on maps with many glowing panels | `32` |
+| `hwrtptflames` / `hwrtptflamehidden` | Scene lights: a torch's light follows its flame / torches out of view keep flickering | `1` / `1` |
+| `hwrtptlogicwindows` | Scene lights: a lamp the mapper set behind a window lights the room; `0` the window lets the sky's light through | `0` |
 | `hwrtshadowself` | own-body RT shadow: `0` off, `1` sun, `2` + small/glow lights, `3` + nearest lamps, `4` + sky | `1` |
 | `hwrtshadowothers` | RT shadows of the others (players, bots, corpses, projectiles, flags, pickups): `0` none, `1` sun and sky, `2` + teleporters / lava / jump pads, `3` + the map's lamps | `2` |
 | `hwrtsoftshadows` | RT soft shadows (penumbra that widens with the distance from the object; Options → Graphics → *Ray tracing* tab → *Shadows*, *Off* / *On*): `2` On, the sun and the lamps (lamps, fires, teleporters, lava), `0` Off (hard shadows), `1` the sun only (console). The *Low* profile turns them off | `2` |
@@ -140,6 +148,25 @@ Useful commands:
 Menu status lines tell you whether RT is really running.
 
 If your graphics card or driver cannot run ray tracing, *Ray tracing* is greyed out with the reason.
+
+### Path tracing
+
+- A third lighting mode, next to *Classic* and *Ray tracing*: the ray tracing plus the light that bounces off walls, floors and ceilings into the shade.
+- It costs more than ray tracing, and needs the same graphics card.
+- Its light sources are the ones chosen in Options → Graphics → *Ray tracing* → *Lights* (*Map lamps* or *Scene lights*).
+- Its settings are saved: switching between the three modes is one click.
+
+**Menu:** Options → Graphics → *General* tab → *Lighting* → *Path tracing*; its settings: *Path tracing* tab
+
+| Setting | Values | Default |
+|---|---|---|
+| `hwrtptbouncegain` | how strongly light bounces into the shade (menu `0` to `2`, *Soft* `1`, *Strong* `1.5`) | `1` |
+| `hwrtptskypixel` | steady light while moving: a place that comes into view does not sparkle | `1` |
+| `hwrtptskyscale` | sky light in the shade (*Sky light in the shade*: `1` on, `0` none) | `1` |
+| `hwrtptskyforce` / `hwrtptskyratio` | on maps with a sun, the sky lights the shade with this share of the sun's light (*Hazy* `0.3`, *Clear* `0.13`); `hwrtptskyforce 0` = the strength the map gives (*Use the map's sky strength*) | `1` / `0.3` |
+| `hwrtptskyhue` | sky light colour: `1` the colour the mapper chose, `0` the colours of the sky picture | `1` |
+| `hwrtptskyis` | one more ray toward the bright parts of the sky: steadier light near openings when you move | `1` |
+| `hwrtptglass` | light goes through the gaps of leaves and see-through parts of models; `0` faster on maps with trees | `1` |
 
 ### Ray tracing performance
 
@@ -244,7 +271,7 @@ The game reads your mouse once the GPU has caught up, instead of queueing frames
 | `lookfxaa` | FXAA in Native (Options → Graphics → *General* → *Anti-Aliasing*): smoother edges, softer textures. Off = as sharp as stock Sauerbraten | `0` |
 | `lookselfshadow` | classic lighting: your own body casts a sun shadow in first person (needs Classic shadows, Graphics → Classic). With ray tracing it is `hwrtshadowself` (Graphics → *Ray tracing* → *Shadows*) | `1` |
 | `waterwaves` | animated waves on classic water (Options → Graphics → *Classic* → *Detail*): reflection, refraction and shine ripple, the water stays flat for the game. Same strength / speed / detail settings as `hwrtwaterwaves` | `0` |
-| `gtao` | Ambient Occlusion, classic lighting only (Options → Graphics → *Classic* → *Shading*): `0` off, `1` Low, `2` High. Slightly darker corners and wall bases; players are never darkened | `1` |
+| `gtao` | Ambient Occlusion, classic lighting only (Options → Graphics → *Classic* → *Shading*): `0` off, `1` Low, `2` High. Slightly darker corners and wall bases; players are never darkened | `0` |
 
 ### Chat translation (local AI)
 
@@ -371,6 +398,7 @@ Ask in plain words how to find or change a setting, and the translation model an
 - Friends are coloured on their body, the name above their head, the scoreboard, chat, the kill feed and the minimap.
   - One colour for your team, another for the other team.
   - Also on the first-person arm of the friend you spectate, and in demos.
+  - While you spectate or watch a demo, a friend keeps the colour of their own side: friend colours, flags, radar and scoreboard agree (in your own HD demos, your team is the one you played on).
 - *Find friends online* scans the public server list, and lets you join a friend's server.
 
 **Menu:** Options → *Friends and colours* (colours: *Player colours* tab)
@@ -501,6 +529,30 @@ With ray tracing, lights follow your colours: a muzzle flash takes the trail col
 | `playlocaldemo <i>`, `localdemoextract <i>` | play a demo, copy it with its `.dmohd` | |
 | `openfolder demo` | open the folder | |
 
+The list of saved demos shows the newest first.
+
+### Demo analysis and player stats
+
+Work in progress. Off by default: nothing runs and nothing is written until you tick *Demo analysis*.
+
+- **Demo analysis:** a tool-assisted check that helps spot unusual behaviour in the demos on this computer (aim, movement, knowing where hidden enemies are).
+  - It shows what stands out for each name, in plain words, and lists the moments to look at; a click goes there in the demo. Rest the mouse on a value to see the numbers.
+- It is a help to know where to look, not a verdict: a demo shows neither the screen nor the game used, and names can be copied. Watch the moments yourself.
+- **Player stats:** what each player did in your recorded games and the demos you analyze (frags, weapons, flags, time in each half…), by name, mode and map. Pick a mode, map or weapon from a list, find a name, and tick names to show only *My list* (kept when the game starts again).
+- **After each recorded game** (optional): the analysis runs by itself. A line shows only when something stands out strongly; that demo then shows in red in the list of demos, and the automatic clean-up keeps it until you check it (*Mark as checked*, or open it).
+- Everything stays on this computer and is never sent.
+
+**Menu:** Options → Recording → *Demo analysis* tab; while watching a demo, Options → Recording → *Demo playback* → *Analyze this demo...*
+
+| Setting | What it does | Default |
+|---|---|---|
+| `demoanalysis` | demo analysis on | `0` |
+| `demoanalysishistory` | after each recorded game, keep its players' numbers to compare the next games with their usual ones | `1` |
+| `demoanalysisstats` | player stats from the recorded games | `0` |
+| `demoanalysisauto` | analyze each recorded game when it ends | `0` |
+
+How far a value must stand out before it is shown in red can be changed in the same tab (*Alert levels*).
+
 ### Tiny Apa bots
 
 - **Classic:** the normal Sauerbraten bots.
@@ -508,7 +560,7 @@ With ray tracing, lights follow your colours: a muzzle flash takes the trail col
 
 Classic bots stay the default.
 
-**Menu:** main menu → *Bot Match* → *bots play*: *Classic* or *Tiny Apa*; with Tiny Apa, their level and *a different form each game*.
+**Menu:** main menu → *Bot Match* → *bots play*: *Classic* or *Tiny Apa*; with Tiny Apa, their level, *a different form each game*, and the *form*, *shot*, *attention* and *walk grid* settings pages. The *Shots* and *Attention* pages each have a *default* button and a button to go back to how it was before.
 
 | Setting | Values | Default |
 |---|---|---|
@@ -516,7 +568,17 @@ Classic bots stay the default.
 | `botstylelevel` | Tiny Apa level in %, `50` to `100`: `100` a strong player, `50` half the accuracy and slower | `100` |
 | `botstyleform` | `1` a different form each game, `0` always the same | `1` |
 | `botstyletired` | % of games a Tiny Apa plays tired, `0` to `100` (with a different form each game) | `25` |
-| `botstylewarmup` | `1` warm up during the first two minutes, `0` full level from the start | `1` |
+| `botstylewarmup` | `1` warm up during the first two minutes, `0` full level from the start | `0` |
+| `botstylepatience` | *Shots*: ms of waiting on you before a Tiny Apa allows twice as wide a shot (`100` to `2000`) | `300` |
+| `botstylepatnear` | *Shots*: that wait only counts once their crosshair is near you, in tenths of your half width (`0` off, up to `50`) | `20` |
+| `botstyletolmax` | *Shots*: widest shot out of a flick, in tenths of your half width (`0` no limit, up to `50`) | `20` |
+| `botstyleunpredtol` | *Shots*: how much a target that keeps changing direction widens the shot, in % (`0` to `100`) | `50` |
+| `botstylereactduel` | *Shots*: how much quicker they react to you in a duel, in ms (`0` to `150`) | `100` |
+| `botstylereflexduel` | *Shots*: in a duel, how much quicker they shoot when you appear right in front of them, in ms (`0` to `100`) | `40` |
+| `botstylewallwait` | *Shots*: `1` no shot while their crosshair is on the wall in front of you, `0` they fire anyway | `1` |
+| `botstyleaimspread` | *Shots*: how far around you the point they aim at is drawn, in % (`50` to `300`) | `120` |
+| `botstylefelt` | *Attention*: `1` turn round when one of your shots passes close, even from a cover, `0` keep watching where they last saw you | `1` |
+| `botstyleheardwait` / `botstyleheardfar` | *Attention*, in a duel: how soon (ms, `0` at once, up to `3000`) and how far from where they lost you (units, `0` any sound clearly elsewhere, up to `512`) a sound of yours makes them look there | `0` / `0` |
 | `botnavgrid` | `1` find their way on the map's walk grid, `0` the map's waypoints | `1` |
 | `botnavsafe` | on the walk grid: `1` keep clear of deadly falls, `0` off | `1` |
 | `botnet` | `1` a new way for Tiny Apa to make decisions (work in progress), `0` off | `0` |
@@ -527,12 +589,14 @@ Classic bots stay the default.
   - Admin, auth and master are shown as a tag after the name; names are dimmed while a player is dead.
 - **Spectating:** a list of the players on the right (`spectatorlist`, `1`, Options → HUD → *Scoreboard (Tab)…*). Hold Tab and click a name to follow that player. A small eye marks the player you watch, in the list, the scoreboard and the Master menu.
 - **Master menu** (main menu → *Master*, in a game): each player's client number, and the actions as icons (hover one to see what it does).
-- **Crosshair** (Options → HUD → *Crosshair…*, also from Options → Mouse): resting colour in hex (`crosshaircolour`, or `crosshairhex FF8800`; default white), with white/green/cyan/yellow/pink presets. The hit crosshair takes the colour of the player you hit (friend colour, otherwise blue or red); `crosshairreloaddim` dims it while reloading (`0`).
+- **Crosshair** (Options → HUD → *Crosshair…*, also from Options → Mouse): resting colour in hex (`crosshaircolour`, or `crosshairhex FF8800`; default white), with white/green/cyan/yellow/pink presets. The hit crosshair takes the colour of the player you hit (friend colour, otherwise blue or red), whatever the crosshair colour; *Colour shows my health* (`crosshaircolors`) only changes the low-health colours; `crosshairreloaddim` dims it while reloading (`0`).
+  - **My crosshairs:** put your own PNG pictures in the folder that *Open my crosshair folder* opens (`Documents\My Games\L4ZY\crosshairs`, a README there explains it), then click one to use it; `name-hit.png` is its hit marker. *Default crosshair* goes back to the game's own.
 - **Sound mix** (Options → Sound → Mix): `mixweapons`, `mixhits`, `mixpain`, `mixitems`, `mixannounce`, `mixflags`, `mixmove`, `mixworld`.
   - All go from 0 to 200 (`100` = normal). `mixreset` puts them all back to 100.
 - **Mouse** (Options → Mouse): `mousedpi` (`800`), `setcm360 <cm>` and `getcm360`, for hipfire cm per 360°.
 - **Window** (Options → Display): `windowmode` `0` windowed, `1` exclusive fullscreen, `2` borderless (default).
   - `borderlessres` (`0`): in borderless, play at the resolution chosen below it and stretch it over the whole screen; Windows keeps its own resolution. `borderlessaspect` (`0`) keeps the proportions with black bars.
+  - `permonitordpi` (`0`, *Sharp on a second screen with another scale*, Options → Display → *Screen*): on a screen whose Windows scale differs from the main screen, the game draws every pixel instead of being stretched by Windows. Applies after a restart.
 
 ### Online rules
 
@@ -556,7 +620,25 @@ Classic bots stay the default.
 
 Each release is listed on the [Releases](https://github.com/Lazy-Apathy/L4ZY/releases) page, newest first.
 
-### 2026.10.25.1 (test)
+### 2026.11.1.1 (test)
+
+- Bots: Tiny Apa no longer fire before their crosshair is on you or at the wall in front of you, and in a duel they shoot a little sooner when you appear in front of them.
+- Bots: Tiny Apa turn round when your shot passes close, and in a duel look towards a sound you make elsewhere.
+- Bots: the Tiny Apa warm-up is now off by default.
+- Bots: new Shot and Attention settings for Tiny Apa (main menu → Bot Match → *shot settings..* / *attention settings..*).
+- Graphics: new *Path tracing* lighting mode, next to *Classic* and *Ray tracing*: the ray tracing plus the light that bounces off walls, floors and ceilings into the shade. It costs more than ray tracing (Options → Graphics → *Lighting*, settings in the new *Path tracing* tab).
+- Ray tracing: every lamp of the map now lights, with the mapper's spotlights, lava and glowing auras. On by default; it can be turned off (Options → Graphics → *Ray tracing* → *Lights*).
+- Ray tracing: new choice of light sources, for ray tracing and path tracing: *Map lamps* (the lights the mapper placed, default) or *Scene lights* (torches, light fittings, glowing textures, lava and teleporters light the room).
+- Graphics: the *Ray tracing* tab is split into *Lights*, *Shadows* and *Surfaces*.
+- Demos: new *Demo analysis* (work in progress), off by default (Options → Recording → *Demo analysis*): a tool-assisted check that helps spot unusual behaviour in the demos on your computer.
+- Demos: new *Player stats* from your recorded games, by name, mode and map, and an optional analysis of each recorded game when it ends; a demo where something stands out shows in red and is kept until you check it. Off by default, on this computer only.
+- Demos: the list of saved demos shows the newest first.
+- Crosshair: the hit marker and teammate colours now show with any crosshair colour.
+- Crosshair: your own crosshair pictures: put PNG files in your crosshair folder and pick them in Options → HUD → *Crosshair…* → *My crosshairs*.
+- Spectating and demos: a friend you watch no longer shows as on your team; friend colours, flags, radar and scoreboard now agree.
+- Display: new option, off by default: *Sharp on a second screen with another scale* (Options → Display → *Screen*, after a restart). On a screen whose Windows scale differs from the main screen, the game draws every pixel instead of being stretched by Windows.
+
+### 2026.10.25.1 (stable)
 
 - Bots: Tiny Apa find their way on a walk grid made for each map (jump pads, teleporters, small steps, drops) and keep clear of deadly falls. The grid is built little by little the first time a map is played, then kept on disk and updated after map edits (main menu → Bot Match → walk grid settings..).
 - Bots: Tiny Apa aim at the part of a player they can see, keep one opponent in mind, shoot at where they believe you are, and react to sounds without knowing who made them.

@@ -58,14 +58,14 @@ namespace game
     static const char *friendsfile() { return "friends.cfg"; }
 
     // "same team" as seen by the viewer: in your own HD demo, the recorder's team;
-    // when spectating, the team of the player you follow; otherwise yours
+    // otherwise yours, spectating included, like the blue / red bodies, the flags,
+    // the radar and the scoreboard (the player you follow is never the reference:
+    // he would always be on his own team)
     bool isfriendally(fpsent *d)
     {
         if(!d || !player1) return false;
         if(int vt = demohd::visteam(d)) return vt == 1;
-        fpsent *ref = player1;
-        if(player1->state==CS_SPECTATOR) { fpsent *f = followingplayer(); if(f) ref = f; }
-        return m_teammode && isteam(d->team, ref->team);
+        return m_teammode && isteam(d->team, player1->team);
     }
 
     static int friendcoloridx(bool ally)

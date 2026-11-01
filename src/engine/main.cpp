@@ -140,6 +140,41 @@ VARF(scr_h, SCR_MINH, -1, SCR_MAXH, { if(!scrsizelive()) initwarning("screen res
 VARF(depthbits, 0, 0, 32, initwarning("depth-buffer precision"));
 VARF(fsaa, -1, -1, 16, initwarning("anti-aliasing"));
 
+// Windows: 1 = the game window is per-monitor DPI aware (v2): sharp at the real
+// resolution of a screen whose Windows scale differs from the main screen's
+// (otherwise Windows stretches the game there). The process stays system DPI
+// aware (vcpp/dpiaware.manifest); only the main thread, which creates and
+// drives the window, changes its DPI awareness, before SDL starts. Read from
+// init.cfg: takes effect at the next start. 0 (default) runs none of this.
+#ifdef WIN32
+#define PERMONITORDPI_MAX 1
+#else
+#define PERMONITORDPI_MAX 0
+#endif
+static int permonitordpiactive = 0;
+VARF(permonitordpi, 0, 0, PERMONITORDPI_MAX,
+{
+    if(!initing && permonitordpi != permonitordpiactive)
+        conoutf("\f2Sharp on every screen: restart the game to apply.");
+});
+
+static void applypermonitordpi()
+{
+#ifdef WIN32
+    if(!permonitordpi) return;
+    // DPI_AWARENESS_CONTEXT is a handle; PER_MONITOR_AWARE_V2 = -4 (Windows 10 1703+).
+    typedef HANDLE (WINAPI *setthreaddpictx_t)(HANDLE);
+    HMODULE user32 = GetModuleHandleA("user32.dll");
+    setthreaddpictx_t setctx = user32 ? (setthreaddpictx_t)GetProcAddress(user32, "SetThreadDpiAwarenessContext") : NULL;
+    if(setctx && setctx((HANDLE)(intptr_t)-4))
+    {
+        permonitordpiactive = 1;
+        logoutf("video: per-monitor DPI aware (v2) game window");
+    }
+    else logoutf("video: per-monitor DPI awareness not available (Windows 10 1703 or later), system DPI kept");
+#endif
+}
+
 void writeinitcfg()
 {
     stream *f = openutf8file("init.cfg", "w");
@@ -153,6 +188,7 @@ void writeinitcfg()
     f->printf("scr_h %d\n", scr_h);
     f->printf("depthbits %d\n", depthbits);
     f->printf("fsaa %d\n", fsaa);
+    if(permonitordpi) f->printf("permonitordpi %d\n", permonitordpi);
     extern int usesound, soundchans, soundfreq, soundbufferlen;
     extern char *audiodriver;
     f->printf("usesound %d\n", usesound);
@@ -796,6 +832,68 @@ static void setrendersize();
 
 VARF(windowmode, 0, WM_BORDERLESS, 2, applywindowmode());
 
+// permonitordpi active (Windows), windowed: SDL 2.0.12 sizes the window frame
+// for the main screen's scale, and Windows resizes the frame (not the window)
+// when the window reaches a screen with another scale, so the picture would
+// lose a few pixels each time. The window gets back exactly the client size in
+// pixels it had or was asked for. The screen scale is written to log.txt at
+// start and whenever it changes.
+#ifdef WIN32
+typedef UINT (WINAPI *permonitorgetdpi_t)(HWND);
+typedef BOOL (WINAPI *permonitoradjust_t)(LPRECT, DWORD, BOOL, DWORD, UINT);
+static UINT permonitorwindowdpi(HWND hwnd)
+{
+    static permonitorgetdpi_t getdpi = (permonitorgetdpi_t)GetProcAddress(GetModuleHandleA("user32.dll"), "GetDpiForWindow");
+    return getdpi && hwnd ? getdpi(hwnd) : 0;
+}
+static int permonitorkeepw = 0, permonitorkeeph = 0;
+#endif
+
+static void permonitordpisize(int w, int h)
+{
+#ifdef WIN32
+    if(!permonitordpiactive || !screen || windowmode != WM_WINDOWED || w <= 0 || h <= 0) return;
+    if(SDL_GetWindowFlags(screen) & (SDL_WINDOW_MAXIMIZED | SDL_WINDOW_MINIMIZED | SDL_WINDOW_FULLSCREEN)) return;
+    permonitorkeepw = w;
+    permonitorkeeph = h;
+    static permonitoradjust_t adjust = (permonitoradjust_t)GetProcAddress(GetModuleHandleA("user32.dll"), "AdjustWindowRectExForDpi");
+    HWND hwnd = gamehwnd();
+    UINT dpi = permonitorwindowdpi(hwnd);
+    RECT cr;
+    if(!adjust || !dpi || !GetClientRect(hwnd, &cr) || (cr.right - cr.left == w && cr.bottom - cr.top == h)) return;
+    RECT r = { 0, 0, w, h };
+    if(!adjust(&r, DWORD(GetWindowLongW(hwnd, GWL_STYLE)), FALSE, DWORD(GetWindowLongW(hwnd, GWL_EXSTYLE)), dpi)) return;
+    SetWindowPos(hwnd, NULL, 0, 0, r.right - r.left, r.bottom - r.top, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    logoutf("video: window client %ldx%ld set back to %dx%d (screen scale %u%%)",
+            long(cr.right - cr.left), long(cr.bottom - cr.top), w, h, dpi*100/96);
+#endif
+}
+
+static void permonitordpiupdate(const char *when)
+{
+#ifdef WIN32
+    if(!permonitordpiactive || !screen) return;
+    static UINT lastdpi = 0;
+    HWND hwnd = gamehwnd();
+    UINT dpi = permonitorwindowdpi(hwnd);
+    RECT cr;
+    if(!dpi || !GetClientRect(hwnd, &cr)) return;
+    if(dpi != lastdpi)
+    {
+        logoutf("%s: screen scale %u%% (dpi %u), window %ldx%ld, display %d", when, dpi*100/96, dpi,
+                long(cr.right - cr.left), long(cr.bottom - cr.top), SDL_GetWindowDisplayIndex(screen));
+        bool changed = lastdpi != 0;
+        lastdpi = dpi;
+        if(changed) { permonitordpisize(permonitorkeepw, permonitorkeeph); return; }
+    }
+    if(windowmode == WM_WINDOWED && !(SDL_GetWindowFlags(screen) & (SDL_WINDOW_MAXIMIZED | SDL_WINDOW_MINIMIZED)))
+    {
+        permonitorkeepw = cr.right - cr.left;
+        permonitorkeeph = cr.bottom - cr.top;
+    }
+#endif
+}
+
 extern int fullscreen, fullscreendesktop;
 
 static bool windowflagsexclusive()
@@ -908,6 +1006,7 @@ void applywindowmode()
             SDL_SetWindowBordered(screen, SDL_TRUE);
             SDL_SetWindowResizable(screen, SDL_TRUE);
             SDL_SetWindowSize(screen, scr_w, scr_h);
+            permonitordpisize(scr_w, scr_h);
             SDL_SetWindowPosition(screen, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
             initwindowpos = false;
             break;
@@ -1111,6 +1210,7 @@ void screenres(int w, int h)
         else if(windowmode == WM_WINDOWED)
         {
             SDL_SetWindowSize(screen, scr_w, scr_h);
+            permonitordpisize(scr_w, scr_h);
             SDL_SetWindowPosition(screen, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
             initwindowpos = false;
         }
@@ -1344,6 +1444,8 @@ void setupscreen()
 
     setrendersize();
     logwindowstate("video: setupscreen");
+    permonitordpiupdate("video: setupscreen");
+    permonitordpisize(scr_w, scr_h);
 }
 
 void resetgl()
@@ -1606,6 +1708,7 @@ void checkinput()
                         break;
 
                     case SDL_WINDOWEVENT_MOVED:
+                        permonitordpiupdate("video: window moved");
                         if(windowmode == WM_BORDERLESS && screen && !applyingwindowmode)
                         {
                             // Alt+Tab often fires MOVED with a 1–8px position jitter.
@@ -1628,6 +1731,7 @@ void checkinput()
                     case SDL_WINDOWEVENT_SIZE_CHANGED:
                     {
                         if(shuttingdown) break;
+                        permonitordpiupdate("video: window resized");
                         setrendersize();
                         if(screenw <= 0 || screenh <= 0) break;
                         if(windowmode == WM_WINDOWED)
@@ -1833,7 +1937,7 @@ VAR(numcpus, 1, 1, 16);
 // step applied; each step runs once, right after config.cfg is read and
 // before autoexec.cfg, and never again, so a choice made later is kept.
 // A fresh profile only records the latest step.
-enum { L4ZY_MIGRATION_LATEST = 4 };
+enum { L4ZY_MIGRATION_LATEST = 5 };
 VARP(l4zymigration, 0, 0, 1000);
 
 static void applyl4zymigrations()
@@ -1893,6 +1997,17 @@ static void applyl4zymigrations()
             hdroutpref = 0;
             logoutf("l4zymigration 4: hdroutpref -1 (Automatic) -> 0 (SDR)");
             conoutf("Display output: Automatic was removed, the game now uses SDR. For HDR, choose Native HDR in Options > Graphics.");
+        }
+    }
+    if(l4zymigration < 5)
+    {
+        // 5: Tiny Apa's warm-up (the first two minutes of each game) is off by default: in a short duel the whole game
+        // was its warm-up. Players who had the old default (on) go to off once; a choice made later is kept.
+        ident *w = getident("botstylewarmup");
+        if(w && w->type == ID_VAR && *w->storage.i)
+        {
+            setvar("botstylewarmup", 0);
+            logoutf("l4zymigration 5: botstylewarmup 1 -> 0");
         }
     }
     if(l4zymigration < L4ZY_MIGRATION_LATEST) l4zymigration = L4ZY_MIGRATION_LATEST;
@@ -2064,6 +2179,7 @@ int main(int argc, char **argv)
     {
         logoutf("init: sdl");
 
+        applypermonitordpi();
         if(SDL_Init(SDL_INIT_TIMER|SDL_INIT_VIDEO|SDL_INIT_AUDIO)<0) fatal("Unable to initialize SDL: %s", SDL_GetError());
         conthreadinit();
         {

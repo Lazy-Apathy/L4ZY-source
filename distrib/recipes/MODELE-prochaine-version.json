@@ -19,7 +19,7 @@
   {
    "dest": "data/glsl.cfg",
    "src": "data/glsl.cfg",
-   "sha256": "07583f1ebd13bab9cca441be1178d53672e59ddcbee25b7515e0b5148e72d518"
+   "sha256": "a74ca14a8bdbd75f49ac1c363f3cc2bf0594b91c27dac0c3ae6711f7a5c33209"
   },
   {
    "dest": "data/menus.cfg",

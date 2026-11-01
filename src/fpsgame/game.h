@@ -982,12 +982,14 @@ namespace demohd
     void onplayback(const char *dmofile);
     void onplaybackend();
     void onplaybackreset();
+    void onintermission();
     const char *hudstatus();
     bool hastrack(int cn);
     bool hdaim(fpsent *d);
     int livedelay();
     bool livecompatible();
     int recordercn();
+    void syncviewteam();
     bool isrecorder(fpsent *d);
     bool ally(fpsent *d);
     bool allyteam(const char *team);
@@ -1030,6 +1032,20 @@ namespace demohd
     bool lookcursor(int &x, int &y);
     void seekkeep();
     void seekrefollow();
+}
+
+// demo analysis (demoanalyse.cpp): indications of cheating read from demos, off by default
+namespace demoanalyse
+{
+    extern bool mirroring;
+    void frame();
+    void onplayback(const char *dmofile);
+    void onplaybackend();
+    void onrecordstart(const void *header, int len, const char *stem);
+    void onrecordpacket(const void *stamp, const uchar *data, int len);
+    void onrecordintermission(const char *stem, const char *hdfile);
+    void onrecordend(const char *stem, const char *dmofile, bool saved);
+    bool keepdemo(const char *stem);    // a demo worth a look, not checked yet, analysis on: the clean-up keeps it
 }
 
 namespace server

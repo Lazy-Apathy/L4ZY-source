@@ -161,13 +161,20 @@ struct LightEnv {
     vec4 soft3;  // optimised rays: smallest contribution, tan of the smallest half-angle, temporal weight, filter radius scale
 };
 struct Light { vec3 pos; float radius; vec3 color; float flags; };
-// Same buffer as hitlight.comp; stage 2 appends one word per lamp after the 256
+// Same buffer as hitlight.comp; stage 2 appends one word per lamp after the
 // lamp slots: bit 0 = the first loop evaluates it (radius 0 within the first
 // 16, or a glow within the first 96, counted in index order exactly as that
 // loop counts them), bit 1 = it is a finite lamp the nearest-N loop may elect.
-const int MAXLIGHTS = 256;
+// PT 6: the table holds every light of the map (4096 slots, lights.cpp HWRT_MAX_LIGHTS) instead of the first 256 (the
+// tile culling tests them 256 at a time). Bit 6: a glow the nearest-N loop elects by its light, not by its distance (lava).
+const int MAXLIGHTS = 4096;
 const uint KIND_ALWAYS = 1u;
 const uint KIND_NEAR = 2u;
+const uint KIND_GLOWNEAR = 64u;
+// The lamps whose kind word the election must read (surface emitter 16, spotlight 32, lava 64): the tile culling marks
+// their entry in list B (bit 31), so an ordinary lamp costs the election no more reads than before.
+const uint KIND_SPECIAL = 112u;
+const uint LIST_SPECIAL = 0x80000000u;
 // Traced reflections: the water planes ride behind the lamp table and the
 // kind words (pos = min x, min y, surface z; radius = max x; color = max y,
 // group, first rectangle; flags = rectangle count; the box has the margin),
@@ -369,6 +376,10 @@ shared vec3 sh_n[16][16];
 shared vec3 sh_p[16][16];
 shared float sh_mdl[16][16];
 shared float sh_hit[16][16];
+#ifdef HWRT_PT
+// Path tracing: the hemisphere light (sky + bounced light) of each pixel, for the same 5x5 as the sky fraction.
+shared vec3 sh_pth[16][16];
+#endif
 
 // Geometry table size with the stage 2 cache (HWRT_MAX_GEOMS_CAP in hwrt.h).
 const uint MAXGEOMS = 161u;
@@ -380,8 +391,12 @@ shared vec3 sh_lo[MAXSUBGROUPS];
 shared vec3 sh_hi[MAXSUBGROUPS];
 shared uint sh_cntA[MAXSUBGROUPS];
 shared uint sh_cntB[MAXSUBGROUPS];
-shared uint sh_listA[MAXLIGHTS];
-shared uint sh_listB[MAXLIGHTS];
+// PT 6: at most this many lamps per list (the first ones in index order if more could reach the tile): the always-
+// evaluated lamps (radius 0, glows, weapon lights: a few dozen) and the finite lamps the box can reach.
+const int MAXLISTA = 256;
+const int MAXLISTB = 1024;
+shared uint sh_listA[MAXLISTA];
+shared uint sh_listB[MAXLISTB];
 shared uint sh_nA, sh_nB;
 
 // Could a lamp at `pos` reach any point of the box? The margin is relative and
@@ -411,40 +426,50 @@ void tileCull(bool reach, vec3 hit, int nlights)
         bmin = min(bmin, sh_lo[s]);
         bmax = max(bmax, sh_hi[s]);
     }
-    // One lamp per invocation, in index order across the subgroups.
+    // One lamp per invocation, in index order across the subgroups; PT 6: 256 lamps per pass, as many passes as the
+    // table needs (a map of 256 lamps or fewer takes one, as before).
     bool full = gl_NumSubgroups * gl_SubgroupSize == 256u;
-    uint li = gl_SubgroupID * gl_SubgroupSize + gl_SubgroupInvocationID;
-    bool inA = false, inB = false;
-    if(full && int(li) < nlights)
-    {
-        uint k = lights.kind[li];
-        float r = lights.l[li].radius;
-        vec3 lp = lights.l[li].pos;
-        if((k & KIND_ALWAYS) != 0u) inA = r <= 0.0 || tileReach(lp, r, bmin, bmax);
-        if((k & KIND_NEAR) != 0u) inB = tileReach(lp, r, bmin, bmax);
-    }
-    uvec4 bA = subgroupBallot(inA);
-    uvec4 bB = subgroupBallot(inB);
-    uint preA = subgroupBallotExclusiveBitCount(bA);
-    uint preB = subgroupBallotExclusiveBitCount(bB);
-    if(subgroupElect())
-    {
-        sh_cntA[gl_SubgroupID] = subgroupBallotBitCount(bA);
-        sh_cntB[gl_SubgroupID] = subgroupBallotBitCount(bB);
-    }
-    barrier();
     if(full)
     {
-        uint offA = 0u, offB = 0u, totA = 0u, totB = 0u;
-        for(uint s = 0u; s < gl_NumSubgroups; s++)
+        if(gl_LocalInvocationIndex == 0u) { sh_nA = 0u; sh_nB = 0u; }
+        for(int base = 0; base < nlights; base += 256)
         {
-            if(s < gl_SubgroupID) { offA += sh_cntA[s]; offB += sh_cntB[s]; }
-            totA += sh_cntA[s];
-            totB += sh_cntB[s];
+            uint li = uint(base) + gl_SubgroupID * gl_SubgroupSize + gl_SubgroupInvocationID;
+            bool inA = false, inB = false;
+            uint specB = 0u;
+            if(int(li) < nlights)
+            {
+                uint k = lights.kind[li];
+                float r = lights.l[li].radius;
+                vec3 lp = lights.l[li].pos;
+                if((k & KIND_ALWAYS) != 0u) inA = r <= 0.0 || tileReach(lp, r, bmin, bmax);
+                if((k & KIND_NEAR) != 0u) inB = tileReach(lp, r, bmin, bmax);
+                if((k & KIND_SPECIAL) != 0u) specB = LIST_SPECIAL;
+            }
+            uvec4 bA = subgroupBallot(inA);
+            uvec4 bB = subgroupBallot(inB);
+            uint preA = subgroupBallotExclusiveBitCount(bA);
+            uint preB = subgroupBallotExclusiveBitCount(bB);
+            if(subgroupElect())
+            {
+                sh_cntA[gl_SubgroupID] = subgroupBallotBitCount(bA);
+                sh_cntB[gl_SubgroupID] = subgroupBallotBitCount(bB);
+            }
+            barrier();
+            uint offA = sh_nA, offB = sh_nB, totA = 0u, totB = 0u;
+            for(uint s = 0u; s < gl_NumSubgroups; s++)
+            {
+                if(s < gl_SubgroupID) { offA += sh_cntA[s]; offB += sh_cntB[s]; }
+                totA += sh_cntA[s];
+                totB += sh_cntB[s];
+            }
+            if(inA && offA + preA < uint(MAXLISTA)) sh_listA[offA + preA] = li;
+            if(inB && offB + preB < uint(MAXLISTB)) sh_listB[offB + preB] = li | specB;
+            // Everyone has read the counts and the running totals before they change.
+            barrier();
+            if(gl_LocalInvocationIndex == 0u) { sh_nA = min(sh_nA + totA, uint(MAXLISTA)); sh_nB = min(sh_nB + totB, uint(MAXLISTB)); }
+            barrier();
         }
-        if(inA) sh_listA[offA + preA] = li;
-        if(inB) sh_listB[offB + preB] = li;
-        if(gl_LocalInvocationIndex == 0u) { sh_nA = totA; sh_nB = totB; }
     }
     else if(gl_LocalInvocationIndex == 0u)
     {
@@ -455,8 +480,8 @@ void tileCull(bool reach, vec3 hit, int nlights)
             uint k = lights.kind[i];
             float r = lights.l[i].radius;
             vec3 lp = lights.l[i].pos;
-            if((k & KIND_ALWAYS) != 0u && (r <= 0.0 || tileReach(lp, r, bmin, bmax))) sh_listA[na++] = uint(i);
-            if((k & KIND_NEAR) != 0u && tileReach(lp, r, bmin, bmax)) sh_listB[nb++] = uint(i);
+            if((k & KIND_ALWAYS) != 0u && na < uint(MAXLISTA) && (r <= 0.0 || tileReach(lp, r, bmin, bmax))) sh_listA[na++] = uint(i);
+            if((k & KIND_NEAR) != 0u && nb < uint(MAXLISTB) && tileReach(lp, r, bmin, bmax)) sh_listB[nb++] = uint(i) | ((k & KIND_SPECIAL) != 0u ? LIST_SPECIAL : 0u);
         }
         sh_nA = na;
         sh_nB = nb;
@@ -1184,6 +1209,170 @@ void addSpec(vec3 ldir, vec3 n, vec3 viewDir, vec3 color, float specMul, inout v
     specAcc += color * sp * specMul;
 }
 
+// PT 5, with the ray tracing too since PT 6 (lights.cpp ptspotkind): the map's spotlights (kind bit 5). A direction in
+// kind bits 8-15 (azimuth / 2pi) and 24-31 (elevation from -90 to 90 degrees), the cone's half-angle in bits 16-23.
+const uint KIND_SPOT = 32u;
+vec3 ptKindDir(uint kd)
+{
+    float az = float((kd >> 8u) & 255u) * (6.28318530718 / 256.0);
+    float el = (float(kd >> 24u) * (1.0 / 255.0) - 0.5) * 3.14159265359;
+    float ce = cos(el);
+    return vec3(ce * cos(az), ce * sin(az), sin(el));
+}
+// A spotlight's cone, the baker's law (lightmap.cpp): (cos of the angle to its axis - cos of its half-angle, kind bits
+// 16-23 in degrees) / (1 - that), 0 or less outside. fromL: unit direction from the lamp to the point.
+float ptSpotAtten(uint kd, vec3 fromL)
+{
+    float ca = cos(radians(clamp(float((kd >> 16u) & 255u), 1.0, 89.0)));
+    return (dot(ptKindDir(kd), fromL) - ca) / (1.0 - ca);
+}
+
+#ifdef HWRT_PT
+// Path tracing parameters (trace.cpp ptwriteparams), set 1 binding 0. Declared here: the lamps below read it too.
+layout(std430, set = 1, binding = 0) readonly buffer PtParams {
+    vec4 a;  // x hemisphere rays (1-4), y bounces (1 once, 2 many), z transport albedo exponent, w floor (x ambient)
+    vec4 b;  // x cell size near the camera, y distance band, z one update warp in N, w logical lighting (1)
+    vec4 c;  // xyz spare, w cache entries - 1
+    vec4 d;  // x flags (bit0 cache, bit1 update on a miss, bit2 short-ray bit, bit3 5x5 filter), y debug, z sample clamp, w combine (0 max, 1 sum)
+    // PT 3 (prototype). e: the sky as a light (x on, y importance sampling, z pixel mode, w spare); f: the flames
+    // (x method 0/1/2 with the logical lighting, y sprite disc, z fire strength, w spare); g, h spare.
+    vec4 e;
+    vec4 f;
+    vec4 g;
+    vec4 h;
+} ptp;
+// Logical lighting (hwrtptlogical, lights.cpp ptlogical.inc): the map's placed lamps and ambient are gone, the sources
+// the scenery shows (flames, glowing textures, teleporters, lava) are emitters. Kind bit 3 marks them, kind bits 16-23
+// hold their size in quarter units, their colour is a power (light x units^2): their light falls with the square of
+// the distance, softened by their size and taken smoothly to 0 at their radius.
+const uint KIND_LOGICAL = 8u;
+bool ptLogical() { return int(ptp.b.w + 0.5) == 1; }
+float ptLogicFalloff(uint kd, float d, float radius)
+{
+    float s = float((kd >> 16u) & 255u) * 0.25;
+    float x = d / max(radius, 1e-3);
+    if(x >= 1.0) return 0.0;
+    float w = 1.0 - x * x * x * x;
+    return w * w / (d * d + s * s);
+}
+// Reflections with the logical lighting (reflWorld): the light of the radiance cache where the reflection ray landed.
+vec3 ptReflLight(vec3 p, vec3 n, float cone);
+vec3 gReflRd = vec3(0.0, 0.0, -1.0);
+
+// PT 3, the sky as a light (trace.cpp ptsky.inc), set 1 binding 4: the radiance of the sky GL draws, 128 x 64
+// directions (latitude-longitude, z up; rgb in the world's light units, a the probability of the texel), the CDFs to
+// draw a direction in proportion to its light, and the mean colour of the sky above the horizon by normal direction.
+layout(std430, set = 1, binding = 4) readonly buffer PtSky { vec4 v[]; } ptsky;
+const int PTSKY_W = 128, PTSKY_H = 64, PTSKY_NW = 32, PTSKY_NH = 16;
+const int PTSKY_RAD = 4;
+const int PTSKY_COND = PTSKY_RAD + PTSKY_W * PTSKY_H;
+const int PTSKY_MARG = PTSKY_COND + PTSKY_W * PTSKY_H / 4;
+const int PTSKY_NTAB = PTSKY_MARG + PTSKY_H / 4;
+// PT 5: the same mean in physical light (hwrtptcombine 3), right after it.
+const int PTSKY_NTAB2 = PTSKY_NTAB + PTSKY_NW * PTSKY_NH;
+bool ptSkyOn() { return ptp.e.x > 0.5; }
+bool ptSkyIS() { return ptp.e.y > 0.5; }
+vec2 ptSkyUV(vec3 d)
+{
+    float phi = atan(d.y, d.x);
+    if(phi < 0.0) phi += 6.28318530718;
+    return vec2(phi * (1.0 / 6.28318530718), acos(clamp(d.z, -1.0, 1.0)) * (1.0 / 3.14159265359));
+}
+// Bilinear, wrapping in azimuth: table at offset base, w x h texels.
+vec3 ptSkyBilin(int base, int w, int h, vec3 d)
+{
+    vec2 t = ptSkyUV(d) * vec2(float(w), float(h)) - 0.5;
+    ivec2 i0 = ivec2(floor(t));
+    vec2 f = t - vec2(i0);
+    int x0 = (i0.x + w) % w, x1 = (i0.x + 1 + w) % w;
+    int y0 = clamp(i0.y, 0, h - 1), y1 = clamp(i0.y + 1, 0, h - 1);
+    vec3 a = mix(ptsky.v[base + y0 * w + x0].rgb, ptsky.v[base + y0 * w + x1].rgb, f.x);
+    vec3 b = mix(ptsky.v[base + y1 * w + x0].rgb, ptsky.v[base + y1 * w + x1].rgb, f.x);
+    return mix(a, b, f.y);
+}
+vec3 ptSkyL(vec3 d) { return ptSkyBilin(PTSKY_RAD, PTSKY_W, PTSKY_H, d); }
+// The mean colour of the sky above the horizon a surface facing n sees (times the share of its rays that escaped).
+vec3 ptSkyMean(vec3 n) { return ptSkyBilin(PTSKY_NTAB, PTSKY_NW, PTSKY_NH, n); }
+// PT 5: the mean of the sky's radiance in physical light a surface facing n sees (hwrtptcombine 3).
+vec3 ptSkyMeanLin(vec3 n) { return ptSkyBilin(PTSKY_NTAB2, PTSKY_NW, PTSKY_NH, n); }
+// Probability density (solid angle) of drawing d with ptSkySample.
+float ptSkyPdf(vec3 d)
+{
+    vec2 uv = ptSkyUV(d);
+    int x = min(int(uv.x * float(PTSKY_W)), PTSKY_W - 1), y = min(int(uv.y * float(PTSKY_H)), PTSKY_H - 1);
+    float st = max(sqrt(max(1.0 - d.z * d.z, 0.0)), 1e-4);
+    return ptsky.v[PTSKY_RAD + y * PTSKY_W + x].a * float(PTSKY_W * PTSKY_H) / (19.7392088022 * st);
+}
+float ptSkyF(int k) { return ptsky.v[k >> 2][k & 3]; }
+// A direction drawn in proportion to the sky's light (row by the marginal CDF, column by the row's CDF).
+vec3 ptSkySample(vec2 u, out float pdf)
+{
+    int lo = 0, hi = PTSKY_H - 1;
+    while(lo < hi) { int mid = (lo + hi) >> 1; if(ptSkyF(PTSKY_MARG * 4 + mid) < u.x) lo = mid + 1; else hi = mid; }
+    int j = lo;
+    float c0 = j > 0 ? ptSkyF(PTSKY_MARG * 4 + j - 1) : 0.0;
+    float fy = clamp((u.x - c0) / max(ptSkyF(PTSKY_MARG * 4 + j) - c0, 1e-7), 0.0, 0.9999);
+    int base = PTSKY_COND * 4 + j * PTSKY_W;
+    lo = 0; hi = PTSKY_W - 1;
+    while(lo < hi) { int mid = (lo + hi) >> 1; if(ptSkyF(base + mid) < u.y) lo = mid + 1; else hi = mid; }
+    int i = lo;
+    float d0 = i > 0 ? ptSkyF(base + i - 1) : 0.0;
+    float fx = clamp((u.y - d0) / max(ptSkyF(base + i) - d0, 1e-7), 0.0, 0.9999);
+    float phi = (float(i) + fx) / float(PTSKY_W) * 6.28318530718, th = (float(j) + fy) / float(PTSKY_H) * 3.14159265359;
+    float st = sin(th);
+    pdf = ptsky.v[PTSKY_RAD + j * PTSKY_W + i].a * float(PTSKY_W * PTSKY_H) / (19.7392088022 * max(st, 1e-4));
+    return vec3(st * cos(phi), st * sin(phi), cos(th));
+}
+
+// PT 4: how the sky's light joins the direct light (hwrtptcombine, ptp.d.w): 0 the larger of the two (as the maps were
+// baked), 1 their sum in the game's light values, 2 their sum in physical light. The game's light values are display
+// values (a lightmap texel, a lamp colour /255: what the screen shows on a white wall), roughly the physical light to
+// the power 1/2.2: two lights add once taken back to physical light (^2.2), the sum then shown again (^1/2.2). In the
+// sun the sky adds little (the sun dominates), in the shade it is all there is.
+const float PT_GAMMA = 2.2;
+vec3 ptToPhys(vec3 c) { return pow(max(c, vec3(0.0)), vec3(PT_GAMMA)); }
+vec3 ptToDisp(vec3 c) { return pow(max(c, vec3(0.0)), vec3(1.0 / PT_GAMMA)); }
+vec3 ptCombineSky(vec3 direct, vec3 sky)
+{
+    float m = ptp.d.w;
+    if(m > 1.5) return ptToDisp(ptToPhys(direct) + ptToPhys(sky));
+    return m > 0.5 ? direct + sky : max(direct, sky);
+}
+// PT 4, the ray tracing with the path tracing's sources (hwrtptnobounce, flags bit 4): the bounce rays only look for
+// the sky (first hit ends them), no bounced light is added; the map's ambient is the floor (hwrtptfloor), as in the
+// ray tracing.
+bool ptNoBounce() { return (int(ptp.d.x + 0.5) & 16) != 0; }
+// PT 5 (hwrtptcombine 3): the light that reaches a point from many directions (the sky through an opening, the
+// bounced light) adds and averages in physical light. Each sample (the sky's radiance in a direction, the light a
+// bounce ray brings back) is taken to physical light, the sums and the radiance cache are in physical light, and
+// only the pixel's final light is shown again: a place that sees a sunlit floor or a patch of sky through a gap gets
+// the share of that light it really gets (a fifth of a bright view is 0.2 in shown values, 0.48 in physical light).
+bool ptPhys() { return ptp.d.w > 2.5; }
+// The reflectance in physical light is the texture colour as shown to the power 2.2, times this strength (c.x).
+float ptBounceGain() { return max(ptp.c.x, 0.0); }
+vec3 ptSkyLP(vec3 d, bool phys) { vec3 L = ptSkyL(d); return phys ? ptToPhys(L) : L; }
+// PT 5 (lights.cpp pttex.inc): surface emitters (glowing textures, kind bit 4); the map's spotlights (kind bit 5) are
+// above, with the ray tracing (PT 6).
+const uint KIND_SURFACE = 16u;
+// A surface emitter's factor at a point (fromL: unit direction from it to the point, d the distance): the cosine at the
+// emitter over d^2 + size^2 (kind bits 16-23, quarter units), faded to 0 at its radius. Times its colour (the light it
+// emits times its area) it is the physical light there, shown again (to the power 1/2.2) before it joins the lamps.
+float ptSurfFalloff(uint kd, vec3 fromL, float d, float radius)
+{
+    float ce = dot(ptKindDir(kd), fromL);
+    float x = d / max(radius, 1e-3);
+    if(ce <= 0.0 || x >= 1.0) return 0.0;
+    float s = float((kd >> 16u) & 255u) * 0.25;
+    float w = 1.0 - x * x * x * x;
+    return ce * w * w / (d * d + s * s);
+}
+// The colour addOmni uses for lamp i (a surface emitter's shown light is not its stored colour).
+vec3 gOmniColor = vec3(0.0);
+#define OMNI_COLOR(i) gOmniColor
+#else
+#define OMNI_COLOR(i) lights.l[i].color
+#endif
+
 // bodymask: a second shadow ray against the bodies and game objects alone
 // (DYN, plus SELF / LOCAL from hwrtshadowself 2), traced only once shmask found
 // the lamp clear. 0 for none. The teleport / lava lamps use it: their world ray
@@ -1203,6 +1392,13 @@ void addOmni(int i, vec3 hit, vec3 n, vec3 sorigin, uint shmask, uint bodymask, 
         // Glow / teleport: 1-x^2 keeps mid-range light without raising the
         // peak. Linear (ordinary lamps) matches the baker.
         intensity = flags >= 1.5 ? (1.0 - x*x) : (1.0 - x);
+#ifdef HWRT_PT
+        if((lights.kind[i] & KIND_LOGICAL) != 0u) intensity = ptLogicFalloff(lights.kind[i], magh, radius);
+        // PT 5: a surface emitter's law (physical light, shown again below).
+        if((lights.kind[i] & KIND_SURFACE) != 0u) intensity = ptSurfFalloff(lights.kind[i], (hit - lights.l[i].pos) / max(magh, 1e-4), magh, radius);
+#endif
+        // PT 5, the ray tracing too since PT 6: a spotlight's cone.
+        if((lights.kind[i] & KIND_SPOT) != 0u) intensity *= max(ptSpotAtten(lights.kind[i], (hit - lights.l[i].pos) / max(magh, 1e-4)), 0.0);
     }
     vec3 ldir = mag > 1e-4 ? (toL / mag) : n;
     // flags 2: aura (screens). Sit on a pad that is often buried
@@ -1219,9 +1415,30 @@ void addOmni(int i, vec3 hit, vec3 n, vec3 sorigin, uint shmask, uint bodymask, 
         // Teleport / lava sit low over a pad: hard Lambert leaves the floor
         // black a few metres out. A bit of wrap fills the room; walls still
         // block because the shadow ray runs after this.
+#ifdef HWRT_PT
+        if(flags >= 2.5 && (lights.kind[i] & KIND_LOGICAL) == 0u) ndotl = ndotl * 0.65 + 0.35;
+#else
         if(flags >= 2.5) ndotl = ndotl * 0.65 + 0.35;
+#endif
         if(ndotl <= 0.0) return;
     }
+#ifdef HWRT_PT
+    gOmniColor = lights.l[i].color;
+    if((lights.kind[i] & KIND_SURFACE) != 0u)
+    {
+        // PT 5: the emitter's physical light here, shown again; gOmniColor times intensity * ndotl gives that shown light.
+        vec3 el = lights.l[i].color * (intensity * ndotl);
+        vec3 shown = pow(max(el, vec3(0.0)), vec3(1.0 / PT_GAMMA));
+        if(max(shown.r, max(shown.g, shown.b)) < 0.004) return;
+        gOmniColor = shown / max(intensity * ndotl, 1e-20);
+    }
+    else if((lights.kind[i] & KIND_LOGICAL) != 0u)
+    {
+        vec3 lc0 = lights.l[i].color;
+        if(intensity * ndotl * max(lc0.r, max(lc0.g, lc0.b)) < 0.004) return;
+    }
+    else
+#endif
     if(intensity * ndotl < 0.02) return;
 
     // vis: 0 behind a surface, below 1 through weapon smoke, else 1.
@@ -1248,7 +1465,7 @@ void addOmni(int i, vec3 hit, vec3 n, vec3 sorigin, uint shmask, uint bodymask, 
         if(SOFT_NEW)
         {
             // Extended unless it adds less than soft3.x to this pixel or looks smaller than soft3.y (hwrtsoftopt 16).
-            vec3 lc = lights.l[i].color;
+            vec3 lc = OMNI_COLOR(i);
             extended = sr >= 0.05 && intensity * ndotl * max(lc.r, max(lc.g, lc.b)) >= lights.env.soft3.x
                        && sr >= mag * lights.env.soft3.y;
             if(SOFT_SIGMA) extsr = sr;
@@ -1323,7 +1540,7 @@ void addOmni(int i, vec3 hit, vec3 n, vec3 sorigin, uint shmask, uint bodymask, 
     bool ratio = (SOFT_RATIO || SOFT_SIGMA) && extended;
     if(ratio)
     {
-        vec3 c = lights.l[i].color * intensity * ndotl;
+        vec3 c = OMNI_COLOR(i) * intensity * ndotl;
         gLampU += c;
         gLampV += c * vis;
         float cl = dot(c, vec3(0.2126, 0.7152, 0.0722));
@@ -1335,14 +1552,14 @@ void addOmni(int i, vec3 hit, vec3 n, vec3 sorigin, uint shmask, uint bodymask, 
     }
     if(SOFT_SIGMA) gOccT = -1.0;
     if(vis <= 0.0) return;
-    if(!ratio) acc += lights.l[i].color * intensity * ndotl * vis;
+    if(!ratio) acc += OMNI_COLOR(i) * intensity * ndotl * vis;
     if(!aura)
     {
-        addSpec(ldir, n, viewDir, lights.l[i].color * intensity * vis, specMul, specAcc);
+        addSpec(ldir, n, viewDir, OMNI_COLOR(i) * intensity * vis, specMul, specAcc);
         // Real lamps only: the glow omnis (teleporters, jump pads, lava) are
         // RT extras with no highlight in classic lighting.
 #ifndef HWRT_NO_REFL
-        if(flags < 1.5) addWorldSpec(ldir, viewDir, lights.l[i].color * intensity * vis);
+        if(flags < 1.5) addWorldSpec(ldir, viewDir, OMNI_COLOR(i) * intensity * vis);
 #endif
     }
 }
@@ -1527,6 +1744,16 @@ vec3 reflWorld(uint prim, vec2 bary, float cone)
         bake = texture(lightmaps, vec3(lm, float(lmid))).rgb;
     vec3 scale = vec3(float(t.z & 255u), float((t.z >> 8u) & 255u), float((t.z >> 16u) & 255u)) * (2.0 / 255.0);
     vec3 col = albedo * bake * scale;
+#ifdef HWRT_PT
+    // Logical lighting: the bake holds the map's placed lamps; the light of the scene where the ray landed instead.
+    if(ptLogical())
+    {
+        vec3 rn = cross(p1 - p0, p2 - p0);
+        float rl = length(rn);
+        rn = rl > 1e-8 ? rn / rl : -gReflRd;
+        col = albedo * (scale * 0.5) * ptReflLight(p0 * a + p1 * b + p2 * c, rn, cone);
+    }
+#endif
     uint glayer = t.w & 255u;
     int nglow = int(lights.env.glowLayers + 0.5);
     if(glayer != 255u && nglow > 0 && int(glayer) < nglow)
@@ -1568,12 +1795,19 @@ vec3 traceReflection(vec3 ro, vec3 rd, float travelled, float pixangle, out floa
     float t = rayQueryGetIntersectionTEXT(rq, true);
     hitT = t;
     float cone = pixangle * (travelled + t);
+#ifdef HWRT_PT
+    gReflRd = rd;
+#endif
     if(custom == 0u) return reflWorld(prim, bary, cone);
 
     // A model. Anything the primary pass would hand back to GL (skin overflow,
     // no attributes) has no GL raster to fall back on here: dim neutral grey
     // rather than a hole.
     vec3 base = pc.lighting.xyz;
+#ifdef HWRT_PT
+    // Logical lighting: no map ambient (the floor alone, hwrtptfloor).
+    if(ptLogical()) base *= ptp.a.w;
+#endif
     vec3 fallback = vec3(0.35) * max(base, vec3(0.25));
     if((pc.mode & SHADE_MODELS) == 0 || (custom & 0xFFu) >= MAXGEOMS) return fallback;
     ModelGeom g = geoms.g[nonuniformEXT(custom & 0xFFu)];
@@ -1811,6 +2045,639 @@ void storeSigma(ivec2 p, bool world)
     imageStore(sigpen, p, vec4(pen));
     imageStore(sigfrac, p, f);
 }
+
+#ifdef HWRT_PT
+// ---------------------------------------------------------------------------
+// Path tracing (hwrtpt, trace.cpp): the third lighting mode, built only into the PT pipeline (-DHWRT_PT).
+//
+// The direct light (sun, lamps, soft shadows, SIGMA, weapon lights) is the RT mode's own code. PT adds the light
+// that bounced: for a world pixel the sky rays are replaced by hwrtptspp cosine-weighted rays that look for the
+// nearest surface (closest hit, opaque). A ray that escapes brings the sky; a ray that lands brings that surface's
+// albedo (in transport units, hwrtptalbedo) times the light that reaches it, plus its glow.
+//
+// That light comes from a world-space radiance cache (a hash grid: the approach of NVIDIA's SHaRC and AMD's GI-1.0,
+// written here from their published descriptions; the MIT cache of slade's Pathtraced-Cube-2 was read as a
+// reference, no code copied). A cell is a cube of hwrtptcell units near the camera, twice as wide in each farther
+// band (hwrtptcellband), split by the dominant axis of the normal (the two faces of a wall never share a cell) and by
+// a "short ray" bit (a lookup from a surface closer than one cell never shares a cell with the long rays: fewer leaks
+// under thin walls, after GI-1.0). A cell holds an irradiance (display units, the world gain applied), averaged over
+// the samples the update warps wrote: one warp in hwrtptupdate does, at its first bounce, the sun (one shadow ray),
+// one map lamp drawn among all in proportion to its unshadowed light (one shadow ray), and one more cosine ray from
+// there (sky, glow, and with hwrtptbounces 2 the cache of the next surface: light bounced many times). ptcache.comp
+// folds those sums into the cells once per frame.
+//
+// The hemisphere light then goes to NRD REBLUR in place of the sky fraction (colour instead of a scalar), and the
+// compose pass (skycompose.comp -DHWRT_PT) adds it to the direct light. No ambient: hwrtptfloor is a floor at a
+// fraction of the map's ambient, 0 by default (the bounces light the dark rooms instead).
+// ---------------------------------------------------------------------------
+// PtParams (set 1 binding 0) is declared before addOmni, which reads it too.
+layout(std430, set = 1, binding = 1) buffer PtKeys { uvec2 k[]; } ptkeys;       // x checksum (0 empty), y last frame written
+layout(std430, set = 1, binding = 2) buffer PtAccum { uvec4 s[]; } ptacc;       // this frame's sums: rgb x PT_ACC_SCALE, samples
+layout(std430, set = 1, binding = 3) readonly buffer PtVal { vec4 v[]; } ptval; // irradiance rgb, samples behind it
+const float PT_ACC_SCALE = 1024.0;
+// PT 5: the scale of the sums with hwrtptcombine 3 (physical light: small values in the shade).
+const float PT_ACC_SCALE_PHYS = 16384.0;
+const uint PT_PROBES = 8u;
+// Bounce rays see the world, the scenery and the teleporter rims, all opaque (foliage counts as solid). The other
+// players, bodies, projectiles and smoke do not change the bounced light.
+const uint PT_MASK = RAYMASK_WORLD | RAYMASK_MODEL | RAYMASK_PORTAL;
+// The world pixel's hemisphere light (display units), filtered with the sky's 5x5, then handed to NRD.
+vec3 gPtH = vec3(0.0);
+// PT 3: the sky term of a world pixel without NRD this frame, for the debug view hwrtptdebug 3.
+vec3 gPtSkyDbg = vec3(0.0);
+// PT 5: the direct light of a world pixel without NRD this frame, for hwrtptdebug 4.
+vec3 gPtDirDbg = vec3(0.0);
+
+int ptFlags() { return int(ptp.d.x + 0.5); }
+uint ptSlotMask() { return uint(ptp.c.w + 0.5); }
+
+uint ptHash3(ivec3 q, uint salt)
+{
+    uint h = pcg(uint(q.x) * 0x9E3779B1u + salt);
+    h = pcg(h ^ (uint(q.y) * 0x85EBCA77u));
+    return pcg(h ^ (uint(q.z) * 0xC2B2AE3Du));
+}
+
+// The cache cell of a surface point reached by a ray of length raylen: its first slot and its checksum (never 0).
+void ptCell(vec3 pos, vec3 n, float raylen, out uint slot0, out uint check)
+{
+    int level = clamp(int(log2(1.0 + distance(pos, pc.origin.xyz) / max(ptp.b.y, 1.0))), 0, 12);
+    float cell = max(ptp.b.x, 0.5) * exp2(float(level));
+    ivec3 q = ivec3(floor(pos / cell));
+    vec3 an = abs(n);
+    uint axis = (an.x >= an.y && an.x >= an.z) ? (n.x > 0.0 ? 0u : 1u) : ((an.y >= an.z) ? (n.y > 0.0 ? 2u : 3u) : (n.z > 0.0 ? 4u : 5u));
+    uint shortray = ((ptFlags() & 4) != 0 && raylen < cell) ? 1u : 0u;
+    uint salt = uint(level) * 16u + axis * 2u + shortray;
+    uint h = ptHash3(q, salt);
+    slot0 = h & ptSlotMask();
+    check = pcg(h ^ 0x27D4EB2Fu ^ ptHash3(q.zxy, salt + 977u)) | 1u;
+}
+
+int ptFind(uint slot0, uint check)
+{
+    uint m = ptSlotMask();
+    for(uint i = 0u; i < PT_PROBES; i++)
+    {
+        uint s = (slot0 + i) & m;
+        uint k = ptkeys.k[s].x;
+        if(k == check) return int(s);
+        if(k == 0u) break;
+    }
+    return -1;
+}
+
+int ptInsert(uint slot0, uint check)
+{
+    uint m = ptSlotMask();
+    for(uint i = 0u; i < PT_PROBES; i++)
+    {
+        uint s = (slot0 + i) & m;
+        uint prev = atomicCompSwap(ptkeys.k[s].x, 0u, check);
+        if(prev == 0u || prev == check) return int(s);
+    }
+    return -1;
+}
+
+void ptWrite(int s, vec3 e)
+{
+    if(s < 0) return;
+    // PT 5: with hwrtptcombine 3 the cache holds physical light: the clamp taken there, a finer fixed point
+    // (ptcache.comp reads the same scale).
+    bool phys = ptPhys();
+    float cl = phys ? pow(max(ptp.d.z, 0.1), PT_GAMMA) : max(ptp.d.z, 0.1);
+    uvec3 q = uvec3(clamp(e, vec3(0.0), vec3(cl)) * (phys ? PT_ACC_SCALE_PHYS : PT_ACC_SCALE) + 0.5);
+    atomicAdd(ptacc.s[s].x, q.x);
+    atomicAdd(ptacc.s[s].y, q.y);
+    atomicAdd(ptacc.s[s].z, q.z);
+    atomicAdd(ptacc.s[s].w, 1u);
+}
+
+vec4 ptLookup(vec3 x, vec3 n, float raylen, out uint slot0, out uint check, out int slot)
+{
+    ptCell(x, n, raylen, slot0, check);
+    slot = ptFind(slot0, check);
+    return slot >= 0 ? ptval.v[slot] : vec4(0.0);
+}
+
+// The share of the light a surface sends on: its texture colour taken to the power hwrtptalbedo (1 = the colour as
+// shown, 2.2 = linear), at most 0.9 so light bouncing back and forth always fades.
+vec3 ptTransport(vec3 albedo)
+{
+    // PT 5 (hwrtptcombine 3): the reflectance in physical light, times the bounce strength.
+    if(ptPhys()) return min(pow(clamp(albedo, vec3(0.0), vec3(1.0)), vec3(PT_GAMMA)) * ptBounceGain(), vec3(0.9));
+    return min(pow(clamp(albedo, vec3(0.0), vec3(1.0)), vec3(max(ptp.a.z, 0.5))), vec3(0.9));
+}
+
+// A world triangle seen by a bounce ray: flat normal facing the ray, albedo (texture at a coarse level from the
+// ray cone, blend layer, colour scale) and glow, as the primary pass reads them.
+bool ptWorldSurf(uint prim, vec2 bary, vec3 rd, float cone, out vec3 n, out vec3 albedo, out vec3 emit)
+{
+    n = -rd;
+    albedo = vec3(0.0);
+    emit = vec3(0.0);
+    uint ntris = uint(max(pc.range.w, 0.0));
+    if(prim >= ntris) return false;
+    uvec4 t = tri.t[prim];
+    if(t.x == 0xFFFFFFFFu) return false;
+    float a = 1.0 - bary.x - bary.y, b = bary.x, c = bary.y;
+    uint i0 = idx.i[prim * 3u + 0u];
+    uint i1 = idx.i[prim * 3u + 1u];
+    uint i2 = idx.i[prim * 3u + 2u];
+    vec3 p0 = verts.v[i0].pos, p1 = verts.v[i1].pos, p2 = verts.v[i2].pos;
+    vec3 gn = cross(p1 - p0, p2 - p0);
+    float gl = length(gn);
+    if(gl > 1e-8) n = gn / gl;
+    if(dot(n, rd) > 0.0) n = -n;
+    vec2 t0 = verts.v[i0].tc, t1 = verts.v[i1].tc, t2 = verts.v[i2].tc;
+    vec2 tc = t0 * a + t1 * b + t2 * c;
+    int ndiff = int(pc.range.y);
+    int layer = int(t.x & TRI_LAYER_MASK);
+    float texdim = float(textureSize(diffuses, 0).x);
+    float lod = reflLod(p0, p1, p2, t0, t1, t2, texdim, cone);
+    albedo = vec3(0.5);
+    if(ndiff > 0 && layer < ndiff)
+        albedo = colorTex(textureLod(diffuses, vec3(tc, float(layer)), lod).rgb);
+    uint lmid = t.y & 0xFFFFu;
+    uint bot = t.y >> 16u;
+    if(bot != 0xFFFFu && ndiff > 0 && int(bot) < ndiff)
+    {
+        vec2 bt0 = vec2(verts.v[i0].pad, verts.v[i0].pad2);
+        vec2 bt1 = vec2(verts.v[i1].pad, verts.v[i1].pad2);
+        vec2 bt2 = vec2(verts.v[i2].pad, verts.v[i2].pad2);
+        vec2 btc = bt0 * a + bt1 * b + bt2 * c;
+        vec3 botc = colorTex(textureLod(diffuses, vec3(btc, float(bot)), reflLod(p0, p1, p2, bt0, bt1, bt2, texdim, cone)).rgb);
+        float ba = 1.0;
+        int nlm = textureSize(lightmaps, 0).z;
+        if(lmid >= 6u && nlm > 0 && int(lmid) < nlm)
+        {
+            vec2 lm = verts.v[i0].lm * a + verts.v[i1].lm * b + verts.v[i2].lm * c;
+            ba = texture(lightmaps, vec3(lm, float(lmid))).a;
+        }
+        albedo = mix(botc, albedo, ba);
+    }
+    albedo *= vec3(float(t.z & 255u), float((t.z >> 8u) & 255u), float((t.z >> 16u) & 255u)) * (1.0 / 255.0);
+    uint glayer = t.w & 255u;
+    int nglow = int(lights.env.glowLayers + 0.5);
+    if(glayer != 255u && nglow > 0 && int(glayer) < nglow)
+    {
+        vec3 gcol = vec3(float((t.w >> 8u) & 255u), float((t.w >> 16u) & 255u), float((t.w >> 24u) & 255u)) * (1.0 / 255.0);
+        emit = colorTex(textureLod(glows, vec3(tc, float(glayer)), lod).rgb) * colorTex(gcol);
+    }
+    // PT 5 (e.w): the glowing textures light by themselves (sampled as lights): their glow is not counted twice.
+    if(ptp.e.w > 0.5) emit = vec3(0.0);
+    return true;
+}
+
+// A mapmodel triangle seen by a bounce ray: flat normal facing the ray and skin colour (no glow, no light of its own).
+bool ptModelSurf(uint custom, uint prim, uint geomid, vec2 bary, mat4x3 o2w, vec3 rd, float cone, out vec3 n, out vec3 albedo)
+{
+    n = -rd;
+    albedo = vec3(0.0);
+    if((custom & 0xFFu) >= MAXGEOMS) return false;
+    ModelGeom g = geoms.g[nonuniformEXT(custom & 0xFFu)];
+    uint nopaque = g.flags >> 2u;
+    uint trii = prim + (geomid != 0u ? nopaque : 0u);
+    if((g.flags & GEOM_SHADE) == 0u || (g.verts.x == 0u && g.verts.y == 0u) || (g.indices.x == 0u && g.indices.y == 0u) || trii >= g.ntris)
+        return false;
+    ModelVertRef mv = ModelVertRef(g.verts);
+    ModelIdxRef mi = ModelIdxRef(g.indices);
+    ModelVert v0 = mv.v[mi.i[trii * 3u + 0u]];
+    ModelVert v1 = mv.v[mi.i[trii * 3u + 1u]];
+    ModelVert v2 = mv.v[mi.i[trii * 3u + 2u]];
+    vec3 gn = cross(v1.pos - v0.pos, v2.pos - v0.pos);
+    n = normalize(mat3(o2w) * (length(gn) > 1e-8 ? gn : vec3(0.0, 0.0, 1.0)));
+    if(dot(n, rd) > 0.0) n = -n;
+    uint nskin = geoms.g[0].ntris;
+    if((g.tris.x == 0u && g.tris.y == 0u) || nskin == 0u) return false;
+    ModelTriRef mt = ModelTriRef(g.tris);
+    uint layer = mt.t[trii] & 255u;
+    if(layer == 255u || layer >= nskin) return false;
+    float a = 1.0 - bary.x - bary.y;
+    vec2 tc = v0.tc * a + v1.tc * bary.x + v2.tc * bary.y;
+    float lod = reflLod(v0.pos, v1.pos, v2.pos, v0.tc, v1.tc, v2.tc, float(textureSize(skins, 0).x), cone);
+    albedo = colorTex(textureLod(skins, vec3(tc, float(layer)), lod).rgb);
+    return true;
+}
+
+// PT 3, glass (hwrtptglass, params g.x): the path tracing's own rays (bounce, sky drawn by importance, the cache's
+// shadow rays) go through the see-through texels of the scenery's model skins (window panes, gaps in foliage), as the
+// direct light's shadow rays already do, the light tinted by the texel's colour and dimmed by its opacity
+// (g.y: the share of the opacity that tints rather than blocks); a texel at least as opaque as the model's alpha test
+// stops the ray. Off: the rays see those models as solid (PT 1 / PT 2).
+// PT 6 (hwrtptglass, g.x): 1 every ray of the path tracing, 2 the pixels' bounce rays only, 3 the cache's rays only
+// (gPtInCache: inside ptBounceLight, the light a cache update computes).
+bool gPtInCache = false;
+bool ptGlassOn() { int m = int(ptp.g.x + 0.5); return m == 1 || (m == 2 && !gPtInCache) || (m == 3 && gPtInCache); }
+vec3 gPtTrans = vec3(1.0);   // the light let through by the glass the last ptTrace / ptShadowT ray crossed
+// A see-through model candidate: its skin texel (a = 1 when it has none: solid), and the model's alpha test.
+vec4 ptSkinTexel(uint custom, uint prim, uint geomid, vec2 bary, out float cutoff)
+{
+    cutoff = 0.0;
+    uint geom = custom & 0xFFu;
+    if(geom == 0u || geom >= MAXGEOMS || ((custom >> 8) & 0xFFu) != 0u) return vec4(1.0);
+    ModelGeom g = geoms.g[nonuniformEXT(geom)];
+    uint nopaque = g.flags >> 2u;
+    uint trii = prim + (geomid != 0u ? nopaque : 0u);
+    if((g.flags & GEOM_SHADE) == 0u || (g.verts.x == 0u && g.verts.y == 0u) || (g.indices.x == 0u && g.indices.y == 0u) ||
+       (g.tris.x == 0u && g.tris.y == 0u) || trii >= g.ntris)
+        return vec4(1.0);
+    ModelVertRef mv = ModelVertRef(g.verts);
+    ModelIdxRef mi = ModelIdxRef(g.indices);
+    ModelTriRef mt = ModelTriRef(g.tris);
+    ModelVert v0 = mv.v[mi.i[trii * 3u + 0u]];
+    ModelVert v1 = mv.v[mi.i[trii * 3u + 1u]];
+    ModelVert v2 = mv.v[mi.i[trii * 3u + 2u]];
+    cutoff = v0.pad1;
+    if(cutoff <= 0.0) return vec4(1.0);
+    uint layer = mt.t[trii] & 255u;
+    uint nskin = geoms.g[0].ntris;
+    if(layer == 255u || nskin == 0u || layer >= nskin) return vec4(1.0);
+    float w = 1.0 - bary.x - bary.y;
+    vec2 tc = v0.tc * w + v1.tc * bary.x + v2.tc * bary.y;
+    return texture(skins, vec3(tc, float(layer)));
+}
+vec3 ptGlassT(vec4 tx)
+{
+    float a = clamp(tx.a, 0.0, 1.0);
+    float k = clamp(ptp.g.y, 0.0, 1.0);
+    return vec3(1.0 - a) + clamp(colorTex(tx.rgb), 0.0, 1.0) * (a * k);
+}
+// Up to 4 glass candidates along a ray, kept when they turn out nearer than its committed hit.
+float gGlassT[4];
+vec3 gGlassC[4];
+int gGlassN = 0;
+// A candidate of a see-through model: true when it stops the ray (the caller confirms it), else its glass is kept.
+bool ptGlassSolid(uint custom, uint prim, uint geomid, vec2 bary, float tcand)
+{
+    float cutoff;
+    vec4 tx = ptSkinTexel(custom, prim, geomid, bary, cutoff);
+    if(tx.a >= cutoff || cutoff <= 0.0) return true;
+    if(tx.a > 0.05 && gGlassN < 4)
+    {
+        gGlassT[gGlassN] = tcand;
+        gGlassC[gGlassN] = ptGlassT(tx);
+        gGlassN++;
+    }
+    return false;
+}
+vec3 ptGlassUpTo(float t)
+{
+    vec3 T = vec3(1.0);
+    for(int k = 0; k < 4; k++) if(k < gGlassN && gGlassT[k] < t) T *= gGlassC[k];
+    return T;
+}
+// A shadow ray of the path tracing: the light let through (0 behind a solid surface).
+vec3 ptShadowT(vec3 o, vec3 d, float tmax)
+{
+    if(!ptGlassOn()) return occluded(o, d, tmax, PT_MASK, 0xFFFFFFFFu) ? vec3(0.0) : vec3(1.0);
+    rayQueryEXT q;
+    rayQueryInitializeEXT(q, tlas, 0u, PT_MASK, o, 0.01, d, max(tmax, 0.02));
+    gGlassN = 0;
+    while(rayQueryProceedEXT(q))
+    {
+        if(rayQueryGetIntersectionTypeEXT(q, false) == gl_RayQueryCandidateIntersectionTriangleEXT &&
+           ptGlassSolid(uint(rayQueryGetIntersectionInstanceCustomIndexEXT(q, false)), uint(rayQueryGetIntersectionPrimitiveIndexEXT(q, false)),
+                        uint(rayQueryGetIntersectionGeometryIndexEXT(q, false)), rayQueryGetIntersectionBarycentricsEXT(q, false),
+                        rayQueryGetIntersectionTEXT(q, false)))
+            rayQueryConfirmIntersectionEXT(q);
+    }
+    if(rayQueryGetIntersectionTypeEXT(q, true) == gl_RayQueryCommittedIntersectionTriangleEXT) return vec3(0.0);
+    return ptGlassUpTo(1e30);
+}
+
+// The nearest surface along a bounce ray (false: the ray escaped). cone0: the ray cone's width where it starts.
+// PT 3: with the glass on, gPtTrans holds the light let through by the glass crossed before it (or before escaping).
+bool ptTrace(vec3 o, vec3 d, float tmax, float cone0, out float t, out vec3 n, out vec3 albedo, out vec3 emit)
+{
+    t = -1.0;
+    n = -d;
+    albedo = vec3(0.0);
+    emit = vec3(0.0);
+    gPtTrans = vec3(1.0);
+    rayQueryEXT q;
+    bool glass = ptGlassOn();
+    rayQueryInitializeEXT(q, tlas, glass ? 0u : gl_RayFlagsOpaqueEXT, PT_MASK, o, 0.01, d, max(tmax, 0.02));
+    gGlassN = 0;
+    if(glass)
+    {
+        while(rayQueryProceedEXT(q))
+        {
+            if(rayQueryGetIntersectionTypeEXT(q, false) == gl_RayQueryCandidateIntersectionTriangleEXT &&
+               ptGlassSolid(uint(rayQueryGetIntersectionInstanceCustomIndexEXT(q, false)), uint(rayQueryGetIntersectionPrimitiveIndexEXT(q, false)),
+                            uint(rayQueryGetIntersectionGeometryIndexEXT(q, false)), rayQueryGetIntersectionBarycentricsEXT(q, false),
+                            rayQueryGetIntersectionTEXT(q, false)))
+                rayQueryConfirmIntersectionEXT(q);
+        }
+    }
+    else while(rayQueryProceedEXT(q)) {}
+    if(rayQueryGetIntersectionTypeEXT(q, true) != gl_RayQueryCommittedIntersectionTriangleEXT)
+    {
+        if(glass) gPtTrans = ptGlassUpTo(1e30);
+        return false;
+    }
+    if(glass) gPtTrans = ptGlassUpTo(rayQueryGetIntersectionTEXT(q, true));
+    t = rayQueryGetIntersectionTEXT(q, true);
+    uint custom = uint(rayQueryGetIntersectionInstanceCustomIndexEXT(q, true));
+    uint prim = uint(rayQueryGetIntersectionPrimitiveIndexEXT(q, true));
+    vec2 bary = rayQueryGetIntersectionBarycentricsEXT(q, true);
+    // A diffuse bounce spreads: a coarse texture level is enough (and steadier).
+    float cone = cone0 + t * 0.5;
+    if(custom == 0u)
+    {
+        if(!ptWorldSurf(prim, bary, d, cone, n, albedo, emit)) albedo = vec3(0.0);
+    }
+    else
+    {
+        uint geomid = uint(rayQueryGetIntersectionGeometryIndexEXT(q, true));
+        mat4x3 o2w = rayQueryGetIntersectionObjectToWorldEXT(q, true);
+        if(!ptModelSurf(custom, prim, geomid, bary, o2w, d, cone, n, albedo)) albedo = vec3(0.0);
+    }
+    return true;
+}
+
+// Map lamp i at a point: its colour times its falloff and N.L, the way addOmni weighs it (0 out of reach).
+vec3 ptLampLight(int i, vec3 p, vec3 n)
+{
+    vec3 toL = lights.l[i].pos - p;
+    float mag = length(toL);
+    float radius = lights.l[i].radius;
+    float fl = lights.l[i].flags;
+    float intensity = 1.0;
+    if(radius > 0.0)
+    {
+        float x = mag / radius;
+        if(x >= 1.0) return vec3(0.0);
+        intensity = fl >= 1.5 ? (1.0 - x * x) : (1.0 - x);
+        if((lights.kind[i] & KIND_LOGICAL) != 0u) intensity = ptLogicFalloff(lights.kind[i], mag, radius);
+        // PT 5: surface emitters and spotlights, as in addOmni.
+        if((lights.kind[i] & KIND_SURFACE) != 0u) intensity = ptSurfFalloff(lights.kind[i], -toL / max(mag, 1e-4), mag, radius);
+        if((lights.kind[i] & KIND_SPOT) != 0u) intensity *= max(ptSpotAtten(lights.kind[i], -toL / max(mag, 1e-4)), 0.0);
+    }
+    bool aura = fl >= 1.5 && fl < 2.5;
+    float ndotl = 1.0;
+    if(!aura)
+    {
+        ndotl = mag > 1e-4 ? max(dot(n, toL / mag), 0.0) : 1.0;
+        if(fl >= 2.5 && (lights.kind[i] & KIND_LOGICAL) == 0u) ndotl = ndotl * 0.65 + 0.35;
+        if(ndotl <= 0.0) return vec3(0.0);
+    }
+    vec3 c = lights.l[i].color * (intensity * ndotl);
+    // PT 5: a surface emitter's physical light, shown again.
+    if((lights.kind[i] & KIND_SURFACE) != 0u) c = pow(max(c, vec3(0.0)), vec3(1.0 / PT_GAMMA));
+    return c;
+}
+
+// One map lamp at a point, drawn among all of them in proportion to its unshadowed light (one pass, weighted
+// reservoir), with one shadow ray: an unbiased estimate of the lamps' light there (lumel units). Weapon lights stay
+// out (they never enter the cache).
+vec3 ptOneLamp(vec3 p, vec3 n, vec3 so, inout uint seed)
+{
+    int nl = clamp(int(pc.lighting.w), 0, MAXLIGHTS);
+    float wsum = 0.0, wpick = 0.0;
+    int pick = -1;
+    vec3 cpick = vec3(0.0);
+    for(int i = 0; i < nl; i++)
+    {
+        if(lights.l[i].flags >= 3.5) continue;
+        vec3 c = ptLampLight(i, p, n);
+        float w = dot(c, vec3(0.2126, 0.7152, 0.0722));
+        if(w <= 1e-5) continue;
+        wsum += w;
+        seed = pcg(seed);
+        if(rand01(seed) * wsum <= w) { pick = i; cpick = c; wpick = w; }
+    }
+    if(pick < 0) return vec3(0.0);
+    float fl = lights.l[pick].flags;
+    vec3 tr = vec3(1.0);
+    if(fl < 0.5 || fl >= 2.5)
+    {
+        vec3 toL = lights.l[pick].pos - so;
+        float mag = length(toL);
+        float slack = fl >= 2.5 ? 0.35 : 0.01;
+        // PT 3: through glass (ptShadowT is the plain shadow ray when the glass is off).
+        if(mag > slack + 0.02) tr = ptShadowT(so, toL / mag, mag - slack);
+        if(max(tr.r, max(tr.g, tr.b)) <= 0.0) return vec3(0.0);
+    }
+    return cpick * tr * (wsum / wpick);
+}
+
+// The light that reaches a surface point (display units): the sun and one lamp with their shadow rays, then one
+// cosine ray (sky, glow, and with hwrtptbounces 2 the cached light of the next surface).
+vec3 ptBounceLight(vec3 x, vec3 n, float cone0, inout uint seed)
+{
+    // PT 6: the rays below are the cache's (hwrtptglass 2 / 3).
+    bool wasInCache = gPtInCache;
+    gPtInCache = true;
+    vec3 so = x + n * SHADOW_BIAS;
+    float tmax = max(pc.range.x, 1.0);
+    float gain = max(lights.env.worldGain, 0.0);
+    bool hdr = (pc.mode & HDR) != 0;
+    // PT 5 (hwrtptcombine 3): every term below in physical light, and so the result (the cache holds it).
+    bool phys = ptPhys();
+    vec3 d = vec3(0.0);
+    if(lights.env.sunOn > 0.5)
+    {
+        vec3 sd = lights.env.sunDir;
+        float sl = length(sd);
+        if(sl > 1e-6)
+        {
+            sd /= sl;
+            float ndl = dot(n, sd);
+            if(ndl > 0.0) d += lights.env.sunColor * ndl * ptShadowT(so, sd, tmax);
+        }
+    }
+    d += ptOneLamp(x, n, so, seed);
+    if(!hdr) d = ptLogical() ? d / max(1.0, max(d.r, max(d.g, d.b))) : min(d, vec3(1.0));
+    vec3 esky = vec3(0.0), ebounce = vec3(0.0);
+    seed = pcg(seed);
+    float u1 = rand01(seed);
+    seed = pcg(seed);
+    float u2 = rand01(seed);
+    vec3 hd = cosineHemiU(n, u1, u2);
+    float t;
+    vec3 n3, a3, e3;
+    // PT 3: with the sky as a light, an escaping ray brings the sky's radiance in its direction, and one more ray drawn
+    // in proportion to the sky's light adds its share (multiple importance sampling, balance heuristic, one sample each).
+    bool skyL = ptSkyOn();
+    bool skyIS = skyL && ptSkyIS();
+    if(!ptTrace(so, hd, tmax, cone0, t, n3, a3, e3))
+    {
+        if(skyL)
+        {
+            float c = max(dot(n, hd), 1e-4);
+            esky = ptSkyLP(hd, phys) * (skyIS ? c / (c + 3.14159265359 * ptSkyPdf(hd)) : 1.0);
+        }
+        else if(lights.env.skyOn > 0.5) esky = phys ? ptToPhys(lights.env.skyColor * gain) : lights.env.skyColor * gain;
+        // PT 3: the light the glass crossed lets through (1 when the glass is off).
+        esky *= gPtTrans;
+    }
+    else
+    {
+        vec3 tr3 = gPtTrans;
+        ebounce = phys ? ptToPhys(e3) : e3;
+        if(ptp.a.y > 1.5 && (ptFlags() & 1) != 0)
+        {
+            uint s0, ck;
+            int sl;
+            vec4 cv = ptLookup(so + hd * t, n3, t, s0, ck, sl);
+            if(cv.w >= 0.5) ebounce += ptTransport(a3) * cv.rgb;
+        }
+        ebounce *= tr3;
+    }
+    if(skyIS)
+    {
+        seed = pcg(seed);
+        float v1 = rand01(seed);
+        seed = pcg(seed);
+        float v2 = rand01(seed);
+        float pe;
+        vec3 sd = ptSkySample(vec2(v1, v2), pe);
+        float c = dot(n, sd);
+        if(c > 0.0 && pe > 0.0)
+            esky += ptSkyLP(sd, phys) * ptShadowT(so, sd, tmax) * ((c * (1.0 / 3.14159265359)) / (c * (1.0 / 3.14159265359) + pe));
+    }
+    // The point is lit the way a pixel there would be (hwrtptcombine): 0 the larger of its direct light and its sky,
+    // as the maps were baked, plus the bounced light; 1 the sum of all three; 2 (PT 4) the sky added to the direct
+    // light in physical light, plus the bounced light.
+    vec3 e = ptCombineSky(d * gain, esky) + ebounce;
+    if(!hdr) e = min(e, vec3(2.0));
+    // PT 5: the sum in physical light (the shown clip of 2 is 2^2.2 there).
+    if(phys)
+    {
+        e = ptToPhys(d * gain) + esky + ebounce;
+        if(!hdr) e = min(e, vec3(4.594794));
+    }
+    gPtInCache = wasInCache;
+    return e;
+}
+
+// Logical lighting: what a reflection ray hits takes the radiance cache's light there. No cell yet: that light is
+// computed once there (as for a cache update) and written to the cache.
+vec3 ptReflLight(vec3 p, vec3 n, float cone)
+{
+    if(dot(n, gReflRd) > 0.0) n = -n;
+    uint s0, ck;
+    int sl;
+    vec4 cv = ptLookup(p + n * 0.5, n, 1e6, s0, ck, sl);
+    if(cv.w >= 0.5) return ptPhys() ? ptToDisp(cv.rgb) : cv.rgb;
+    uint seed = pcg(gl_GlobalInvocationID.x * 1973u + pcg(gl_GlobalInvocationID.y * 9277u + pcg(uint(pc.frame) * 26699u + 11u)));
+    vec3 e = ptBounceLight(p, n, cone, seed);
+    if((ptFlags() & 1) != 0) ptWrite(sl >= 0 ? sl : ptInsert(s0, ck), e);
+    return ptPhys() ? ptToDisp(e) : e;
+}
+
+// A world pixel's bounced light (display units), from hwrtptspp cosine rays: what the surfaces they hit send back.
+// The rays that escape are the sky: they only count in missfrac (the sky fraction of the RT mode, which keeps its own
+// filtering), so the sky never goes through the bounced light's denoiser. hitdist: the hits' mean distance for NRD
+// (65504 when they all escaped).
+vec3 ptHemisphere(ivec2 p, vec3 n, vec3 so, float tsky, float primT, out float missfrac, out float hitdist)
+{
+    int spp = clamp(int(ptp.a.x + 0.5), 1, 4);
+    int fl = ptFlags();
+    bool cacheon = (fl & 1) != 0;
+    uint rate = max(uint(ptp.b.z + 0.5), 1u);
+    // One warp in N writes the cache this frame, another set every frame; whole subgroups, so no lane waits for another.
+    bool upd = cacheon && (pcg(gl_WorkGroupID.x * 7919u ^ pcg(gl_WorkGroupID.y * 104729u ^ pcg(gl_SubgroupID * 31u + uint(pc.frame) * 2654435761u))) % rate) == 0u;
+    bool bn = (skyPackFlags() & 8192) != 0;
+    uvec2 bnb = bn ? skyBlueNoiseBase(p, false) : uvec2(0u);
+    uint seed = pcg(uint(p.x) * 1973u + pcg(uint(p.y) * 9277u + pcg(uint(pc.frame) * 26699u + 7u)));
+    float cone0 = primT * reflPixelAngle();
+    // PT 5 (hwrtptcombine 3): the hemisphere light in physical light (the clamp taken there).
+    bool phys = ptPhys();
+    float clampv = phys ? pow(max(ptp.d.z, 0.1), PT_GAMMA) : max(ptp.d.z, 0.1);
+    vec3 H = vec3(0.0);
+    int nmiss = 0, nhit = 0;
+    float tsum = 0.0;
+    // PT 3, the sky as a light with hwrtptskypixel 1: the escaped rays bring the sky's radiance in their direction,
+    // with one more ray drawn in proportion to the sky's light (multiple importance sampling against the spp cosine
+    // rays), all through the bounced light's denoiser.
+    bool skyPix = ptSkyOn() && ptp.e.z > 0.5;
+    bool skyPixIS = skyPix && ptSkyIS();
+    vec3 skyH = vec3(0.0);
+    for(int s = 0; s < 4; s++)
+    {
+        if(s >= spp) break;
+        vec3 d = bn ? skyBlueNoiseDir(n, bnb, s) : cosineHemi(n, seed);
+        // Smooth normals: a ray that leaves under the flat face is mirrored, as the sky rays are.
+        if(gSmoothed && dot(d, gFlatN) < 0.0) d = reflect(d, gFlatN);
+        // PT 4, no bounce (the ray tracing with the path tracing's sources): a ray only tells whether it reaches the sky
+        // (the first hit ends it), except the cache's update rays, which still light the surface they land on (the
+        // cache lights the reflections and the scenery's models).
+        bool nob = ptNoBounce();
+        if(nob && !(upd && s == 0))
+        {
+            vec3 trs = ptShadowT(so, d, tsky);
+            if(max(trs.r, max(trs.g, trs.b)) <= 0.0) { nhit++; tsum += tsky; continue; }
+            nmiss++;
+            if(skyPix)
+            {
+                float c = max(dot(n, d), 1e-4) * float(spp);
+                skyH += min(ptSkyLP(d, phys) * trs * (skyPixIS ? c / (c + 3.14159265359 * ptSkyPdf(d)) : 1.0), vec3(clampv));
+            }
+            continue;
+        }
+        float t;
+        vec3 n2, a2, e2;
+        if(!ptTrace(so, d, tsky, cone0, t, n2, a2, e2))
+        {
+            nmiss++;
+            if(skyPix)
+            {
+                float c = max(dot(n, d), 1e-4) * float(spp);
+                skyH += min(ptSkyLP(d, phys) * gPtTrans * (skyPixIS ? c / (c + 3.14159265359 * ptSkyPdf(d)) : 1.0), vec3(clampv));
+            }
+            continue;
+        }
+        // PT 3: the light the glass crossed lets through (1 when the glass is off); ptBounceLight below traces again.
+        vec3 trh = gPtTrans;
+        nhit++;
+        tsum += t;
+        vec3 x2 = so + d * t;
+        vec3 E = vec3(0.0);
+        if(cacheon)
+        {
+            uint s0, ck;
+            int sl;
+            vec4 cv = ptLookup(x2, n2, t, s0, ck, sl);
+            bool have = cv.w >= 0.5;
+            if(have) E = cv.rgb;
+            if((upd && s == 0) || (!have && (fl & 2) != 0))
+            {
+                vec3 e = ptBounceLight(x2, n2, cone0 + t, seed);
+                ptWrite(sl >= 0 ? sl : ptInsert(s0, ck), e);
+                if(!have) E = e;
+            }
+        }
+        else E = ptBounceLight(x2, n2, cone0 + t, seed);
+        // PT 4, no bounce: the update ray lit the cache, the pixel takes none of it.
+        if(!nob) H += min((ptTransport(a2) * E + (phys ? ptToPhys(e2) : e2)) * trh, vec3(clampv));
+    }
+    float inv = 1.0 / float(spp);
+    missfrac = float(nmiss) * inv;
+    hitdist = nhit > 0 ? tsum / float(nhit) : 65504.0;
+    H = (H + skyH) * inv;
+    if(skyPixIS)
+    {
+        seed = pcg(seed);
+        float v1 = rand01(seed);
+        seed = pcg(seed);
+        float v2 = rand01(seed);
+        float pe;
+        vec3 sd = ptSkySample(vec2(v1, v2), pe);
+        float c = dot(n, sd);
+        if(gSmoothed && dot(sd, gFlatN) <= 0.0) c = 0.0;
+        if(c > 0.0 && pe > 0.0)
+            H += min(ptSkyLP(sd, phys) * ptShadowT(so, sd, tsky) * ((c * (1.0 / 3.14159265359)) / (float(spp) * c * (1.0 / 3.14159265359) + pe)), vec3(clampv));
+    }
+    return H;
+}
+
+// REBLUR_FrontEnd_PackRadianceAndNormHitDist's colour transform (NRD _NRD_LinearToYCoCg).
+vec3 ptYCoCg(vec3 c)
+{
+    return vec3(dot(c, vec3(0.25, 0.5, 0.25)), dot(c, vec3(0.5, 0.0, -0.5)), dot(c, vec3(-0.25, 0.5, -0.25)));
+}
+#endif
 
 void shadePixel()
 {
@@ -2264,6 +3131,19 @@ void shadePixel()
     // it was tuned with.
     if(fullbright) base = max(base, vec3(MODEL_MINSHADE));
     else if(ismodel) base *= MODEL_AMBWRAP;
+#ifdef HWRT_PT
+    // Path tracing: a mapmodel (crate, tree, scenery) takes the bounced light the radiance cache holds where it
+    // stands, instead of the map's ambient (no ray, no grain: the cell is already an average). Players and bots keep
+    // the ray tracing look (readability). No cell there yet: the ambient stays.
+    if(ismodel && !fullbright && (ptFlags() & 1) != 0)
+    {
+        uint ptc0, ptck;
+        int ptsl;
+        vec4 ptcv = ptLookup(hit + noffset * 2.0, n, 1e6, ptc0, ptck, ptsl);
+        if(ptcv.w >= 0.5) base = ptcv.rgb / max(lights.env.worldGain, 1e-3) * MODEL_AMBWRAP;
+        else if(ptLogical()) base *= ptp.a.w;
+    }
+#endif
     gain = ismodel ? 1.0 : max(lights.env.worldGain, 0.0);
     if(ismodel)
     {
@@ -2375,16 +3255,40 @@ void shadePixel()
     // strict comparisons, so the same lamps win the same ties.
     int besti[4] = int[](-1, -1, -1, -1);
     float bestd[4] = float[](1e30, 1e30, 1e30, 1e30);
+    // PT 6: the glows elected by their light here (lava, kind bit 6): the strongest few (env.soft2.z, at most 2) next
+    // to the lamps' nearest-N, each with the glows' shadow rays. Their unshadowed light is continuous from one point to
+    // the next, so is the sum of the strongest: no seam where two of them swap.
+    int glowi[2] = int[](-1, -1);
+    float glowc[2] = float[](0.0, 0.0);
+    int nglowpick = clamp(int(lights.env.soft2.z + 0.5), 0, 2);
     int nB = int(sh_nB);
     for(int j = 0; j < nB; j++)
     {
-        int i = int(sh_listB[j]);
+        uint ent = sh_listB[j];
+        int i = int(ent & ~LIST_SPECIAL);
         float radius = lights.l[i].radius;
         vec3 L = lights.l[i].pos - hit;
         float mag = length(L);
         if(mag >= radius) continue;
         vec3 ldir = mag > 1e-4 ? (L / mag) : n;
+        // Only the marked lamps (lava, spotlight, surface emitter) read their kind word.
+        uint kd = 0u;
+        if((ent & LIST_SPECIAL) != 0u) kd = lights.kind[i];
+        if((kd & KIND_GLOWNEAR) != 0u)
+        {
+            float gx = mag / radius;
+            float gc = (1.0 - gx * gx) * (max(dot(n, ldir), 0.0) * 0.65 + 0.35) * dot(lights.l[i].color, vec3(0.2126, 0.7152, 0.0722));
+            if(nglowpick >= 1 && gc > glowc[0]) { glowc[1] = glowc[0]; glowi[1] = glowi[0]; glowc[0] = gc; glowi[0] = i; }
+            else if(nglowpick >= 2 && gc > glowc[1]) { glowc[1] = gc; glowi[1] = i; }
+            continue;
+        }
         if(dot(n, ldir) <= 0.0) continue;
+        // PT 5, the ray tracing too since PT 6: a spotlight outside its cone lights nothing here: not elected.
+        if((kd & KIND_SPOT) != 0u && ptSpotAtten(kd, -ldir) <= 0.0) continue;
+#ifdef HWRT_PT
+        // PT 5: a surface emitter seen from behind lights nothing here: not elected.
+        if((kd & KIND_SURFACE) != 0u && dot(ptKindDir(kd), -ldir) <= 0.0) continue;
+#endif
         for(int k = 0; k < nuse; k++)
         {
             if(mag < bestd[k])
@@ -2405,7 +3309,23 @@ void shadePixel()
     {
         int i = besti[k];
         if(i < 0) continue;
+#ifdef HWRT_PT
+        // PT 6: the logical lighting's sources (flames, light fittings, lava, glowing textures) throw the shadows of the
+        // others (players, bodies, projectiles, flags, items: DYN) as the glows do (hwrtshadowothers 2, the default),
+        // not only from 3 as the map's lamps.
+        uint lmask = nearmask;
+        if((lights.kind[i] & (KIND_LOGICAL | KIND_SURFACE)) != 0u) lmask |= glowbody & RAYMASK_DYN;
+        addOmni(i, hit, n, sorigin, lmask, 0u, skipInst, ismodel, direct, dir, specMul, specAcc);
+#else
         addOmni(i, hit, n, sorigin, nearmask, 0u, skipInst, ismodel, direct, dir, specMul, specAcc);
+#endif
+    }
+    // PT 6: the glows elected by their light, with the glows' shadow rays (world and portal rims, then the bodies).
+    for(int k = 0; k < nglowpick; k++)
+    {
+        int i = glowi[k];
+        if(i < 0) continue;
+        addOmni(i, hit, n, sorigin, RAYMASK_WORLD | RAYMASK_PORTAL, glowbody, skipInst, ismodel, direct, dir, specMul, specAcc);
     }
 
     if(lights.env.sunOn > 0.5)
@@ -2526,6 +3446,18 @@ void shadePixel()
     // shadowing the sky; occludedT accepts DYN on its opaque path, shadowVis does not.
     bool skyOpq = (pc.mode & RT_SKYOPAQUE) != 0;
     if(skyOpq) skymask &= RAYMASK_WORLD | RAYMASK_MODEL | RAYMASK_PORTAL | RAYMASK_DYN;
+#ifdef HWRT_PT
+    // Path tracing: a world pixel's bounce rays give its bounced light and, by those that escape, its sky fraction;
+    // models keep the sky rays.
+    if(!ismodel)
+    {
+        float ptmiss, pthit;
+        gPtH = ptHemisphere(p, n, sorigin, skyT, hitdist, ptmiss, pthit);
+        skyvis = ptmiss;
+        if(nrdOn) skyHitDist = pthit;
+    }
+    else
+#endif
     if(lights.env.skyOn > 0.5)
     {
 #ifdef HWRT_SKY_HALF
@@ -2672,6 +3604,9 @@ void shadePixel()
         sh_mdl[ly][lx] = ismodel ? 1.0 : 0.0;
         sh_hit[ly][lx] = (valid && nrdOn) ? skyHitDist : -1.0;
 #endif
+#ifdef HWRT_PT
+        sh_pth[ly][lx] = gPtH;
+#endif
         barrier();
         // One 5x5. Every invocation hits every barrier. Four rays already
         // carry the grain; a second 7x7 pass smeared mid/far lighting.
@@ -2687,6 +3622,9 @@ void shadePixel()
             float hitAcc = 0.0;
             float hitW = 0.0;
             float selfm = ismodel ? 1.0 : 0.0;
+#ifdef HWRT_PT
+            vec3 accH = vec3(0.0);
+#endif
             for(int dy = -2; dy <= 2; dy++)
             for(int dx = -2; dx <= 2; dx++)
             {
@@ -2703,6 +3641,9 @@ void shadePixel()
                 float spat = exp(-0.5 * float(dx * dx + dy * dy) / 2.0);
                 float w = spat * nd * nd;
                 acc += sv * w;
+#ifdef HWRT_PT
+                accH += sh_pth[ny][nx] * w;
+#endif
                 wsum += w;
                 w2sum += w * w;
                 // HitT is a noisy guide if it stays the raw 4-ray mean while
@@ -2717,6 +3658,9 @@ void shadePixel()
             if(wsum > 1e-5)
             {
                 skyvis = acc / wsum;
+#ifdef HWRT_PT
+                if(!ismodel && (ptFlags() & 8) != 0) gPtH = accH / wsum;
+#endif
                 skytaps = (wsum * wsum) / max(w2sum, 1e-8);
 #ifdef HWRT_SKY_HALF
                 // A skipped pixel takes its neighbours' occluder distance, or
@@ -2866,7 +3810,13 @@ void shadePixel()
     // variance of the very neighbourhood that is noisy.
     // World pixels that NRD denoises skip hold/age so REBLUR does not inherit
     // a frozen skyage mean. Models keep the original temporal path.
+#ifdef HWRT_PT
+    // Path tracing: REBLUR gets the hemisphere light; the sky fraction alone (the share of bounce rays that escaped)
+    // keeps this temporal path on the world too, for the compose pass's max(direct, sky).
+    if(lights.env.skyAlpha > 0.0)
+#else
     if(lights.env.skyAlpha > 0.0 && (!nrdOn || ismodel))
+#endif
     {
         // A miss, a magenta overflow or a pixel handed back to GL keeps no
         // entry: -1 can never be mistaken for a visibility later.
@@ -2881,7 +3831,12 @@ void shadePixel()
             bool skyhold = (flags & 1) != 0;
             bool skybilin = (flags & 2) != 0;
             bool skyage = (flags & 16) != 0;
+#ifdef HWRT_PT
+            // PT 3: the sky as a light keeps the escaped share over frames on a map without a sky light too.
+            if(lights.env.skyAlpha < 1.0 && (lights.env.skyOn > 0.5 || ptSkyOn()))
+#else
             if(lights.env.skyAlpha < 1.0 && lights.env.skyOn > 0.5)
+#endif
             {
                 vec4 clip = lights.env.prevViewProj * vec4(hitp, 1.0);
                 if(clip.w > 1e-6)
@@ -3015,7 +3970,12 @@ void shadePixel()
                 // Y = skyvis, Co = Cg = 0. Integers 0..31 used to be stuffed
                 // into alpha via uintBitsToFloat; those denormals vanish in
                 // rgba16f. Flags go out as a numeric float instead.
+#ifdef HWRT_PT
+                // Path tracing: the bounced light itself (colour, without the sky) in the world's light units.
+                packed = vec4(ptYCoCg(gPtH / max(gain, 1e-3)), normH);
+#else
                 packed = vec4(skyvis, 0.0, 0.0, normH);
+#endif
                 float ax = max(abs(n.x), max(abs(n.y), abs(n.z)));
                 vec3 Np = n / max(ax, 1e-6);
                 Npack = Np * 0.5 + 0.5;
@@ -3068,6 +4028,23 @@ void shadePixel()
             imageStore(nrdp0, p, vec4(albedo, float(flags)));
             imageStore(nrdp1, p, vec4(direct, gain));
             int nrdDbg = (skyPackFlags() >> 6) & 15;
+#ifdef HWRT_PT
+            // PT 3, the sky as a light (compose mode bit 24): p3.rgb carries the sky's light of this pixel (the share of
+            // its bounce rays that escaped, kept over frames, times the mean colour of the sky on its side; 0 when the
+            // sky rides in the bounced light, hwrtptskypixel 1), and the glow joins p2.rgb.
+            vec3 p2rgb = specAcc, p3rgb = emit;
+            if(ptSkyOn() && nrdSurface)
+            {
+                p2rgb = specAcc + emit;
+                // PT 5 (hwrtptcombine 3): the share of the sky it sees times the sky's physical light, shown again.
+                p3rgb = ptp.e.z > 0.5 ? vec3(0.0) : (ptPhys() ? ptToDisp(skyvis * ptSkyMeanLin(n)) : skyvis * ptSkyMean(n));
+            }
+            if(nrdDbg >= 9 && nrdSurface)
+                imageStore(nrdp2, p, vec4(nrdNoV, clamp(nrdAbsZ / 64.0, 0.0, 1.0), clamp(nrdProjErr / 8.0, 0.0, 1.0), nrdNz));
+            else
+                imageStore(nrdp2, p, vec4(p2rgb, nrdSurface ? uvD3dY : maskrgb.g));
+            imageStore(nrdp3, p, vec4(p3rgb, nrdSurface ? skyvis : 0.0));
+#else
             if(nrdDbg >= 9 && nrdSurface)
                 imageStore(nrdp2, p, vec4(nrdNoV, clamp(nrdAbsZ / 64.0, 0.0, 1.0), clamp(nrdProjErr / 8.0, 0.0, 1.0), nrdNz));
             else
@@ -3076,6 +4053,7 @@ void shadePixel()
             // packHalf2x16(modelenv) into a float then rgba16f dropped 16 bits;
             // models never read this payload (original lighting below).
             imageStore(nrdp3, p, vec4(emit, nrdSurface ? skyvis : 0.0));
+#endif
             if(nrdSurface) return;
         }
         else return;
@@ -3139,6 +4117,28 @@ void shadePixel()
         vec3 sky = base + max(skycol - base, vec3(0.0)) * skyvis;
         lit = base + (max(sunlamps, sky) - base) * gain;
     }
+#ifdef HWRT_PT
+    // Path tracing, world pixel without NRD this frame: direct light, sky and the (5x5) bounced light, the floor a
+    // fraction of the ambient (the compose pass does the same with REBLUR's output).
+    if(!ismodel)
+    {
+        vec3 sl = direct;
+        if((pc.mode & HDR) == 0) sl = ptLogical() ? sl / max(1.0, max(sl.r, max(sl.g, sl.b))) : min(sl, vec3(1.0));
+        // hwrtptcombine (d.w): 0 the larger of the direct light and the sky (the bake's combine, with the sky
+        // fraction kept over frames), plus the bounced light; 1 the sum of the three; 2 (PT 4) the sky added in
+        // physical light.
+        // PT 5 (hwrtptcombine 3): the sky's share and the bounced light in physical light, the sum shown again.
+        bool phys = ptPhys();
+        vec3 ptsky = lights.env.skyOn > 0.5 ? lights.env.skyColor * gain * (phys ? pow(max(skyvis, 0.0), 1.0 / PT_GAMMA) : skyvis) : vec3(0.0);
+        // PT 3: the sky as a light (as in the compose pass).
+        if(ptSkyOn()) ptsky = ptp.e.z > 0.5 ? vec3(0.0) : (phys ? ptToDisp(skyvis * ptSkyMeanLin(n)) : skyvis * ptSkyMean(n));
+        vec3 traced = phys ? ptToDisp(ptToPhys(sl * gain) + ptToPhys(ptsky) + max(gPtH, vec3(0.0))) : ptCombineSky(sl * gain, ptsky) + gPtH;
+        if((pc.mode & HDR) == 0) traced = min(traced, vec3(2.0));
+        lit = max(traced, base * ptp.a.w);
+        gPtSkyDbg = ptsky;
+        gPtDirDbg = sl * gain;
+    }
+#endif
 
     if(ismodel) lit += dynCap(dynAcc) * gain;
 
@@ -3149,6 +4149,16 @@ void shadePixel()
     if(ismodel && ((pc.mode & HDR) == 0 || gSdrModel)) lit = min(lit, vec3(1.5));
 
     vec3 shaded = albedo * lit + specAcc;
+#ifdef HWRT_PT
+    // hwrtptdebug: 1 the bounced light alone on the texture, 2 the bounced light alone (white walls), PT 3: 3 the sky's
+    // light alone (white walls).
+    // PT 5: 4 the direct light alone (white walls); the bounced light shown in shown values with hwrtptcombine 3.
+    if(!ismodel && ptp.d.y > 0.5)
+    {
+        vec3 hshow = ptPhys() ? ptToDisp(max(gPtH, vec3(0.0))) : gPtH;
+        shaded = ptp.d.y > 3.5 ? gPtDirDbg * 0.5 : (ptp.d.y > 2.5 ? gPtSkyDbg * 0.5 : (ptp.d.y > 1.5 ? hshow * 0.5 : albedo * hshow));
+    }
+#endif
     float vis = lights.env.diffVis;
     if(!ismodel)
     {

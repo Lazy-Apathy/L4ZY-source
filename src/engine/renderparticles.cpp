@@ -188,6 +188,7 @@ struct partrenderer
     virtual void labages(int &n, int &amin, int &amax) { n = amin = amax = 0; }
     virtual void cleanup() {}
     virtual void collectsmokepuffs() {}
+    virtual void collectflames() {}
 
     virtual void seedemitter(particleemitter &pe, const vec &o, const vec &d, int fade, float size, int gravity)
     {
@@ -922,6 +923,25 @@ struct varenderer : partrenderer
             hwrtnotesmokepuff(o, p->size * SQRT2, vis, seed);
         }
     }
+
+    // Path tracing, flames that light (hwrtptflames 1, hwrt/ptflames.inc): every live flame sprite as GL draws it this
+    // frame (where it is now, how opaque, its size, colour and quarter of the texture), with its spawn point, which tells
+    // which emitter made it, and its birth, which tells whether that emitter is still emitting.
+    void collectflames()
+    {
+        extern void hwrtptnoteflame(const vec &spawn, int born, const vec &o, float size, int alpha, const bvec &color, int quad);
+        loopi(numparts)
+        {
+            particle *p = &parts[i];
+            if(p->fade < 0) continue;
+            vec o, d;
+            int blend, ts;
+            calc(p, blend, ts, o, d, false);
+            if(blend <= 1) continue;
+            modifyblend<T>(o, blend);
+            hwrtptnoteflame(p->o, p->millis, o, p->size, blend, p->color, (p->flags>>5)&3);
+        }
+    }
 };
 typedef varenderer<PT_PART> quadrenderer;
 typedef varenderer<PT_TAPE> taperenderer;
@@ -1020,6 +1040,19 @@ void hwrtpartbiasdraw()
 void hwrtcollectsmokesprites()
 {
     parts[PART_SMOKE]->collectsmokepuffs();
+}
+
+// Path tracing, flames that light (hwrt/ptflames.inc): the flame sprites of this frame, and their texture.
+void hwrtcollectflamesprites()
+{
+    parts[PART_FLAME]->collectflames();
+}
+
+Texture *hwrtflametexture()
+{
+    partrenderer *r = parts[PART_FLAME];
+    if(!r->tex && r->texname) r->tex = textureload(r->texname, r->texclamp);
+    return r->tex;
 }
 
 void finddepthfxranges()

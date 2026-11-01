@@ -137,6 +137,7 @@ namespace demohd
         lilswap(stamp, 3);
         dmo->write(stamp, sizeof(stamp));
         dmo->write(data, len);
+        if(demoanalyse::mirroring) demoanalyse::onrecordpacket(stamp, data, len);
         if(dmo->rawtell() >= DEMOHD_MAXBYTES)
         {
             conoutf(CON_WARN, "local demo hit size limit");
@@ -504,6 +505,7 @@ namespace demohd
         hdr.protocol = PROTOCOL_VERSION;
         lilswap(&hdr.version, 2);
         dmo->write(&hdr, sizeof(hdr));
+        demoanalyse::onrecordstart(&hdr, sizeof(hdr), dmostem);
         rec_cn = game::player1 ? game::player1->clientnum : -1;
         recmode = game::gamemode;
         splitnext = false;
@@ -557,12 +559,14 @@ namespace demohd
             conoutf("saved local demo + HD \"%s.dmo\"", dmostem);
             prune();
         }
+        demoanalyse::onrecordend(dmostem, dkeep, !drop);
         dmofile[0] = hdfile[0] = dmostem[0] = 0;
         committed = false;
         splitnext = false;
     }
 
-    static bool fileless(const fileitem &a, const fileitem &b) { return a.mtime < b.mtime; }
+    // the newest first (the list Saved demos of the menu)
+    static bool fileless(const fileitem &a, const fileitem &b) { return a.mtime > b.mtime || (a.mtime == b.mtime && strcmp(a.stem, b.stem) > 0); }
 
     static bool already(const char *stem)
     {
@@ -633,7 +637,8 @@ namespace demohd
     // the local original moved to demo/replaced when the server's copy took
     // its place. The demokeep newest matches in demo/ stay; every set older
     // than the oldest kept one goes, oldest first. Demos received with getdemo,
-    // copied in or renamed by the player are never counted nor removed.
+    // copied in or renamed by the player are never counted nor removed, nor, while the demo analysis is on, a
+    // demo where it found a player worth a look, until it is checked (opened, or Mark as checked).
     // Runs only when a recorded match has just been saved (finish(): next map,
     // disconnect, quit, or the server's copy arriving), never at start.
     static bool ownstem(const char *s)
@@ -689,8 +694,8 @@ namespace demohd
         }
         stems.sort(stemnewer);
         int kept = 0, cut = stems.length();
-        loopv(stems) if(ownexists("demo", stems[i], "dmo") && ++kept >= demokeep) { cut = i+1; break; }
-        for(int i = stems.length()-1; i >= cut; i--) loopj(2) loopk(2)
+        loopv(stems) if(!demoanalyse::keepdemo(stems[i]) && ownexists("demo", stems[i], "dmo") && ++kept >= demokeep) { cut = i+1; break; }
+        for(int i = stems.length()-1; i >= cut; i--) if(!demoanalyse::keepdemo(stems[i])) loopj(2) loopk(2)
         {
             string p;
             ownpath(p, dirs[j], stems[i], exts[k]);
@@ -1156,6 +1161,14 @@ namespace demohd
         startfiles(snap);
     }
 
+    // the game ended: its map is still loaded while the recording goes on (demo analysis history)
+    void onintermission()
+    {
+        if(!active || !hd || !demoanalyse::mirroring) return;
+        hd->flush();
+        demoanalyse::onrecordintermission(dmostem, hdfile);
+    }
+
     void onselfspawn()
     {
         if(active) committed = true;
@@ -1186,6 +1199,7 @@ namespace demohd
         autofollowdone = false;
         game::demoxrayreset(); // a demo opens: X-ray at its start value; going back in it (onplaybackreset) keeps it
         povopen(dmofilepath); // its network positions, for the players' views (demopov)
+        demoanalyse::onplayback(dmofilepath);
     }
 
     void onplaybackend()
@@ -1202,6 +1216,7 @@ namespace demohd
         dbhidden = 0;
         autofollowdone = false;
         povclose();
+        demoanalyse::onplaybackend();
     }
 
     void onplaybackreset()
@@ -3671,3 +3686,28 @@ ICOMMAND(installdemohd, "ss", (char *dmo, char *hdpath),
     delete[] buf;
 });
 
+namespace demohd
+{
+    // In a demo with the recorder's HD track, blue is the recorder's side for the
+    // bodies and names (visteam); the flags, bases, radar and scoreboard read
+    // player1->team: it takes the recorder's team during the demo, yours comes back after.
+    static string viewteamsaved, viewteamset;
+    static bool viewteamactive = false;
+    void syncviewteam()
+    {
+        fpsent *p1 = game::player1;
+        if(!p1) return;
+        fpsent *r = game::demoplayback && play_cn >= 0 ? game::getclient(play_cn) : NULL;
+        if(r && r != p1 && r->team[0])
+        {
+            if(!viewteamactive) { copystring(viewteamsaved, p1->team); viewteamactive = true; }
+            if(strcmp(p1->team, r->team)) copystring(p1->team, r->team);
+            copystring(viewteamset, p1->team);
+        }
+        else if(viewteamactive && (!game::demoplayback || play_cn < 0))
+        {
+            if(!strcmp(p1->team, viewteamset)) copystring(p1->team, viewteamsaved);
+            viewteamactive = false;
+        }
+    }
+}

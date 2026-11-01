@@ -378,6 +378,7 @@ extern void hwrtnoteworldedit();   // commitchanges(): the RT world is stale
 extern void hwrtpolleditrebuild(); // main loop: rebuild it once the edits are quiet
 extern bool hwrtalignsundisk();
 extern bool hwrtnobake();
+extern bool hwrtptlogicactive();
 extern void hwrtsnapworlddepth();
 extern void hwrtsnapscenedepth();
 extern void hwrtdrawalignsun(int farplane, float skyclip, float topclip, int faces);

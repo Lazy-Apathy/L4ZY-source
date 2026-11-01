@@ -984,7 +984,8 @@ def game_vars(src_root):
     src = Path(src_root) / "src"
     if not src.is_dir():
         return out
-    for f in sorted(list(src.rglob("*.cpp")) + list(src.rglob("*.h"))):
+    # *.inc: sources included by a .cpp (src/engine/hwrt/pt*.inc declare hwrtpt* variables)
+    for f in sorted(list(src.rglob("*.cpp")) + list(src.rglob("*.h")) + list(src.rglob("*.inc"))):
         if "third_party" in f.parts:
             continue
         text = f.read_text(encoding="latin-1")

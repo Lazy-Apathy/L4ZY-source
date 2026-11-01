@@ -155,6 +155,42 @@ hwrtjumppadlight: Jump pads glow and light the room around them.
 cost hwrtjumppadlight: Low (estimated)
 hwrtdynlights: Muzzle flashes, rockets, grenades and explosions light the walls, floor, players and your gun. Custom trail colours tint the light.
 cost hwrtdynlights: Low - nothing when nobody shoots, up to 0.34 ms in a fight (measured)
+hwrtlampsall: Every lamp of the map lights, with the mapper's spotlights in their cone, the lava and the glowing panels; no light turns on or off as you move.
+hwrtlampsall=0: Only the first 256 lamps of a map light, without spotlights, lava or glowing panels (as before).
+cost hwrtlampsall: Medium - almost nothing on maps without spotlights, lava or more than 256 lamps; up to 0.9 ms where they add light (measured)
+# --- Path tracing (Graphics > General > Lighting, Graphics > Path tracing) ---
+GFX_light: How the game is lit.
+GFX_light=0: Classic: the original Sauerbraten lighting. Fastest, any graphics card.
+GFX_light=1: Ray tracing: ray-traced lamps, sun and sky light, shadows and reflections. Needs a graphics card with hardware ray tracing.
+GFX_light=2: Path tracing: the ray tracing plus the light that bounces off walls, floors and ceilings into the shade. Needs a graphics card with hardware ray tracing.
+cost GFX_light=2: High - about 2 to 6.5 ms more than the ray tracing, 22 to 35 % fewer fps (measured, DLAA)
+hwrtptlogical: Where the light comes from, in ray tracing and path tracing.
+hwrtptlogical=0: Map lamps: the lights the mapper placed (default).
+hwrtptlogical=1: Scene lights: the torches, light fittings, glowing textures, lava and teleporters you see light the room; the lamps the mapper placed are not used.
+cost hwrtptlogical=1: Medium - from 0.9 ms less to 3.4 ms more than the map lamps; most on maps full of glowing textures (measured, DLAA)
+hwrtpttexpower: How strongly the glowing textures light the room (Scene lights). 1: as bright as they look.
+hwrtpttexreach: How far the light of the glowing textures goes, in units (Scene lights). Farther lights more of the room and costs more.
+hwrtpttexgroup: Glowing textures side by side, facing the same way, light as one (within this many units): much faster on maps with many glowing panels; a few steps away the light is the same. 0: each part lights on its own.
+cost hwrtpttexgroup: None - it saves time: up to 6.7 ms on maps with many glowing textures (44 to 62 fps on one of them); nothing on the others (measured, DLAA)
+hwrtptcombine: How the light of the sky, the lamps and the bounces add up.
+hwrtptcombine=3: Physical: light from several sides adds up as real light does; shaded places are lit more (default).
+hwrtptcombine=2: As before: the earlier way of adding them.
+hwrtptbouncegain: How strongly light bounces off walls and floors into the shade. 1: as real light bounces (default); more lights the shade more.
+hwrtptskypixel: Keeps the light steady while you move: a place that comes into view does not sparkle.
+hwrtptskypixel=0: Bright specks for a moment where the view has just changed.
+hwrtptskyis: One more ray per pixel toward the bright parts of the sky: steadier light near openings when you move.
+cost hwrtptskyis: Medium - 0.7 to 1.8 ms (measured, DLAA)
+hwrtptskyscale: Light from the sky in the shade. 0: none.
+hwrtptskyforce: On maps with a sun, the sky lights the shade with the strength below. Off: the strength the map gives.
+hwrtptskyratio: How much the sky lights the shade, as a share of the sun's light.
+hwrtptskyhue=1: The light of the sky takes the colour the mapper chose, as in the classic lighting (default).
+hwrtptskyhue=0: The light of the sky takes the colours of the sky picture (often bluer).
+hwrtptglass: Light goes through the gaps of leaves and through see-through parts of models.
+hwrtptglass=0: Leaves and see-through parts stop the bounced light. Faster on maps with trees.
+cost hwrtptglass: Medium - up to 3 ms on maps with many trees (measured, DLAA)
+hwrtptflames: The light of a torch follows its flame: it moves and flickers with it (Scene lights).
+hwrtptflamehidden: A torch out of view keeps flickering the same way (Scene lights).
+hwrtptlogicwindows: A lamp the mapper set behind a window lights the room (Scene lights). Off: the window lets the sky's light through.
 hwrtshadowself: Which lights draw your own shadow in first person.
 hwrtshadowself=0: No shadow of yourself.
 hwrtshadowself=1: The sun only: the one that always looks right.
@@ -287,7 +323,7 @@ hdrouthud: Native HDR only: brightness of the HUD and menus, in nits.
 
 # --- Graphics > Classic ---
 gtao: Slightly darker corners and wall bases (ambient occlusion). Players are never darkened. Classic lighting only: ray tracing already traces the sky light.
-gtao=0: No ambient occlusion: the old corner shading is used instead.
+gtao=0: No ambient occlusion: the old corner shading is used instead (default).
 gtao=1: Low: small, close shading.
 gtao=2: High: wider shading.
 cost gtao: Medium - 0.5 to 1.3 ms (measured, Native or DLAA)
@@ -368,6 +404,7 @@ windowmode=2: Borderless: Alt+Tab and a second screen work without closing the g
 windowmode=0: Windowed: a normal window.
 borderlessres: Borderless, but the game draws at the size of the Resolution tab and stretches it over the screen. Windows is not changed. Needs FSAA at -1 or 0.
 borderlessaspect: Keeps the proportions of the chosen resolution, with black bars.
+permonitordpi: Windows only. Keeps the game sharp on a screen whose Windows scale (Display settings > Scale) is not the one of the main screen: the game draws every pixel of that screen instead of being stretched by Windows. There the window keeps its size in real pixels. Applies after restarting the game.
 fov: How wide you see, in degrees.
 cost fov: Low - a wider view draws more of the map (estimated)
 gamma: Brightness of the picture (100 = normal). Not applied when Windows HDR is on for this screen. HDR: Graphics > HDR screen.
@@ -536,6 +573,164 @@ cost demohitbox: None - no measurable cost (measured)
 demohitboxshots: Each shot shows its line and the hitboxes near it, to judge hits and misses.
 demohitboxdeath: How long the hitbox of a killed player stays where it was hit, with the shot that killed.
 demohitboxuncertain: In a player's view: how close to the edge a shot must pass to be shown pink (uncertain) instead of red.
+demoanalysis: Looks for signs of cheating in demos on this computer: hitbox, game speed, aim, hidden enemies. Indications, not proof. Off: nothing runs.
+demoanalysishistory: After each recorded game, its players' numbers are kept on this computer to compare the next games with their usual ones. Never sent.
+demoanalysisms: Line of sight work per frame while an analysis runs (the rest runs in the background). Higher: faster, less smooth.
+demoanalysisminsecs: Games shorter than this in a demo file are skipped (a map loaded then changed at once). Next analysis.
+demoanalysisallmoments: The list of moments shows every player, not only those with an alert or worth a look.
+demoanalysishitboxhits: Hitbox alert: hits measured in the game, at least.
+demoanalysishitboxshare: Hitbox alert: share of hits stopped off the body as the shooter saw it (normal 4.1 units from the axis).
+demoanalysishitboxdist: Hitbox alert: median distance from the body axis where the shooter's shots stopped (normal 4.1).
+demoanalysisclock: Clock alert: how far ahead of the demo a player's shot clock gets (a game running too fast).
+demoanalysisearly: Clock alert: shots fired sooner than the weapon allows, at least.
+demoanalysisspeedtime: Movement alert: time with an announced speed over the game's limit.
+demoanalysismovespeed: Movement: real speed counted as too fast (the game allows about 169 units/s). Next analysis.
+demoanalysismovetime: Movement alert: time moving faster than that, with no push.
+demoanalysismoveping: Movement: above this ping, positions come in bunches; no fast movement alert.
+demoanalysisratio: Movement alert: distance moved / speed announced (1 in a normal game; a game running too fast is higher).
+demoanalysisratiowindows: Movement alert: 2 s windows measured for that ratio, at least.
+demoanalysisjumps: Movement alert: jumps of position with no teleporter or jump pad, at least.
+demoanalysissnaprepeat: Snap alert: shots whose view jumped onto the target in one step, at least.
+demoanalysissnapz: Snap alert: how far the share of such shots stands from the players' (deviations).
+demoanalysistrackwindows: Tracking alert: times the view stayed on a moving enemy, at least.
+demoanalysistrackseconds: Tracking alert: seconds spent near a moving enemy, at least.
+demoanalysistrackz: Tracking alert: how far the time on target stands from the players' (deviations).
+demoanalysistriggerflicks: Trigger alert: flick shots measured, at least.
+demoanalysistriggerz: Trigger alert: how far the shots fired as the view reaches the body stand from the players' (deviations).
+demoanalysissound: Hidden enemies: a shot is heard this far (you then know where he is). Next analysis.
+demoanalysiscold: Hidden enemies: an enemy counts as unknown after this long not seen nor heard. Next analysis.
+demoanalysisexposure: Hidden enemies alert: time near hidden enemies, at least.
+demoanalysishiddenrepeat: Hidden enemies alert: times the view held on an enemy behind a wall, at least.
+demoanalysishiddenz: Hidden enemies alert: how far that stands from chance (the same enemy 20 s earlier or later), in deviations.
+demoanalysishiddenshots: Hidden enemies alert: shots at an enemy behind a wall, at least.
+demoanalysiscombinedshots: View and shots together: hidden shots, at least, with a view on hidden enemies far from chance.
+demoanalysiscombinedz: View and shots together: how far those shots stand from chance (deviations).
+demoanalysisfollow: Hidden enemies alert: points for following an enemy who moves behind a wall (exact, near and long count most).
+demoanalysiswaitfast: Waiting: a shot this soon after an enemy comes out counts as fast (information only).
+demoanalysiswaitcount: Waiting: reactions measured, at least (information only).
+demoanalysiswaitfastcount: Waiting: fast reactions, at least (information only).
+demoanalysisduel: No hidden enemy alert against a single enemy: with one enemy, knowing where he is is normal.
+demoanalysisrupturegames: History: games kept for a name before a new game is compared with them. Next analysis.
+demoanalysisrupturemeasures: Names: measures far from the name's usual games needed to say that he plays very differently. Next analysis.
+demoanalysisrupturez: Names: how far a measure must stand from the name's usual games, in deviations. Next analysis.
+demoanalysiswalls: Walls alert: hits whose shot crossed a wall on an enemy the shooter could not see, at least.
+demoanalysiswallshare: Walls alert: share of his hits (%) that crossed a wall that way.
+demoanalysislagfrags: Lag alert: frags right after his own gaps in the positions (a lag switch), at least.
+demoanalysislagz: Lag alert: how far those frags stand from chance (his frags spread over his time alive), in deviations.
+demoanalysislaggaps: Lag alert: his own gaps of 300 ms or more in the positions, at least.
+demoanalysisair: Air alert: seconds in the air with a fall that never grows (the game always pulls down), far from any floor.
+demoanalysisjumplook: Jumps: yellow (worth a look) from this many jumps the game's gravity cannot make. Never an alert.
+demoanalysisnocliplook: Noclip: yellow (worth a look) from this many times the body was inside a wall or passed through one. Never an alert.
+demoanalysisstats: Player stats: what each player did in your recorded games and in the demos you analyze (frags, weapons, flags, time in each half...), by name, mode and map. On this computer only, never sent.
+demoanalysisauto: At the end of each recorded game, the demo analysis runs by itself (during the intermission, then in the background). A line only when a player has an alert; the demo then shows in red in the list of the demos until you check it.
+demoanalysisfov: Player stats: field of view (degrees) given to the others to tell a frag from behind, as a demo does not hold theirs; the default is the game's. Yours is your own.
+demoanalysisbaseradius: Player stats: "near his flag" means this close to his own flag or base (units).
+demoanalysisstill: Player stats: staying still means at least this many seconds inside a small circle (strafes included). Dead and waiting to spawn do not count.
+demoanalysisstillradius: Player stats: the radius of that circle (units; a player is about 8 units wide).
+@Player: The player, one line per connection (a second one gets #2), in the colour of his verdict; the players with an alert come first. The mouse on a name: his ping, shots, frags and deaths, and this game against his usual games on this computer. A name alone proves nothing: names can be copied.
+@Verdict: Alert (red): a check is over its alert level. Worth a look (yellow): jumps or noclip over their level, never an alert. OK: nothing found by the checks that had enough data. The mouse on a verdict: everything found, by kind of cheat (aim, wallhack, movement).
+@What was found: The first check that found something, in the order of the tabs (aim, wallhack, movement), in words, with what normal players do (+2: two more, with the mouse on it). For OK: how many of the 13 checks had enough data to judge.
+@Hitbox: Hits that stopped off the body as the shooter saw it, out of his hits checked (rifle, chaingun, pistol). Normal players: up to 1 in 9. Grey: too few hits to judge. The numbers: the mouse on a cell.
+@Clock: His shot clock against the demo's: on time, ahead (a game running too fast) or shots fired sooner than the weapon allows. Normal players: on time.
+@Speed, warps: His top speed (u/s: units per second, 500 ms with no push), or in red what went over the alert levels: time over the limit, x times his speed, warps with no teleporter. Normal players: up to 212 u/s.
+@Snap: Shots whose view jumped onto the target in one step, out of his shots measured; silent: shots that left far from the view. Normal players: 0-1.
+@Tracking: Share of the time his view stayed on a moving enemy near it. Normal players: about 37 %. Grey: too little time near moving enemies to judge.
+@Trigger: Of his flick shots: the share fired before the view reached the body's centre, then the share that went in at the body's entry edge (a trigger fires on first contact). Normal players: about 41 % and 22 %.
+@View on hidden: Times his view held on an enemy behind a wall that he could not know about, and by chance (the same enemies 20 s earlier or later). Normal players: about as often as chance. Never an alert against one enemy.
+@Shots at hidden: Shots aimed at an enemy behind a wall that he could not know about, and by chance. Normal players: 0-2 in a game. When views and shots together make the alert, both are red.
+@Reaction: When an enemy came out from behind a wall where his crosshair was already placed (waiting for him): his fast reactions out of all. Information only, never red: waiting for an enemy is normal play.
+@Walls: Hits whose shot crossed at least 1 unit of wall on an enemy he could not see, out of his hits. Normal players: 0-1.
+@Lag: Frags right after his own gaps in the positions (a lag switch); no gaps: none. A bad connection makes gaps with no frags. Normal players: 0-2.
+@Air: Seconds in the air without falling at all (the game always pulls down). Normal players: 0.
+@Jumps: Jumps the game's gravity cannot make: higher, longer, climbing again in the air, floating. Yellow: worth a look, never an alert. Normal players: 0-5.
+@Noclip: Times the body was inside a wall or passed through one, except where other players also go. Yellow: worth a look, never an alert. Normal players: 0.
+@Walls, lag, air: Shots through walls, lag switch and flying (alerts); jumps the game cannot make and noclip (worth a look).
+>DA_view = 0: The verdict of each player and what was found, in words.
+>DA_view = 5: Aim: is his aim helped? Snap, tracking, trigger, reaction (information) and hitbox, one short value per check: red over the alert level, grey too little data to judge (the value cannot alert).
+>DA_view = 1: Wallhack: does he know where enemies are behind walls? His view on hidden enemies, his shots at them, his hits through walls. Grey: too little data to judge.
+>DA_view = 4: Movement: does he move or shoot faster than the game allows? Speed and warps, flying, jumps the game's gravity cannot make and noclip (yellow: worth a look), shot clock, lag switch. Grey: too little data to judge.
+>DA_view = 2: When each check found something, in the colour of its check; a click goes 2 s before it in the demo you watch.
+>DA_view = 3: What the history on this computer says about the names (a copied clan tag, a name playing unlike his usual games).
+@Indications, not proof: A demo shows neither the screen nor the game used: look at the moments before deciding anything.
+@Analyze this demo...: Runs the demo analysis on the demo you watch and opens its page.
+@Open the last analysis...: Opens the page of the last demo analysis.
+@Previous moments: The previous moments.
+@Next moments: The next moments.
+@Previous notes: The previous notes about the names.
+@Next notes: The next notes about the names.
+@Previous players: The previous players of the table (Alert first, then Worth a look, then OK).
+@Next players: The next players of the table (Alert first, then Worth a look, then OK).
+>demoanalysegoto *: Goes to 2 s before this moment in the demo you watch and follows the player.
+>demoanalysenextgame: The next game in this demo file.
+>PS_dropopen 1: Opens the list of modes with games on the map chosen, the most played first, with their games. Click one to choose it.
+>PS_dropopen 2: Opens the list of maps with games in the mode chosen, the most played first, with their games. Click one to choose it.
+>PS_dropopen 3: Opens the list of weapons. Click one to choose it.
+>playerstatschoose *: Shows the stats for this choice (in yellow: the one shown now).
+@Previous choices: The previous choices of the list.
+@Next choices: The next choices of the list.
+@Find a name: Type part of a name (any case): the table keeps the names that hold it and the best matches show under it. Click one to add it to My list.
+>playerstatsfoundpick *: Adds this name to My list (in green: already in it).
+>PS_find =*: Clears the name typed: every name again.
+>playerstatsrowpick *: Ticks this name for My list (kept when the game starts again).
+>playerstatsshowlist 1*: Shows only the names of My list, without the boxes (ready for a screenshot).
+>playerstatsshowlist 0: Shows every name again (My list stays).
+>playerstatsclearlist: Unticks every name of My list.
+@Player stats: What each player did in your recorded games and the demos you analyzed, by name, mode and map. On this computer only.
+@Mark as checked: A player of this demo has an alert and you have not looked yet, so the automatic clean-up keeps it while the demo analysis is on. Click once you have checked it (opening the demo does it too).
+@Overview: Games with each name, time, the last day, maps, ping and reaction.
+@Kills: Frags on enemies, deaths, suicides, frags on a teammate and the best streak.
+@Weapons: Shots, hits, damage and frags by weapon (instagib: a rifle hit counts 100, a saw hit 50).
+@You: You and each name: games together and who killed whom (behind: from out of the other's view).
+@Behind: Frags made while the victim could not see the killer, and deaths without seeing the killer.
+@Flags: Flags taken, scored and returned, and frags on a flag carrier.
+@Field: Time in his half, in the other half and near his flag (modes where each team has a flag or a base), and staying still.
+@Checks: Games where a check of the demo analysis was in red, by check.
+@Name: The name in the games. A name can be copied: the stats of a name can mix players.
+@Games: Games with this name (each recorded or analyzed game counts once).
+@Previous names: The previous names of the table.
+@Next names: The next names of the table.
+>playerstatssort 0 2: Time in the games, hours:minutes (from his first to his last position). Click to sort.
+>playerstatssort 0 3: The last day of a game with this name. Click to sort.
+>playerstatssort 0 4: Maps of these games. Click to sort.
+>playerstatssort 0 5: Mean ping he sent (not known for you in your own demos). Click to sort.
+>playerstatssort 0 6: Reaction to an enemy coming out: his first shot at him, the view already on him; the one in the middle of his reactions. Needs the demo's map (the automatic analysis, or an analysis while watching). Click to sort.
+>playerstatssort 1 2: Frags on enemies. Click to sort.
+>playerstatssort 1 3: Deaths (suicides included). Click to sort.
+>playerstatssort 1 4: Frags / deaths. Click to sort.
+>playerstatssort 1 5: Suicides (his own weapon, a fall). Click to sort.
+>playerstatssort 1 6: Frags on a teammate. Click to sort.
+>playerstatssort 1 7: The most frags in a row without dying, in one game. Click to sort.
+>playerstatssort 2 2: Shots fired. Click to sort.
+>playerstatssort 2 3: Shots that hit an enemy (a shotgun shot counts once). Click to sort.
+>playerstatssort 2 4: Hits / shots. Click to sort.
+>playerstatssort 2 5: Damage dealt to enemies (instagib: 100 a rifle hit, 50 a saw hit). Click to sort.
+>playerstatssort 2 6: Damage taken from enemies (instagib: 100 a rifle hit, 50 a saw hit). Click to sort.
+>playerstatssort 2 7: Frags on enemies (with this weapon). Click to sort.
+>playerstatssort 2 8: Deaths (by this weapon). Click to sort.
+>playerstatssort 3 2: Games together in your recorded demos. Click to sort.
+>playerstatssort 3 3: Times he killed you, then how many from out of your field of view (behind). Click to sort.
+>playerstatssort 3 4: Times you killed him, then how many from out of his field of view (behind). Click to sort.
+>playerstatssort 4 2: His frags where both could be placed (the others are left out). Click to sort.
+>playerstatssort 4 3: Frags made while the victim could not see him (out of the victim's field of view), and their share. Click to sort.
+>playerstatssort 4 4: His deaths where both could be placed. Click to sort.
+>playerstatssort 4 5: Deaths without seeing the killer (out of his field of view), and their share. Click to sort.
+>playerstatssort 5 2: Flags taken. Click to sort.
+>playerstatssort 5 3: Flags scored. Click to sort.
+>playerstatssort 5 4: Flags returned. Click to sort.
+>playerstatssort 5 5: Frags on a flag carrier. Click to sort.
+>playerstatssort 6 2: Share of his time alive in his half (nearer his own flag or base). Click to sort.
+>playerstatssort 6 3: Share of his time alive in the other half. Click to sort.
+>playerstatssort 6 4: Share of his time alive near his own flag or base (Player stats settings). Click to sort.
+>playerstatssort 6 5: Time staying still in a game, the mean per game, minutes:seconds (Player stats settings); the total with the mouse on a cell. Click to sort.
+>playerstatssort 6 6: Times he stayed still. Click to sort.
+>playerstatssort 6 7: Frags made while staying still. Click to sort.
+>playerstatssort 7 2: Games with a red result in any check. Click to sort.
+>playerstatssort 7 3: Games with the hitbox check in red. Click to sort.
+>playerstatssort 7 4: Games with the clock check in red. Click to sort.
+>playerstatssort 7 5: Games with the movement check in red. Click to sort.
+>playerstatssort 7 6: Games with an aim check in red (snap, tracking, trigger). Click to sort.
+>playerstatssort 7 7: Games with the hidden enemies check in red (games measured with the map only). Click to sort.
+>playerstatssort 7 8: Games with walls, lag or air in red (full analyses only). Click to sort.
 demohitboxothercolour: In a player's view: colour of the victims of the other players' shots.
 
 # --- HUD parts (ammo bar, game clock, score, kill feed, kill streak) ---
@@ -650,10 +845,12 @@ crosshairsize: Size of the crosshair. 0 = hidden.
 crosshairhex: Resting colour of the crosshair, as hex RRGGBB. Hit, teammate and low-health colours still show over it.
 crosshaircolour: Resting colour of the crosshair. Hit, teammate and low-health colours still show over it.
 crosshairfx: Hit marker, teammate crosshair and health colours. Off: always the plain crosshair.
-crosshaircolors: The crosshair turns orange then red when your health is low.
+crosshaircolors: The crosshair turns orange then red when your health is low. Hit marker and teammate colours do not depend on it.
 teamcrosshair: Another crosshair when you aim at a teammate.
 hitcrosshair: The crosshair shows a hit marker, in the colour of the player hit.
 crosshairreloaddim: The crosshair is dimmer while the weapon reloads.
+@Open my crosshair folder: Opens the folder where you put your own crosshair pictures (PNG, transparent background; name-hit.png = its hit marker).
+@Default crosshair: Back to the game's own crosshair and hit marker.
 
 # --- Bots ---
 botmatchcount: How many bots the match starts with.
@@ -667,7 +864,20 @@ botstylelevel: How good the Tiny Apa bots are. 100 = a strong player, 50 = half 
 botstyleform: Tiny Apa bots have a different form each game, as a real player does.
 @form settings: How often Tiny Apa bots play tired, and their warm-up.
 botstyletired: How often a game is played very tired (late at night): a bit less accurate and slower.
-botstylewarmup: Tiny Apa bots are a little less accurate in the first two minutes. Off: their full level from the first second.
+botstylewarmup: Tiny Apa bots are a little less accurate in the first two minutes. Off (default): their full level from the first second.
+@shot settings: When Tiny Apa bots take their shot: how long they wait on you and how wide a shot they allow.
+botstylepatience: Tiny Apa bots allow a wider shot the longer they wait on you: the time (ms) for that allowance to double.
+botstylepatnear: Their wait only counts once their crosshair is near you (tenths of your half width). Off: from the moment they notice you, so more shots leave before they are on you.
+botstyletolmax: The widest shot Tiny Apa bots allow out of a flick, in tenths of your half width. 0: no limit.
+botstyleunpredtol: How much a target that keeps changing direction widens the shot they allow (%). Lower: they wait to be on you.
+botstylereactduel: How much quicker Tiny Apa bots react to you in a duel than in team games (ms). Higher: a quicker first shot.
+botstylereflexduel: In a duel, how much quicker Tiny Apa bots shoot when you appear right in front of them (ms). Higher: a quicker first shot.
+botstylewallwait: Tiny Apa bots do not fire while their crosshair is on the wall in front of you. Off: they fire anyway.
+botstyleaimspread: How far around you the point Tiny Apa bots aim at is drawn (%). Higher: more shots just beside you.
+@attention settings: What Tiny Apa bots do with your sounds and with shots that pass close to them.
+botstylefelt: Tiny Apa bots turn to where a shot that passed close to them came from, and leave a cover they hold for a shot or a sound elsewhere. Off: they keep watching where they last saw you.
+botstyleheardwait: In a duel, how soon a sound of yours heard elsewhere makes Tiny Apa bots look there (ms after losing sight of you). 0: at once.
+botstyleheardfar: In a duel, how far from where they lost you a sound of yours must be to make Tiny Apa bots look there (units). 0: any sound clearly elsewhere.
 botnet: Tiny Apa bots take their steps, stops and jumps from a small network learned from one real player's recorded games (work in progress). Off: the rules, as before.
 cost botnet: Low - about 0.001 to 0.003 ms of processor per bot and per frame (measured)
 botnavgrid: Tiny Apa bots find their way on a walk grid the game makes of each map. Off: the map's waypoints, as before (none: they stand still).

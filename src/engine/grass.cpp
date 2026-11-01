@@ -280,6 +280,29 @@ void generategrass()
     gle::clearvbo();
 }
 
+// Path tracing with the logical lighting: the lightmap holds the map's placed lamps, so each grass triangle takes the
+// light lightreaching gives at its centre instead (logical sources, sun, sky), computed once and kept until the
+// mode, the map or the world changes (hwrtptlogicgrassreset).
+struct ptlgrassval { vec center, light; };
+static hashtable<GLuint, ptlgrassval> ptlgrasscache;
+static int ptlgrassepoch = -1;
+void hwrtptlogicgrassreset() { ptlgrasscache.clear(); }
+static vec ptlgrasslight(const grasstri &t)
+{
+    extern int hwrtshadeepoch;
+    if(ptlgrassepoch != hwrtshadeepoch) { ptlgrasscache.clear(); ptlgrassepoch = hwrtshadeepoch; }
+    ivec q(int(floorf(t.center.x*4)), int(floorf(t.center.y*4)), int(floorf(t.center.z*4)));
+    GLuint key = (GLuint(q.x)*73856093u) ^ (GLuint(q.y)*19349663u) ^ (GLuint(q.z)*83492791u);
+    ptlgrassval *v = ptlgrasscache.access(key);
+    if(v && v->center == t.center) return v->light;
+    vec c, d;
+    lightreaching(vec(t.center).add(vec(0, 0, 1)), c, d, false, NULL, 0);
+    ptlgrassval &n = ptlgrasscache[key];
+    n.center = t.center;
+    n.light = c;
+    return c;
+}
+
 void rendergrass()
 {
     if(!grass || !grassdist || grassgroups.empty() || dbggrass) return;
@@ -294,6 +317,9 @@ void rendergrass()
     SETSHADER(grass);
 
     LOCALPARAMF(grassmargin, grassmargin, grassmargin ? grassmarginfade / grassmargin : 0.0f, grassmargin ? grassmarginfade : 1.0f);
+    static bool grasslogicalset = false;
+    const bool ptlogic = hwrtptlogicactive();
+    if(!ptlogic && grasslogicalset) { LOCALPARAMF(grasslogical, 0, 0, 0, 0); grasslogicalset = false; }
  
     gle::bindvbo(grassvbo);
 
@@ -332,6 +358,12 @@ void rendergrass()
             glBindTexture(GL_TEXTURE_2D, g.lmtex);
             glActiveTexture_(GL_TEXTURE0);
             lmtexid = g.lmtex;
+        }
+        if(ptlogic)
+        {
+            vec c = ptlgrasslight(*g.tri);
+            LOCALPARAMF(grasslogical, c.x, c.y, c.z, 1);
+            grasslogicalset = true;
         }
 
         gle::drawquads(g.offset, g.numquads);

@@ -380,6 +380,8 @@ static bool helpactive = false, helphave = false, helpfresh = false, helprowhit 
 static int helpdepth = 0, helprowdepth = -1, helpstart = 0;
 static float helpcx = 0, helpcy = 0;
 static string helppage = "", helpvar = "", helpval = "", helplabel = "", helpaction = "", helprow = "", helprowname = "", helplastid = "", helpkind = "";
+// guitip: the explanation a page builds for the control laid out just before it (a cell of a table of results)
+static char helptipnow[1024] = "";
 
 static void helpbegin(const char *page)
 {
@@ -388,6 +390,7 @@ static void helpbegin(const char *page)
     helpdepth = 0;
     helprowdepth = -1;
     helprow[0] = helpvar[0] = helpval[0] = helplabel[0] = helpaction[0] = helprowname[0] = helpkind[0] = 0;
+    helptipnow[0] = 0;
     copystring(helppage, page ? page : "");
 }
 
@@ -470,6 +473,7 @@ static const char *helpcostcolor(const char *level)
 static const char *helpcompose()
 {
     static char out[4096];
+    if(helptipnow[0]) { copystring(out, helptipnow, sizeof(out)); return out; }
     const char *main = NULL, *val = NULL, *cost = NULL;
     char k[MAXSTRLEN];
     if(helpvar[0])
@@ -545,7 +549,7 @@ const char *menuhelptip(bool clicked, float cx, float cy, int &place)
         helpshown = false;
         return NULL;
     }
-    defformatstring(id, "%s|%s|%s|%s|%s|%s", helppage, helpvar, helpval, helplabel, helpaction, helprowname);
+    defformatstring(id, "%s|%s|%s|%s|%s|%s|%.100s", helppage, helpvar, helpval, helplabel, helpaction, helprowname, helptipnow);
     // a new option, a click, or the mouse still moving: wait again
     if(strcmp(id, helplastid) || clicked || (!helpshown && (fabs(cx - helpcx) > 0.004f || fabs(cy - helpcy) > 0.004f)))
     {
@@ -568,6 +572,9 @@ static void menuhelptext(char *var, char *val)
 {
     string sv, sval, sl, sa, sr, sk;
     copystring(sv, helpvar); copystring(sval, helpval); copystring(sl, helplabel); copystring(sa, helpaction); copystring(sr, helprowname); copystring(sk, helpkind);
+    char stip[sizeof(helptipnow)];
+    copystring(stip, helptipnow);
+    helptipnow[0] = 0;
     helpvar[0] = helpval[0] = helplabel[0] = helpaction[0] = helprowname[0] = helpkind[0] = 0;
     if(var[0] == '@') copystring(helplabel, var + 1);
     else if(var[0] == '>') copystring(helpaction, var + 1);
@@ -575,8 +582,20 @@ static void menuhelptext(char *var, char *val)
     const char *t = helpcompose();
     result(t ? t : "");
     copystring(helpvar, sv); copystring(helpval, sval); copystring(helplabel, sl); copystring(helpaction, sa); copystring(helprowname, sr); copystring(helpkind, sk);
+    copystring(helptipnow, stip);
 }
 COMMAND(menuhelptext, "ss");
+
+// guitip [code]: the explanation of the control laid out just before (a cell of a table of results), built by the
+// page: the code runs only while the mouse is on that control, and its result shows as the other explanations do
+static void guitip(uint *code)
+{
+    if(!helpactive || !cgui || !cgui->lasthit()) return;
+    char *s = executestr(code);
+    if(s && s[0]) { copystring(helptipnow, s, sizeof(helptipnow)); helphave = true; }
+    delete[] s;
+}
+COMMAND(guitip, "e");
 
 //@DOC name and icon are optional
 void guibutton(char *name, char *action, char *icon)
@@ -1290,6 +1309,33 @@ ICOMMAND(openfolder, "s", (char *which),
         {
             // relative name: openrawfile() puts it in the profile itself
             stream *f = openrawfile("packages/models/custom/README.txt", "w");
+            if(f) { f->write(readme, strlen(readme)); delete f; }
+        }
+    }
+    else if(!strcmp(which, "crosshairs"))
+    {
+        // the player's own crosshair pictures, in the profile (menu: Crosshair > My crosshairs)
+        formatstring(dir, "%scrosshairs", homedir);
+        static const char * const readme =
+            "My crosshairs (menu: Crosshair > My crosshairs)\n"
+            "\n"
+            "Put your own crosshair pictures here, as PNG files with a\n"
+            "transparent background (square, for example 64x64):\n"
+            "  name.png      : the crosshair\n"
+            "  name-hit.png  : its hit marker (optional; without it the same\n"
+            "                  picture is used when you hit someone)\n"
+            "White parts take the crosshair colour and the hit, teammate and\n"
+            "low-health colours. The crosshair size setting still applies.\n"
+            "Click a picture in the menu to use it; \"Default crosshair\" goes\n"
+            "back to the game's own. A missing or broken picture: the default\n"
+            "crosshair is used.\n";
+        folderensure(dir);
+        string rm;
+        formatstring(rm, "%s/README.txt", dir);
+        if(!fileexists(rm, "r"))
+        {
+            // relative name: openrawfile() puts it in the profile itself
+            stream *f = openrawfile("crosshairs/README.txt", "w");
             if(f) { f->write(readme, strlen(readme)); delete f; }
         }
     }

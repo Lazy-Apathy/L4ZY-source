@@ -2610,13 +2610,16 @@ void lightreaching(const vec &target, vec &color, vec &dir, bool fast, extentity
         return;
     }
 
+    // Path tracing with the logical lighting (hwrt/ptlogical.inc): no placed finite lamp and no map ambient; the sky
+    // counts for what of it is visible, the logical sources add their direct light. The caller's floor stays.
+    const bool ptlogic = hwrtptlogicactive();
     color = dir = vec(0, 0, 0);
     const vector<extentity *> &ents = entities::getents();
     const vector<int> &lights = checklightcache(int(target.x), int(target.y));
     loopv(lights)
     {
         extentity &e = *ents[lights[i]];
-        if(e.type != ET_LIGHT)
+        if(e.type != ET_LIGHT || (ptlogic && e.attr1))
             continue;
     
         vec ray(target);
@@ -2664,9 +2667,20 @@ void lightreaching(const vec &target, vec &color, vec &dir, bool fast, extentity
         uchar skylight[3];
         if(t) calcskylight(NULL, target, vec(0, 0, 0), 0.5f, skylight, RAY_POLY, t);
         else fastskylight(target, 0.5f, skylight, RAY_POLY, t, fast);
-        loopk(3) color[k] = min(1.5f, max(max(skylight[k]/255.0f, ambient), color[k]));
+        if(ptlogic) loopk(3)
+        {
+            float span = float(max(skylightcolor[k], ambientcolor[k])) - float(ambientcolor[k]);
+            if(span > 0) color[k] += (float(skylight[k]) - float(ambientcolor[k])) / span * (skylightcolor[k]/255.0f);
+        }
+        else loopk(3) color[k] = min(1.5f, max(max(skylight[k]/255.0f, ambient), color[k]));
     }
-    else loopk(3) color[k] = min(1.5f, max(max(ambientcolor[k]/255.0f, ambient), color[k]));
+    else if(!ptlogic) loopk(3) color[k] = min(1.5f, max(max(ambientcolor[k]/255.0f, ambient), color[k]));
+    if(ptlogic)
+    {
+        extern void hwrtptlogicfallback(const vec &target, vec &color, vec &dir, extentity *skip);
+        hwrtptlogicfallback(target, color, dir, t);
+        loopk(3) color[k] = min(1.5f, max(color[k], ambient));
+    }
     if(dir.iszero()) dir = vec(0, 0, 1);
     else dir.normalize();
 }
